@@ -228,7 +228,6 @@ const BRANDS = ["Bambu Lab","eSUN","Polymaker","SUNLU","Overture","Prusament","E
 const FINISH = ["","Matte","Glossy","Silk","Translucent","Sparkle","Marble","Dual colour"];
 const COLOURS = ["#111111","#FFFFFF","#8A8D8F","#C8102E","#FF6A13","#FFD100","#00843D","#0057B8","#6D2077","#7B4B2A"];
 const NAMED = [[/\bblack\b/i,"#111111"],[/\bwhite\b/i,"#F4F4F2"],[/\b(grey|gray|silver)\b/i,"#8A8D8F"],[/\bred\b/i,"#C8102E"],[/\borange\b/i,"#FF6A13"],[/\byellow\b/i,"#FFD100"],[/\bgold\b/i,"#C9A227"],[/\bgreen\b/i,"#00843D"],[/\bblue\b/i,"#0057B8"],[/\b(purple|violet)\b/i,"#6D2077"],[/\bpink\b/i,"#E86FA5"],[/\bbrown\b/i,"#7B4B2A"],[/\b(beige|sand|cream)\b/i,"#D9C7A0"]];
-const BRAND_SITES = {"bambu lab":"bambulab.com","esun":"esun3d.com","polymaker":"polymaker.com","sunlu":"sunlu.com","overture":"overture3d.com","prusament":"prusament.com","elegoo":"elegoo.com","jayo":"jayo3d.com","creality":"creality.com","anycubic":"anycubic.com","kingroon":"kingroon.com","fiberlogy":"fiberlogy.com","extrudr":"extrudr.com","colorfabb":"colorfabb.com","spectrum":"spectrumfilaments.com","hatchbox":"hatchbox3d.com","3djake":"3djake.com","geeetech":"geeetech.com","eryone":"eryone3d.com","amolen":"amolen.com","siraya tech":"siraya.tech","flashforge":"flashforge.com","fillamentum":"fillamentum.com","recreus":"recreus.com","ninjatek":"ninjatek.com","das filament":"dasfilament.de","azurefilm":"azurefilm.com","rosa3d":"rosa3d.pl","devil design":"devildesign.com"};
 const ICON_SLUGS = {"bambu lab":"bambulab","creality":"creality","elegoo":"elegoo","anycubic":"anycubic","flashforge":"flashforge"};
 const ICON_BASE = "https://cdn.jsdelivr.net/npm/simple-icons@16.36.0/icons/";
 const PATTERNS = [["solid","Single colour"],["split","Multicolour, split"],["gradient","Gradient"]];
@@ -493,7 +492,6 @@ function watch(){
   },e=>{ clearTimeout(timer); S.loadErr=(e&&e.code)||"unknown"; if(S.ready) toast("Lost the link to your stock. Reload the page."); else render(); });
   sub("spools","spools"); sub("locations","locs"); sub("brands","brands"); sub("profiles","profiles");
   db.doc("config/main").onSnapshot(d=>{ S.settings=d.exists?{...d.data()}:{}; dataChanged(); },()=>{});
-  db.doc("private/keys").onSnapshot(d=>{ LD.token=(d.exists&&d.data().logodev)||""; dataChanged(); },()=>{});
 }
 let seeded=false;
 async function seedStorages(){
@@ -631,7 +629,6 @@ function render(){
   const v={stock:vStock,add:vForm,edit:vForm,scan:vScan,stickers:vStickers,setup:vSetup,spool:vSpool,loc:vLoc,import:vImport}[S.view]||vStock;
   m.innerHTML=(!navigator.onLine?`<div class="note warn">No signal. Changes are kept on this device and sync when you're back.</div>`:S.stale?`<div class="note warn">Showing your last saved copy. It may be out of date.</div>`:"")+v();
   if(S.view==="scan") Scanner.attach();
-  ensureLogos();
   if(S.view==="add"||S.view==="edit") formPreview();
   if(crop) drawCrop();
 }
@@ -1063,11 +1060,7 @@ async function saveLogo(){
   crop=null; toast(brand+" logo saved."); render();
 }
 /* automatic logo lookup */
-const LD = {token:""};
-const siteFor = name => (S.brands[slug(name)]||{}).site || BRAND_SITES[String(name||"").trim().toLowerCase()] || "";
-const ldUrl = (name,size=800) => { if(!LD.token) return ""; const site=siteFor(name); const path=site?encodeURIComponent(site):"name/"+encodeURIComponent(name); return `https://img.logo.dev/${path}?token=${encodeURIComponent(LD.token)}&format=png&size=${size}&theme=light&greyscale=true&fallback=404`; };
-const logoCache = {};
-const logoData = b => { if(!b) return null; if(b.logo) return {src:b.logo,w:b.logoW,h:b.logoH,key:"logo-"+slug(b.name)}; return logoCache[slug(b.name)]||null; };
+const logoData = b => b&&b.logo ? {src:b.logo,w:b.logoW,h:b.logoH,key:"logo-"+slug(b.name)} : null;
 const loadCross = url => new Promise((res,rej)=>{ const i=new Image(); i.crossOrigin="anonymous"; i.onload=()=>res(i); i.onerror=()=>rej(new Error("blocked")); i.src=url; });
 function inkCanvas(source,w,h){
   const k=Math.min(1600/Math.max(w,h),1), c=document.createElement("canvas"); c.width=Math.max(1,Math.round(w*k)); c.height=Math.max(1,Math.round(h*k));
@@ -1085,8 +1078,8 @@ async function svgInk(text){
 async function storeInk(brand,cv,extra){
   const id=slug(brand), old=S.brands[id]||{name:brand};
   const next={...old,name:old.name||brand,logo:cv.toDataURL("image/png"),logoW:cv.width,logoH:cv.height,logoFrom:extra.from};
-  delete next.logoLive; delete next.id;
-  await col("brands").doc(id).set(next); S.brands[id]={...next,id}; delete logoCache[id];
+  delete next.id;
+  await col("brands").doc(id).set(next); S.brands[id]={...next,id};
   return true;
 }
 async function keepLogo(brand,source,extra){
@@ -1107,7 +1100,6 @@ async function wikiCandidates(name){
 }
 async function findLogos(name){
   const out=[], icon=await iconCandidate(name); if(icon) out.push(icon);
-  const ld=ldUrl(name); if(ld) out.push({kind:"live",url:ld,label:"PNG, Logo.dev"});
   out.push(...await wikiCandidates(name));
   return out;
 }
@@ -1115,37 +1107,15 @@ async function useCandidate(name,c){
   try{
     if(c.kind==="svg"){ const cv=await svgInk(c.text); return cv?storeInk(name,cv,{from:c.label}):false; }
     const img=await loadCross(c.url);
-    if(c.kind==="live"){
-      const id=slug(name), old=S.brands[id]||{name};
-      const next={...old,name:old.name||name,logoLive:true,logoFrom:c.label}; delete next.logo; delete next.logoW; delete next.logoH; delete next.id;
-      await col("brands").doc(id).set(next); S.brands[id]={...next,id};
-      const cv=inkCanvas(img,img.naturalWidth,img.naturalHeight);
-      if(cv) logoCache[id]={src:cv.toDataURL("image/png"),w:cv.width,h:cv.height,key:"logo-"+id};
-      return !!cv;
-    }
     const cv=inkCanvas(img,img.naturalWidth,img.naturalHeight);
     return cv?storeInk(name,cv,{from:c.label}):false;
   }catch{ return false; }
 }
 /* quietly fills in a new manufacturer's logo from the sources that are an exact match */
 async function autoLogo(name){
-  const b=S.brands[slug(name)]; if(!name||(b&&(b.logo||b.logoLive))) return false;
+  const b=S.brands[slug(name)]; if(!name||(b&&b.logo)) return false;
   const icon=await iconCandidate(name);
-  if(icon&&await useCandidate(name,icon)) return true;
-  const ld=ldUrl(name);
-  return ld?useCandidate(name,{kind:"live",url:ld}):false;
-}
-/* Logo.dev pictures are fetched fresh each time rather than stored */
-const loading=new Set();
-function ensureLogos(){
-  for(const b of Object.values(S.brands)){
-    const id=slug(b.name); if(!b.logoLive||b.logo||logoCache[id]||loading.has(id)||!LD.token) continue;
-    loading.add(id);
-    loadCross(ldUrl(b.name)).then(img=>{
-      const cv=inkCanvas(img,img.naturalWidth,img.naturalHeight);
-      if(cv){ logoCache[id]={src:cv.toDataURL("image/png"),w:cv.width,h:cv.height,key:"logo-"+id}; if(S.view==="stickers") render(); else if(S.view==="add"||S.view==="edit") formPreview(); }
-    }).catch(()=>{}).finally(()=>loading.delete(id));
-  }
+  return icon?useCandidate(name,icon):false;
 }
 /* import from Spool Reader */
 function parseImport(text){
@@ -1180,7 +1150,7 @@ async function runImport(){
   for(const [name,l] of Object.entries(Imp.logos)){
     if(!rows.some(r=>r.brand===name)||!l||!/^data:image\/png/.test(l.src||"")) continue;
     const id=slug(name), old=S.brands[id]||{};
-    if(old.logo||old.logoLive) continue;
+    if(old.logo) continue;
     const next={...old,name:old.name||name,logo:l.src,logoW:l.w,logoH:l.h,logoFrom:"Spool Reader"}; delete next.id;
     col("brands").doc(id).set(next); S.brands[id]={...next,id};
   }
@@ -1209,9 +1179,8 @@ function stockExport(){
 let P=null; /* logo picker */
 function logoPanel(){
   return `<div class="card" id="logoPanel"><h3>${esc(P.name)} logo</h3>
-    ${P.busy?`<div class="busy"><span class="spin"></span>Looking</div>`:P.items.length?`<div class="tiles">${P.items.map((c,i)=>`<button class="tile logoPick" data-act="logoUse" data-v="${i}"><img src="${esc(c.preview||c.url||"")}" alt="Option ${i+1}"><span>${esc(c.label)}</span></button>`).join("")}</div>`:`<p>Nothing found for ${esc(P.name)}. Upload a logo, or crop one in Spool Reader.</p>`}
-    <label class="field"><span>Manufacturer's website, if it's not found</span><input type="text" id="logoSite" autocapitalize="off" placeholder="example.com" value="${esc(siteFor(P.name))}"></label>
-    <div class="btns"><button class="btn" data-act="logoRetry">Search again</button><label class="btn" for="pickLogo" data-act="logoFor" data-v="${esc(P.name)}">Upload logo</label><button class="btn" data-act="logoClose">Close</button></div>
+    ${P.busy?`<div class="busy"><span class="spin"></span>Looking</div>`:P.items.length?`<div class="tiles">${P.items.map((c,i)=>`<button class="tile logoPick" data-act="logoUse" data-v="${i}"><img src="${esc(c.preview||c.url||"")}" alt="Option ${i+1}"><span>${esc(c.label)}</span></button>`).join("")}</div>`:`<p>Nothing found for ${esc(P.name)}. Upload it once as an SVG or PNG and it stays in your account.</p>`}
+    <div class="btns"><label class="btn" for="pickLogo" data-act="logoFor" data-v="${esc(P.name)}">Upload logo</label><button class="btn" data-act="logoClose">Close</button></div>
   </div>`;
 }
 async function openPicker(name){
@@ -1234,8 +1203,7 @@ function vSetup(){
     ${bs.map(b=>{const l=logoData(b);return `<div class="brandrow">${l?`<img class="logo" src="${esc(l.src)}" alt="${esc(b.name)} logo">`:`<span class="logo" style="display:grid;place-items:center;width:64px;color:#000;font-size:12px">No logo</span>`}<span style="min-width:0"><b>${esc(b.name)}</b>${b.logoFrom?`<br>${esc(b.logoFrom)}`:""}</span><button class="btn sm" data-act="logoFind" data-v="${esc(b.name)}">${l?"Change":"Find logo"}</button></div>`;}).join("")||"<p>Manufacturers appear here when you add a spool.</p>"}
     ${crop?cropHTML():""}
     ${P?logoPanel():""}
-    <label class="field"><span>Logo.dev publishable key (optional, for brands the free sources don't have)</span><input type="text" id="ldKey" autocapitalize="off" autocomplete="off" value="${esc(LD.token)}"></label>
-    <div class="btns"><button class="btn" data-act="ldSave">Save key</button></div>
+
   </div>
   <div class="card"><h2>Spool Reader</h2><p>Reads labels and identifies spools from photos. Give it your stock list so it can check against what you own.</p>
     <div class="btns">${CFG.readerUrl?`<a class="btn" href="${esc(CFG.readerUrl)}" target="_blank" rel="noopener">Open Spool Reader</a>`:""}<button class="btn" data-act="listCopy">Copy stock list</button><button class="btn" data-act="listSave">Download stock list</button><button class="btn" data-go="import">Import spools</button></div>
@@ -1272,17 +1240,11 @@ const actions={
     const c=P.items[+el.dataset.v], name=P.name; const ok=await useCandidate(name,c);
     if(ok){ P=null; toast(name+" logo saved."); render(); } else toast("That image wouldn't load here. Try another, or save it and upload it.");
   },
-  async logoRetry(){
-    const site=$("#logoSite").value.trim().replace(/^https?:\/\//,"").replace(/\/.*$/,""), id=slug(P.name), old=S.brands[id];
-    if(old&&site){ const next={...old,site}; delete next.id; await col("brands").doc(id).set(next); S.brands[id]={...next,id}; }
-    openPicker(P.name);
-  },
   async logosAll(){
     const todo=Object.values(S.brands).filter(b=>!logoData(b)); let n=0;
     for(const b of todo) if(await autoLogo(b.name)) n++;
     const left=todo.length-n; toast(left?`Found ${n}. ${left} still need one, so press Find logo on those.`:`Found ${n}.`); render();
   },
-  ldSave(){ LD.token=$("#ldKey").value.trim(); db.doc("private/keys").set({logodev:LD.token}); document.activeElement?.blur(); toast("Saved."); },
   async listCopy(){ try{ await navigator.clipboard.writeText(stockExport()); toast("Stock list copied."); }catch{ toast("Couldn't copy here. Use Download instead."); } },
   listSave(){ saveFile("spool-stock-list.json",stockExport()); },
   camStart(){ Scanner.start(); },

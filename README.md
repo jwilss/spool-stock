@@ -35,7 +35,7 @@ Stickers download as an A4 PDF. The app remembers where you got to on a part-use
 - **Scan to move:** point the camera at a spool, then at a storage. Done. The camera stays on for the next one.
 - **See every storage:** AMS slots, dryers and shelves are drawn as racks, with each ring showing the filament's colour and how much is left.
 - **Automatic print settings:** type the manufacturer and material and the settings fill in, then get remembered for that filament.
-- **Automatic logos:** the logo is looked up for you, turned solid black on transparent and sized for print.
+- **Logos saved once:** logos are found or uploaded once, turned solid black on transparent, and stored in your account for every sticker.
 - **Works in the shed:** changes save on the device with no signal and sync when you're back.
 - **Sensible warnings:** it flags TPU heading for an AMS, a full slot, or a spool that needs more heat than the dryer can give.
 - **Low stock at a glance:** weigh a spool and it works out what's left.
@@ -93,7 +93,7 @@ Run the tests with `node test/run.js` and `node test/reader.js`.
 ## Good to know
 
 - Your stock is private to your account. Firebase's web settings in `site/config.js` are meant to be public, and `firestore.rules` is what protects the data.
-- No manufacturer logos are stored in this repo. They're looked up from your own session and belong to their owners. The stickers shown above use made-up brands.
+- No manufacturer logos are stored in this repo. They live in your private data and belong to their owners. The stickers shown above use made-up brands.
 - Print stickers at 100% or Actual size, and test on plain paper first.
 
 <div align="center">

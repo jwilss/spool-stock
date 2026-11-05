@@ -22,7 +22,7 @@ Filament stock for Alduin (left P1S, fed by the Space Pi Plus) and Betsy (right 
 - The Scan page runs a live camera: scan a spool, then a storage. A phone's normal camera also works through the link.
 - Spool Reader keeps its own list and hands spools over as a `spool-stock-import` JSON file. Spool Stock hands its stock back as a `spool-stock-list` file.
 - Print settings start from Bambu Lab's filament table, then the label, then your edits, remembered per filament.
-- Logos are looked up by the app: Simple Icons for exact vector matches, Wikimedia Commons as choices, Logo.dev with an optional key. All are turned solid black on transparent. Logo.dev pictures are fetched fresh rather than stored.
+- Logos are found once and stored per manufacturer in your account: Simple Icons for exact vector matches, Wikimedia Commons as choices, or your own upload. All are turned solid black on transparent. No API keys.
 - Stickers are black except for the colour box: solid, triangles for split colours, or a left to right blend for gradients.
 
 ## Done
