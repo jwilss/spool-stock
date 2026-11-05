@@ -16,6 +16,11 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  const b=await chromium.launch({args:['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream','--use-file-for-fake-video-capture='+out+'/feed.mjpeg']});
  const ctx=await b.newContext({viewport:{width:400,height:820},serviceWorkers:'block',acceptDownloads:true,permissions:['camera']});
  await stubs(ctx);
+ const fakeLogo=fs.readFileSync(__dirname+'/fixtures/logo.png');
+ const allow={'access-control-allow-origin':'*'};
+ await ctx.route(/simple-icons/,r=>r.fulfill({status:200,contentType:'image/svg+xml',headers:allow,body:'<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M2 2h20v20H2zM8 8v8h8V8z"/></svg>'}));
+ await ctx.route(/commons\.wikimedia\.org/,r=>r.fulfill({status:200,contentType:'application/json',headers:allow,body:JSON.stringify({query:{pages:{1:{imageinfo:[{mime:'image/svg+xml',url:'https://upload.wikimedia.org/a.svg',thumburl:'https://upload.wikimedia.org/thumb/a.png'}]}}}})}));
+ await ctx.route(/upload\.wikimedia\.org|img\.logo\.dev/,r=>r.fulfill({status:200,contentType:'image/png',headers:allow,body:fakeLogo}));
  const p=await ctx.newPage();const errs=[];
  p.on('pageerror',e=>errs.push(e.message));p.on('console',m=>{if(m.type()==='error'&&!/fonts|ERR_FAILED|404/.test(m.text()))errs.push(m.text())});
  const uid='users/u1/';
@@ -77,6 +82,32 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  ok(!!db[uid+'brands/testbrand'].logo,'logo imported');ok(db[uid+'config/main'].imported.includes(imp.batch),'import remembered');
  await p.evaluate(()=>{location.hash='import'});await p.waitForSelector('#importText');await p.fill('#importText',JSON.stringify(imp));await p.click('[data-act=importPaste]');await p.waitForSelector('[data-act=importGo]');
  ok((await p.textContent('#main')).includes('already imported'),'warns on a repeat import');await p.click('[data-act=importCancel]');
+
+ // logo lookup: exact vector, Wikimedia choices, Logo.dev and upload
+ await p.evaluate(()=>{location.hash='add'});await p.waitForSelector('#f_brand');
+ await p.fill('#f_brand','Bambu Lab');await p.fill('#f_material','PLA Silk Multi');await p.fill('#f_colour','Aurora');
+ await p.selectOption('#f_pattern','split');await p.locator('[data-act=colourAdd]').click();await p.locator('[data-act=colourAdd]').click();
+ await p.evaluate(()=>{const set=(el,v)=>{el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}))};set(document.querySelector('#f_hex'),'#c8102e');const c=document.querySelectorAll('[data-colour]');set(c[0],'#ffd100');set(c[1],'#00843d');set(c[2],'#0057b8')});
+ await p.waitForTimeout(100);await p.screenshot({path:out+'/add-multi.png',fullPage:true});
+ ok((await p.$$('#preview polygon')).length>=4,'split colour box drawn as triangles');
+ await p.click('#saveSpool');await p.waitForSelector('.spoolhead');await p.waitForFunction(()=>{const d=JSON.parse(localStorage.getItem('__fb'));const b=d['users/u1/brands/bambu-lab'];return b&&b.logo});
+ db=await dbOf(p);let bl=db[uid+'brands/bambu-lab'];ok(bl.logoW>=1000||bl.logoH>=1000,'vector logo saved at print size '+bl.logoW+'x'+bl.logoH);ok(bl.logoFrom.includes('Simple Icons'),'exact match added automatically');
+ await add('Gradient Co','PLA Gradient','Sunset');
+ await p.evaluate(()=>{location.hash=location.hash.replace('#','edit-')});await p.waitForSelector('#f_pattern');await p.selectOption('#f_pattern','gradient');await p.click('#saveSpool');await p.waitForSelector('.spoolhead');
+ await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=logosAll]');
+ await p.click('[data-act=logoFind][data-v="eSUN"]');await p.waitForSelector('.logoPick');
+ ok((await p.textContent('#logoPanel')).includes('Vector, Wikimedia'),'Wikimedia choices listed');
+ await p.screenshot({path:out+'/logo-panel.png',fullPage:true});
+ await p.click('.logoPick');await p.waitForFunction(()=>{const d=JSON.parse(localStorage.getItem('__fb'));return d['users/u1/brands/esun']&&d['users/u1/brands/esun'].logo});ok(true,'picked logo saved');
+ await p.fill('#ldKey','pk_test');await p.click('[data-act=ldSave]');await p.waitForTimeout(100);
+ await p.click('[data-act=logoFind][data-v="Polymaker"]');await p.waitForFunction(()=>document.querySelector('#logoPanel')&&document.querySelector('#logoPanel').textContent.includes('PNG, Logo.dev'));ok(true,'Logo.dev offered with a key');
+ await p.locator('.logoPick',{hasText:'Logo.dev'}).click();await p.waitForTimeout(400);
+ db=await dbOf(p);ok(db[uid+'brands/polymaker'].logoLive===true&&!db[uid+'brands/polymaker'].logo,'Logo.dev picture not stored');
+ const logoPixels=await p.evaluate(()=>{const src=JSON.parse(localStorage.getItem('__fb'))['users/u1/brands/esun'].logo;return new Promise(r=>{const i=new Image();i.onload=()=>{const c=document.createElement('canvas');c.width=i.width;c.height=i.height;const x=c.getContext('2d');x.drawImage(i,0,0);const d=x.getImageData(0,0,c.width,c.height).data;let colour=0,clear=0;for(let k=0;k<d.length;k+=4){if(d[k+3]>0&&(d[k]||d[k+1]||d[k+2]))colour++;if(d[k+3]===0)clear++}r({colour,clear})};i.src=src})});
+ ok(logoPixels.colour===0&&logoPixels.clear>0,'logos are pure black on transparent');
+ await p.evaluate(()=>{location.hash='stickers'});await p.waitForSelector('.sheetmap');await p.waitForTimeout(300);
+ await p.click('.cell:nth-child(1)');await p.waitForTimeout(100);
+ const [dl3]=await Promise.all([p.waitForEvent('download'),p.click('[data-act=pdf]')]);await dl3.saveAs(out+'/stickers2.pdf');
 
  // stock list for Spool Reader
  await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=listSave]');

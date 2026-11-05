@@ -66,6 +66,7 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .crop img{width:100%;height:auto;display:block;pointer-events:none}
 .crop i{position:absolute;border:2px solid var(--tag);box-shadow:0 0 0 2000px rgba(0,0,0,.45);pointer-events:none}
 .cropwrap{overflow:hidden}
+.cols{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .tick{display:flex;gap:10px;align-items:center}
 .tick input{width:22px;height:22px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:40;background:var(--ink);color:var(--bg);padding:10px 12px;max-width:calc(100% - 32px);width:max-content;font-weight:500}
@@ -84,11 +85,12 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 
 <script>
 "use strict";
+const PATTERNS=[["solid","Single colour"],["split","Multicolour, split"],["gradient","Gradient"]];
 const FINISH=["","Matte","Glossy","Silk","Translucent","Sparkle","Marble","Dual colour"];
 const LABEL_PROMPT=`This photo shows a 3D printer filament spool, its box or its label, for my own stock list. Read it.
 Report only what the photo shows. Use null for anything you can't see. Don't guess print temperatures.
 Reply with only one JSON object:
-{"brand":string|null,"material":string|null (the full product name as printed, such as "PETG HF" or "PLA Silk+"),"colourName":string|null,"colourHex":"#rrggbb"|null (your estimate of the filament colour),"finish":"Matte"|"Glossy"|"Silk"|"Translucent"|"Sparkle"|"Marble"|"Dual colour"|null,"nozzleMin":number|null,"nozzleMax":number|null,"bedMin":number|null,"bedMax":number|null,"dryTemp":number|null,"dryHours":number|null,"weightG":number|null,"diameter":number|null,"logoBox":[x0,y0,x1,y1]|null (the manufacturer's logo as fractions 0 to 1 of image width and height),"note":string|null (one short sentence if something needs checking)}`;
+{"brand":string|null,"material":string|null (the full product name as printed, such as "PETG HF" or "PLA Silk+"),"colourName":string|null,"colourHex":"#rrggbb"|null (your estimate of the filament colour),"colours":["#rrggbb"]|null (every colour, in order, when the filament has more than one),"pattern":"solid"|"split"|"gradient"|null (split when it changes between distinct colours, gradient when it blends smoothly),"finish":"Matte"|"Glossy"|"Silk"|"Translucent"|"Sparkle"|"Marble"|"Dual colour"|null,"nozzleMin":number|null,"nozzleMax":number|null,"bedMin":number|null,"bedMax":number|null,"dryTemp":number|null,"dryHours":number|null,"weightG":number|null,"diameter":number|null,"logoBox":[x0,y0,x1,y1]|null (the manufacturer's logo as fractions 0 to 1 of image width and height),"note":string|null (one short sentence if something needs checking)}`;
 
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -96,6 +98,7 @@ const slug=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-
 const num=v=>{const n=parseFloat(v);return Number.isFinite(n)?n:null;};
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const hexOK=h=>/^#[0-9a-f]{6}$/i.test(h||"")?h:"#9AA5AB";
+const colourList=p=>{const c=Array.isArray(p.colours)?p.colours.filter(x=>/^#[0-9a-f]{6}$/i.test(x)):[];return c.length?c:[hexOK(p.hex)];};
 const local={get(k){try{return JSON.parse(localStorage.getItem(k));}catch{return null;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}};
 
 let db=null,sample=null,downloads=null,canRead=false,maxImages=4,started=false,ctl=null;
@@ -211,6 +214,13 @@ function vExport(){
     <textarea id="copyBox" rows="3" hidden aria-label="Export text"></textarea>
   </div>${ps.map(cardHTML).join("")}`;
 }
+function colourInputs(p){
+  const c=colourList(p),multi=(p.pattern||"solid")!=="solid",n=multi?c.length:1;
+  let h="";for(let i=0;i<n;i++)h+=`<input type="color" aria-label="Colour ${i+1}" data-c="${i}" data-id="${p.id}" value="${c[i]}">`;
+  if(multi)h+=`${n<6?`<button class="btn sm" data-act="colourAdd" data-v="${p.id}">Add colour</button>`:""}${n>2?`<button class="btn sm" data-act="colourDrop" data-v="${p.id}">Remove last</button>`:""}`;
+  return h;
+}
+function saveColours(p,list){p.colours=list;p.hex=list[0];if(db)db.collection("pending").doc(p.id).update({colours:list,hex:list[0],pattern:p.pattern||"solid"}).catch(er=>fail(er,"That change didn't save"));render();}
 function cardHTML(p){
   const logo=S.logos[slug(p.brand)];
   const f=(k,t,type="number",extra="")=>`<label class="field"><span>${t}</span><input type="${type}" data-f="${k}" data-id="${p.id}" value="${esc(p[k])}" ${extra}></label>`;
@@ -218,7 +228,8 @@ function cardHTML(p){
     <div class="head">${p.thumb?`<img class="t" src="${esc(p.thumb)}" alt="">`:`<span class="swatch" style="background:${hexOK(p.hex)}"></span>`}<div style="min-width:0"><b>${esc(p.material||"Material needed")} ${esc(p.colour||"")}</b><div>${esc(p.brand||"Manufacturer needed")}</div></div><button class="btn sm" data-act="remove" data-v="${p.id}">Remove</button></div>
     ${p.note?`<div class="note">${esc(p.note)}</div>`:""}
     <div class="g2">${f("brand","Manufacturer","text")}${f("material","Material name","text")}</div>
-    <div class="g2">${f("colour","Colour name","text")}<label class="field"><span>Colour</span><input type="color" data-f="hex" data-id="${p.id}" value="${hexOK(p.hex)}"></label></div>
+    <div class="g2">${f("colour","Colour name","text")}<label class="field"><span>Colour type</span><select data-f="pattern" data-id="${p.id}">${PATTERNS.map(([k,t])=>`<option value="${k}" ${(p.pattern||"solid")===k?"selected":""}>${t}</option>`).join("")}</select></label></div>
+    <div class="cols">${colourInputs(p)}</div>
     <div class="g2"><label class="field"><span>Finish</span><select data-f="finish" data-id="${p.id}">${FINISH.map(x=>`<option ${p.finish===x?"selected":""}>${x}</option>`).join("")}</select></label>${f("qty","How many","number",'inputmode="numeric" min="1" max="20"')}</div>
     <div class="g2">${f("netG","Filament weight (g)")}${f("dia","Diameter (mm)")}</div>
     <div class="g4">${f("nMin","Nozzle min")}${f("nMax","Nozzle max")}${f("bMin","Bed min")}${f("bMax","Bed max")}</div>
@@ -236,7 +247,8 @@ async function runRead(){
     for(const ph of queue){
       const r=await sample.json(LABEL_PROMPT,{images:ph.blob,signal:ctl.signal});
       const id="p"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-      const doc={brand:str(r.brand),material:str(r.material),colour:str(r.colourName),hex:hexOK(r.colourHex),finish:FINISH.includes(r.finish)?r.finish:"",netG:num(r.weightG)||1000,qty:1,dia:num(r.diameter)||1.75,nMin:num(r.nozzleMin),nMax:num(r.nozzleMax),bMin:num(r.bedMin),bMax:num(r.bedMax),dT:num(r.dryTemp),dH:num(r.dryHours),note:str(r.note),thumb:ph.thumb,addedAt:Date.now()};
+      const cols=Array.isArray(r.colours)?r.colours.filter(x=>/^#[0-9a-f]{6}$/i.test(x)).slice(0,6):[];
+      const doc={brand:str(r.brand),material:str(r.material),colour:str(r.colourName),hex:cols[0]||hexOK(r.colourHex),colours:cols.length?cols:[hexOK(r.colourHex)],pattern:cols.length>1&&["split","gradient"].includes(r.pattern)?r.pattern:"solid",finish:FINISH.includes(r.finish)?r.finish:"",netG:num(r.weightG)||1000,qty:1,dia:num(r.diameter)||1.75,nMin:num(r.nozzleMin),nMax:num(r.nozzleMax),bMin:num(r.bedMin),bMax:num(r.bedMax),dT:num(r.dryTemp),dH:num(r.dryHours),note:str(r.note),thumb:ph.thumb,addedAt:Date.now()};
       await save("pending",id,doc);
       const key=slug(doc.brand);
       photoFor[key]=ph.url;
@@ -302,7 +314,7 @@ function exportText(){
   const ps=Object.values(S.pending);
   const logos={};
   for(const p of ps){const l=S.logos[slug(p.brand)];if(l&&p.brand)logos[p.brand]={src:l.src,w:l.w,h:l.h};}
-  const spools=ps.map(({brand,material,colour,hex,finish,netG,qty,dia,nMin,nMax,bMin,bMax,dT,dH})=>({brand,material,colour,hex,finish,netG,qty:clamp(parseInt(qty)||1,1,20),dia,nMin,nMax,bMin,bMax,dT,dH}));
+  const spools=ps.map(p=>{const {brand,material,colour,finish,netG,qty,dia,nMin,nMax,bMin,bMax,dT,dH}=p,pattern=p.pattern||"solid",colours=pattern==="solid"?[colourList(p)[0]]:colourList(p);return {brand,material,colour,hex:colours[0],colours,pattern,finish,netG,qty:clamp(parseInt(qty)||1,1,20),dia,nMin,nMax,bMin,bMax,dT,dH};});
   return JSON.stringify({format:"spool-stock-import",version:1,batch:Math.random().toString(36).slice(2,12),exported:new Date().toISOString(),spools,logos});
 }
 function missing(){ return Object.values(S.pending).filter(p=>!p.brand||!p.material).length; }
@@ -314,32 +326,31 @@ function openCrop(url,brand,box){
 }
 const vCrop=()=>`<div class="card"><h2>${esc(crop.brand)} logo</h2><p>Drag a box round the logo. It goes on every ${esc(crop.brand)} sticker.</p>
   <div class="cropwrap"><div class="crop" id="cropBox"><img src="${esc(crop.url)}" alt="Photo to crop"><i id="cropRect"></i></div></div>
-  <label class="tick"><input type="checkbox" id="cropClean" checked><span>Clean up to black on white</span></label>
   <div class="btns"><button class="btn go" data-act="cropSave">Use this logo</button><button class="btn" data-act="cropSkip">Skip</button></div></div>`;
 function drawCrop(){const r=$("#cropRect");if(!r||!crop)return;const [a,b,c,d]=crop.box;r.style.left=a*100+"%";r.style.top=b*100+"%";r.style.width=(c-a)*100+"%";r.style.height=(d-b)*100+"%";}
-function cleanBW(ctx,w,h){
+function blackLogo(ctx,w,h){
   const im=ctx.getImageData(0,0,w,h),d=im.data,hist=new Array(256).fill(0);
-  for(let i=0;i<d.length;i+=4)hist[(d[i]*.3+d[i+1]*.59+d[i+2]*.11)|0]++;
+  for(let i=0;i<d.length;i+=4){const v=d[i]*.3+d[i+1]*.59+d[i+2]*.11;d[i]=v;hist[v|0]++;}
   let total=w*h,sum=0,sb=0,wb=0,best=0,th=128;for(let i=0;i<256;i++)sum+=i*hist[i];
   for(let i=0;i<256;i++){wb+=hist[i];if(!wb)continue;const wf=total-wb;if(!wf)break;sb+=i*hist[i];const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf);if(v>best){best=v;th=i;}}
   let dark=0;for(let i=0;i<=th;i++)dark+=hist[i];
   const inv=dark>total/2;
-  for(let i=0;i<d.length;i+=4){const v=d[i]*.3+d[i+1]*.59+d[i+2]*.11,on=inv?v>th:v<=th,o=on?0:255;d[i]=d[i+1]=d[i+2]=o;d[i+3]=255;}
+  for(let i=0;i<d.length;i+=4){const v=d[i],a=clamp((inv?v-th:th-v)/14+.5,0,1);d[i]=d[i+1]=d[i+2]=0;d[i+3]=Math.round(a*255);}
   ctx.putImageData(im,0,0);
 }
 function trimWhite(c){
   const ctx=c.getContext("2d"),{width:w,height:h}=c,d=ctx.getImageData(0,0,w,h).data;
   let x0=w,y0=h,x1=-1,y1=-1;
-  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;if(d[i+3]>20&&(d[i]<235||d[i+1]<235||d[i+2]<235)){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}}
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;if(d[i+3]>40){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}}
   if(x1<0)return null;
   const o=document.createElement("canvas");o.width=x1-x0+1;o.height=y1-y0+1;o.getContext("2d").drawImage(c,x0,y0,o.width,o.height,0,0,o.width,o.height);return o;
 }
 async function saveLogo(){
-  const clean=$("#cropClean")?.checked,img=await loadImg(crop.url);
-  const [a,b,c,d]=crop.box,W=img.naturalWidth,H=img.naturalHeight,sw=Math.max(1,(c-a)*W),sh=Math.max(1,(d-b)*H),k=Math.min(1,480/Math.max(sw,sh));
+  const img=await loadImg(crop.url);
+  const [a,b,c,d]=crop.box,W=img.naturalWidth,H=img.naturalHeight,sw=Math.max(1,(c-a)*W),sh=Math.max(1,(d-b)*H),k=Math.min(1,900/Math.max(sw,sh));
   let cv=document.createElement("canvas");cv.width=Math.round(sw*k);cv.height=Math.round(sh*k);
-  const ctx=cv.getContext("2d",{willReadFrequently:true});ctx.fillStyle="#fff";ctx.fillRect(0,0,cv.width,cv.height);ctx.drawImage(img,a*W,b*H,sw,sh,0,0,cv.width,cv.height);
-  if(clean)cleanBW(ctx,cv.width,cv.height);
+  const ctx=cv.getContext("2d",{willReadFrequently:true});ctx.drawImage(img,a*W,b*H,sw,sh,0,0,cv.width,cv.height);
+  blackLogo(ctx,cv.width,cv.height);
   cv=trimWhite(cv);
   if(!cv){toast("That box looks empty. Drag it over the logo.");return;}
   const id=slug(crop.brand),brand=crop.brand;crop=null;
@@ -356,7 +367,7 @@ const actions={
   identClear(){I.photos=[];I.result=null;I.err="";render();},
   async identAdd(){
     const g=I.result?.bestGuess||{},id="p"+Date.now().toString(36);
-    await save("pending",id,{brand:str(g.brand),material:str(g.material),colour:str(g.colourName),hex:hexOK(g.colourHex),finish:"",netG:1000,qty:1,dia:1.75,nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,note:"From a photo match, so check the details.",thumb:I.photos[0]?.thumb||"",addedAt:Date.now()}).catch(e=>fail(e,"That didn't save"));
+    await save("pending",id,{brand:str(g.brand),material:str(g.material),colour:str(g.colourName),hex:hexOK(g.colourHex),colours:[hexOK(g.colourHex)],pattern:"solid",finish:"",netG:1000,qty:1,dia:1.75,nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,note:"From a photo match, so check the details.",thumb:I.photos[0]?.thumb||"",addedAt:Date.now()}).catch(e=>fail(e,"That didn't save"));
     S.tab="export";render();
   },
   async refKeep(el){
@@ -377,6 +388,8 @@ const actions={
     try{await navigator.clipboard.writeText(t);toast("Copied. Paste it into Import from Spool Reader.");}
     catch{const b=$("#copyBox");b.hidden=false;b.value=t;b.select();toast("Select all of this box and copy it.");}
   },
+  colourAdd(el){const p=S.pending[el.dataset.v];saveColours(p,[...colourList(p),"#FFFFFF"]);},
+  colourDrop(el){const p=S.pending[el.dataset.v];saveColours(p,colourList(p).slice(0,-1));},
   clearAsk(){$("#clearBox").hidden=false;},
   clearAll(){const ids=Object.keys(S.pending);S.pending={};if(db)ids.forEach(id=>db.collection("pending").doc(id).delete().catch(()=>{}));render();},
   logoFor(el){pendingLogo=el.dataset.v;},
@@ -390,9 +403,14 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("change",async e=>{
   const t=e.target;
+  if(t.dataset&&t.dataset.c!=null){
+    const p=S.pending[t.dataset.id];if(!p)return;
+    const list=[...colourList(p)];list[+t.dataset.c]=t.value;saveColours(p,list);return;
+  }
   if(t.dataset&&t.dataset.f){
     const p=S.pending[t.dataset.id];if(!p)return;
     const k=t.dataset.f,v=t.type==="number"?num(t.value):t.value;p[k]=v;
+    if(k==="pattern"){const list=colourList(p);if(v!=="solid"&&list.length<2)list.push("#FFFFFF");p.colours=list;if(db)db.collection("pending").doc(p.id).update({pattern:v,colours:list}).catch(er=>fail(er,"That change didn't save"));render();return;}
     if(db)db.collection("pending").doc(p.id).update({[k]:v}).catch(er=>fail(er,"That change didn't save"));
     if(["brand","material","colour"].includes(k))render();
     return;

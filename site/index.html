@@ -143,7 +143,7 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .drop.over{border-color:var(--ink)}
 .thumbs{display:flex;flex-wrap:wrap;gap:6px}
 .thumbs img{width:84px;height:84px;object-fit:cover;border:1px solid var(--line)}
-.logo{height:34px;max-width:120px;object-fit:contain;background:#fff;padding:2px;border:1px solid var(--line)}
+.logo{height:40px;max-width:120px;object-fit:contain;background:#fff;padding:3px;border:1px solid var(--line)}
 .crop{position:relative;touch-action:none;user-select:none;line-height:0;max-width:100%}
 .crop img{width:100%;height:auto;display:block;pointer-events:none}
 .crop i{position:absolute;border:2px solid var(--tag);box-shadow:0 0 0 2000px rgba(0,0,0,.45);pointer-events:none}
@@ -161,6 +161,8 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 @keyframes s{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
 .setrow{display:grid;grid-template-columns:minmax(0,1fr) 84px auto;gap:6px;align-items:end}
+.logoPick{background:#fff;border:1px solid var(--line);padding:6px;display:grid;gap:4px;cursor:pointer;color:#000;font-size:13px;text-align:center}
+.logoPick img{height:56px;width:100%;object-fit:contain}
 .brandrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border-top:1px solid var(--line);padding-top:8px}
 .camwrap{position:relative;aspect-ratio:4/3;background:#000;overflow:hidden;max-height:60vh;width:100%}
 .camwrap video{width:100%;height:100%;object-fit:cover;display:block}
@@ -226,6 +228,10 @@ const BRANDS = ["Bambu Lab","eSUN","Polymaker","SUNLU","Overture","Prusament","E
 const FINISH = ["","Matte","Glossy","Silk","Translucent","Sparkle","Marble","Dual colour"];
 const COLOURS = ["#111111","#FFFFFF","#8A8D8F","#C8102E","#FF6A13","#FFD100","#00843D","#0057B8","#6D2077","#7B4B2A"];
 const NAMED = [[/\bblack\b/i,"#111111"],[/\bwhite\b/i,"#F4F4F2"],[/\b(grey|gray|silver)\b/i,"#8A8D8F"],[/\bred\b/i,"#C8102E"],[/\borange\b/i,"#FF6A13"],[/\byellow\b/i,"#FFD100"],[/\bgold\b/i,"#C9A227"],[/\bgreen\b/i,"#00843D"],[/\bblue\b/i,"#0057B8"],[/\b(purple|violet)\b/i,"#6D2077"],[/\bpink\b/i,"#E86FA5"],[/\bbrown\b/i,"#7B4B2A"],[/\b(beige|sand|cream)\b/i,"#D9C7A0"]];
+const BRAND_SITES = {"bambu lab":"bambulab.com","esun":"esun3d.com","polymaker":"polymaker.com","sunlu":"sunlu.com","overture":"overture3d.com","prusament":"prusament.com","elegoo":"elegoo.com","jayo":"jayo3d.com","creality":"creality.com","anycubic":"anycubic.com","kingroon":"kingroon.com","fiberlogy":"fiberlogy.com","extrudr":"extrudr.com","colorfabb":"colorfabb.com","spectrum":"spectrumfilaments.com","hatchbox":"hatchbox3d.com","3djake":"3djake.com","geeetech":"geeetech.com","eryone":"eryone3d.com","amolen":"amolen.com","siraya tech":"siraya.tech","flashforge":"flashforge.com","fillamentum":"fillamentum.com","recreus":"recreus.com","ninjatek":"ninjatek.com","das filament":"dasfilament.de","azurefilm":"azurefilm.com","rosa3d":"rosa3d.pl","devil design":"devildesign.com"};
+const ICON_SLUGS = {"bambu lab":"bambulab","creality":"creality","elegoo":"elegoo","anycubic":"anycubic","flashforge":"flashforge"};
+const ICON_BASE = "https://cdn.jsdelivr.net/npm/simple-icons@16.36.0/icons/";
+const PATTERNS = [["solid","Single colour"],["split","Multicolour, split"],["gradient","Gradient"]];
 const SHEETS = [
   {id:"l7160",name:"63.5 x 38.1 mm, 21 per sheet (L7160 size)",w:63.5,h:38.1,cols:3,rows:7,left:7.25,top:15.15,px:66,py:38.1},
   {id:"l7161",name:"63.5 x 46.6 mm, 18 per sheet (L7161 size)",w:63.5,h:46.6,cols:3,rows:6,left:7.25,top:8.7,px:66,py:46.6},
@@ -282,13 +288,24 @@ const groups = () => { const m=new Map(); for(const l of orderedLocs()){ const g
 const inLoc = id => liveSpools().filter(s=>s.loc===id);
 const isExample = s => !!s.example;
 const hexOK = h => /^#[0-9a-f]{6}$/i.test(h||"") ? h : "#9AA5AB";
+const colourList = s => { const c=Array.isArray(s.colours)?s.colours.filter(x=>/^#[0-9a-f]{6}$/i.test(x)):[]; return c.length?c:[hexOK(s.hex)]; };
+const patternOf = s => colourList(s).length>1&&(s.pattern==="split"||s.pattern==="gradient")?s.pattern:"solid";
 const pct = s => s.netG ? clamp((s.remainG??s.netG)/s.netG,0,1) : 1;
 const isLow = s => (s.remainG??s.netG??9999) <= LOW_G;
 
+let discId=0;
 function disc(s,size=44){
-  const hex = s ? hexOK(s.hex) : null;
   const r = s ? 24 + 23*Math.max(pct(s),.06) : 0;
-  return `<svg class="disc" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true"><circle class="fl" cx="50" cy="50" r="48"/>${s?`<circle class="fil" cx="50" cy="50" r="${r.toFixed(1)}" fill="${hex}"/>`:""}<circle class="hub" cx="50" cy="50" r="22"/><circle class="hole" cx="50" cy="50" r="9"/></svg>`;
+  let fill="", def="";
+  if(s){
+    const c=colourList(s), pat=patternOf(s); fill=c[0];
+    if(pat!=="solid"){
+      const id="fil"+(++discId), n=c.length;
+      const stops=pat==="gradient"?c.map((h,i)=>`<stop offset="${i/(n-1)}" stop-color="${h}"/>`).join(""):c.map((h,i)=>`<stop offset="${i/n}" stop-color="${h}"/><stop offset="${(i+1)/n}" stop-color="${h}"/>`).join("");
+      def=`<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">${stops}</linearGradient></defs>`; fill=`url(#${id})`;
+    }
+  }
+  return `<svg class="disc" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true">${def}<circle class="fl" cx="50" cy="50" r="48"/>${s?`<circle class="fil" cx="50" cy="50" r="${r.toFixed(1)}" fill="${fill}"/>`:""}<circle class="hub" cx="50" cy="50" r="22"/><circle class="hole" cx="50" cy="50" r="9"/></svg>`;
 }
 
 /* ---------- print settings lookup ---------- */
@@ -333,9 +350,38 @@ function fit(text,maxW,pt,minPt,font,bold){
 }
 const safe = t => String(t??"").replace(/[^\x20-\x7E\xA0-\xFF]/g,"");
 function logoFit(b,boxW,boxH){
-  if(!b||!b.logo) return null;
-  const a=(b.logoW||3)/(b.logoH||1); let w=boxW,h=w/a; if(h>boxH){h=boxH;w=h*a;}
-  return {w,h,src:b.logo};
+  const l=logoData(b); if(!l) return null;
+  const a=(l.w||3)/(l.h||1); let w=boxW,h=w/a; if(h>boxH){h=boxH;w=h*a;}
+  return {w,h,src:l.src,key:l.key};
+}
+function edgePoint(cx,cy,half,deg){
+  const a=deg*Math.PI/180, dx=Math.cos(a), dy=Math.sin(a), k=half/Math.max(Math.abs(dx),Math.abs(dy));
+  return [cx+dx*k,cy+dy*k];
+}
+const hexRGB = h => { const v=parseInt(hexOK(h).slice(1),16); return [v>>16,(v>>8)&255,v&255]; };
+function mix(a,b,t){ const p=hexRGB(a), q=hexRGB(b), v=[0,1,2].map(i=>Math.round(p[i]+(q[i]-p[i])*t)); return "#"+v.map(n=>n.toString(16).padStart(2,"0")).join(""); }
+/* colour box: one fill, triangles meeting in the middle, or a blend from left to right. Everything else on a sticker is black. */
+function swatchOps(sp,x,y,sz){
+  const c=colourList(sp), pat=patternOf(sp), ops=[], cx=x+sz/2, cy=y+sz/2, half=sz/2;
+  if(pat==="split"){
+    const n=c.length, step=360/n, start=-135, corners=[-135,-45,45,135];
+    c.forEach((col,i)=>{
+      const a=start+i*step, b=a+step;
+      const marks=[a,...corners.flatMap(k=>[k,k+360]).filter(k=>k>a+.01&&k<b-.01).sort((p,q)=>p-q),b];
+      for(let j=0;j<marks.length-1;j++){
+        const p=edgePoint(cx,cy,half,marks[j]), q=edgePoint(cx,cy,half,marks[j+1]);
+        ops.push({t:"tri",pts:[cx,cy,p[0],p[1],q[0],q[1]],fill:col});
+      }
+    });
+  } else if(pat==="gradient"){
+    const strips=48, w=sz/strips, n=c.length-1;
+    for(let i=0;i<strips;i++){
+      const t=(i+.5)/strips*n, k=Math.min(n-1,Math.floor(t));
+      ops.push({t:"rect",x:x+i*w,y,w:w+.03,h:sz,fill:mix(c[k],c[k+1],t-k)});
+    }
+  } else ops.push({t:"rect",x,y,w:sz,h:sz,fill:c[0]});
+  ops.push({t:"rect",x,y,w:sz,h:sz,stroke:"#000000"});
+  return ops;
 }
 function spoolOps(sp,W,H){
   const m=2.2, ops=[], idH=3.8;
@@ -346,14 +392,14 @@ function spoolOps(sp,W,H){
   const lineH=3.05, specLines=3, logoH=Math.min(8.2,H*.22);
   const brand=S.brands[slug(sp.brand)];
   const lf=logoFit(brand,cw,logoH);
-  if(lf) ops.push({t:"img",x,y:m,w:lf.w,h:lf.h,src:lf.src});
+  if(lf) ops.push({t:"img",x,y:m,w:lf.w,h:lf.h,src:lf.src,key:lf.key});
   else { const f=fit(safe(sp.brand)||"Unknown",cw,12,7,"sans",1); ops.push({t:"text",x,y:m+Math.min(logoH-1.2,3.6),text:f.text,pt:f.pt,font:"sans",bold:1}); }
   let y=m+(lf?lf.h:Math.min(logoH-1.2,4.4))+1.2;
   const mat=fit(safe(sp.material)||"Filament",cw,17,9,"sans",1);
   y+=mat.pt*.3528*.76; ops.push({t:"text",x,y,text:mat.text,pt:mat.pt,font:"sans",bold:1}); y+=1.5;
-  const sw=4; ops.push({t:"rect",x,y,w:sw,h:sw,fill:hexOK(sp.hex),stroke:"#000000"});
+  const sw=5; ops.push(...swatchOps(sp,x,y,sw));
   const cn=fit(safe(sp.colour)||"",cw-sw-1.3,9,6.5,"sans",0);
-  ops.push({t:"text",x:x+sw+1.3,y:y+3.05,text:cn.text,pt:cn.pt,font:"sans"});
+  ops.push({t:"text",x:x+sw+1.3,y:y+3.55,text:cn.text,pt:cn.pt,font:"sans"});
   y+=sw+1;
   const rows=[["Nozzle",range(sp.nMin,sp.nMax),"C"],["Bed",range(sp.bMin,sp.bMax),"C"],["Dry",sp.dT?(sp.dT+" C  "+(sp.dH?sp.dH+" h":"")):"",""]];
   const free=H-m-y, step=Math.min(free/specLines,3.5);
@@ -380,7 +426,8 @@ const itemOps = (it,W,H) => it.kind==="loc" ? locOps(it.data,W,H) : spoolOps(it.
 function opsToSVG(ops,W,H){
   let o="";
   for(const p of ops){
-    if(p.t==="rect") o+=`<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="${p.fill}" stroke="${p.stroke}" stroke-width=".15"/>`;
+    if(p.t==="rect") o+=`<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="${p.fill||"none"}" ${p.stroke?`stroke="${p.stroke}" stroke-width=".15"`:""}/>`;
+    if(p.t==="tri") o+=`<polygon points="${p.pts.map(n=>n.toFixed(3)).join(" ")}" fill="${p.fill}" stroke="${p.fill}" stroke-width=".03"/>`;
     if(p.t==="img") o+=`<image x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" href="${esc(p.src)}" preserveAspectRatio="xMinYMin meet"/>`;
     if(p.t==="text"){
       const fam=p.font==="mono"?"Courier New,Courier,monospace":"Helvetica,Arial,sans-serif";
@@ -398,8 +445,13 @@ const imgFormat = src => /^data:image\/jpe?g/i.test(src) ? "JPEG" : "PNG";
 function opsToPDF(doc,ops,ox,oy){
   for(const p of ops){
     const x=ox+p.x,y=oy+p.y;
-    if(p.t==="rect"){ doc.setDrawColor(p.stroke); doc.setLineWidth(.15); doc.setFillColor(p.fill); doc.rect(x,y,p.w,p.h,"FD"); }
-    if(p.t==="img"){ try{ doc.addImage(p.src,imgFormat(p.src),x,y,p.w,p.h); }catch(e){} }
+    if(p.t==="rect"){
+      if(p.fill) doc.setFillColor(p.fill);
+      if(p.stroke){ doc.setDrawColor(p.stroke); doc.setLineWidth(.15); }
+      doc.rect(x,y,p.w,p.h,p.fill&&p.stroke?"FD":p.stroke?"S":"F");
+    }
+    if(p.t==="tri"){ const q=p.pts; doc.setFillColor(p.fill); doc.setDrawColor(p.fill); doc.setLineWidth(.03); doc.triangle(ox+q[0],oy+q[1],ox+q[2],oy+q[3],ox+q[4],oy+q[5],"FD"); }
+    if(p.t==="img"){ try{ doc.addImage(p.src,imgFormat(p.src),x,y,p.w,p.h,p.key,"FAST"); }catch(e){} }
     if(p.t==="text"){
       doc.setFont(p.font==="mono"?"courier":"helvetica",p.bold?"bold":"normal"); doc.setFontSize(p.pt); doc.setTextColor(0,0,0);
       doc.text(p.text,x,y,{align:p.align==="center"?"center":"left"});
@@ -441,6 +493,7 @@ function watch(){
   },e=>{ clearTimeout(timer); S.loadErr=(e&&e.code)||"unknown"; if(S.ready) toast("Lost the link to your stock. Reload the page."); else render(); });
   sub("spools","spools"); sub("locations","locs"); sub("brands","brands"); sub("profiles","profiles");
   db.doc("config/main").onSnapshot(d=>{ S.settings=d.exists?{...d.data()}:{}; dataChanged(); },()=>{});
+  db.doc("private/keys").onSnapshot(d=>{ LD.token=(d.exists&&d.data().logodev)||""; dataChanged(); },()=>{});
 }
 let seeded=false;
 async function seedStorages(){
@@ -578,6 +631,7 @@ function render(){
   const v={stock:vStock,add:vForm,edit:vForm,scan:vScan,stickers:vStickers,setup:vSetup,spool:vSpool,loc:vLoc,import:vImport}[S.view]||vStock;
   m.innerHTML=(!navigator.onLine?`<div class="note warn">No signal. Changes are kept on this device and sync when you're back.</div>`:S.stale?`<div class="note warn">Showing your last saved copy. It may be out of date.</div>`:"")+v();
   if(S.view==="scan") Scanner.attach();
+  ensureLogos();
   if(S.view==="add"||S.view==="edit") formPreview();
   if(crop) drawCrop();
 }
@@ -776,12 +830,19 @@ const Scanner={
 };
 
 /* form */
-function blankDraft(){ return {brand:"",material:"",colour:"",hex:"#111111",finish:"",netG:1000,dia:1.75,tareG:"",loc:"",qty:1,nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,src:"none",touched:false}; }
+function blankDraft(){ return {brand:"",material:"",colour:"",hex:"#111111",colours:["#111111"],pattern:"solid",finish:"",netG:1000,dia:1.75,tareG:"",loc:"",qty:1,nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,src:"none",touched:false}; }
 function newDraft(){ F=blankDraft(); F.editId=null; }
 function editDraft(id){
   if(F&&F.editId===id) return;
   const s=S.spools[id]; F=blankDraft(); if(!s) return;
-  Object.assign(F,{editId:id,brand:s.brand,material:s.material,colour:s.colour||"",hex:hexOK(s.hex),finish:s.finish||"",netG:s.netG,dia:s.dia||1.75,tareG:s.tareG||"",loc:s.loc||"",nMin:s.nMin,nMax:s.nMax,bMin:s.bMin,bMax:s.bMax,dT:s.dT,dH:s.dH,src:"saved",touched:true});
+  Object.assign(F,{editId:id,brand:s.brand,material:s.material,colour:s.colour||"",hex:colourList(s)[0],colours:[...colourList(s)],pattern:patternOf(s),finish:s.finish||"",netG:s.netG,dia:s.dia||1.75,tareG:s.tareG||"",loc:s.loc||"",nMin:s.nMin,nMax:s.nMax,bMin:s.bMin,bMax:s.bMax,dT:s.dT,dH:s.dH,src:"saved",touched:true});
+}
+function colourRow(){
+  const multi=F.pattern!=="solid", n=multi?F.colours.length:1;
+  let h=`<input type="color" id="f_hex" value="${esc(F.colours[0])}" aria-label="Filament colour">`;
+  for(let i=1;i<n;i++) h+=`<input type="color" data-colour="${i}" value="${esc(F.colours[i])}" aria-label="Colour ${i+1}">`;
+  if(multi) h+=`${n<6?`<button type="button" class="btn sm" data-act="colourAdd">Add colour</button>`:""}${n>2?`<button type="button" class="btn sm" data-act="colourDrop">Remove last</button>`:""}`;
+  return h;
 }
 function vForm(){
   const e=!!F.editId;
@@ -803,7 +864,9 @@ function vForm(){
         <label class="field"><span>Colour name</span><input type="text" id="f_colour" value="${esc(F.colour)}"></label>
         <label class="field"><span>Finish</span><select id="f_finish">${FINISH.map(x=>`<option ${F.finish===x?"selected":""}>${x}</option>`).join("")}</select></label>
       </div>
-      <div class="swatches"><input type="color" id="f_hex" value="${esc(F.hex)}" aria-label="Filament colour">${COLOURS.map(c=>`<button type="button" class="sw" style="background:${c}" data-act="hex" data-v="${c}" aria-label="Use colour ${c}"></button>`).join("")}</div>
+      <label class="field"><span>Colour type</span><select id="f_pattern">${PATTERNS.map(([k,t])=>`<option value="${k}" ${F.pattern===k?"selected":""}>${t}</option>`).join("")}</select></label>
+      <div class="swatches" id="colourRow">${colourRow()}</div>
+      <div class="swatches">${COLOURS.map(c=>`<button type="button" class="sw" style="background:${c}" data-act="hex" data-v="${c}" aria-label="Use colour ${c}"></button>`).join("")}</div>
       <div class="g2">
         <label class="field"><span>Filament weight (g)</span><input type="number" inputmode="numeric" id="f_netG" value="${esc(F.netG)}"></label>
         <label class="field"><span>Empty spool (g)</span><input type="number" inputmode="numeric" id="f_tareG" value="${esc(F.tareG)}"></label>
@@ -829,18 +892,15 @@ function vForm(){
     <div class="card"><h3>Sticker</h3><div id="preview"></div><div id="logoHint"></div></div>
   </div>`;
 }
-const fields=["brand","material","colour","finish","hex","netG","tareG","loc","qty","dia","nMin","nMax","bMin","bMax","dT","dH"];
-function readForm(){ for(const k of fields){ const el=$("#f_"+k); if(el) F[k]=el.value; } }
+const fields=["brand","material","colour","finish","hex","pattern","netG","tareG","loc","qty","dia","nMin","nMax","bMin","bMax","dT","dH"];
+function readForm(){ for(const k of fields){ const el=$("#f_"+k); if(el) F[k]=el.value; } F.colours[0]=F.hex; }
 function writePrint(){ for(const k of ["nMin","nMax","bMin","bMax","dT","dH"]){ const el=$("#f_"+k); if(el) el.value=F[k]??""; } }
-function draftSpool(){ return {id:F.editId||nextIds(1).ids[0],brand:F.brand,material:F.material,colour:F.colour,hex:F.hex,nMin:num(F.nMin),nMax:num(F.nMax),bMin:num(F.bMin),bMax:num(F.bMax),dT:num(F.dT),dH:num(F.dH)}; }
+function draftSpool(){ return {id:F.editId||nextIds(1).ids[0],brand:F.brand,material:F.material,colour:F.colour,hex:F.colours[0],colours:F.pattern==="solid"?[F.colours[0]]:F.colours,pattern:F.pattern,nMin:num(F.nMin),nMax:num(F.nMax),bMin:num(F.bMin),bMax:num(F.bMax),dT:num(F.dT),dH:num(F.dH)}; }
 function formPreview(){
   const sh=curSheet(), box=$("#preview"); if(!box) return;
   box.innerHTML=opsToSVG(spoolOps(draftSpool(),sh.w,sh.h),sh.w,sh.h);
   const n=$("#srcNote"); if(n) n.textContent=srcText(F);
-  const hint=$("#logoHint"); if(hint){
-    const b=S.brands[slug(F.brand)];
-    hint.innerHTML=F.brand&&!(b&&b.logo)?`<div class="btns" style="margin-top:8px"><label class="btn sm" for="pickLogo" data-act="logoFor" data-v="${esc(F.brand)}">Add ${esc(F.brand)} logo</label></div>`:"";
-  }
+  const hint=$("#logoHint"); if(hint) hint.innerHTML="";
 }
 function refreshLookup(){
   if(F.touched) { formPreview(); return; }
@@ -854,7 +914,8 @@ async function submitForm(){
   if(!F.brand.trim()||!F.material.trim()){ toast("Add the manufacturer and material name."); return; }
   const btn=$("#saveSpool"); if(btn) btn.disabled=true;
   const now=Date.now(), brand=F.brand.trim(), material=F.material.trim();
-  const body={brand,material,colour:F.colour.trim(),hex:F.hex,finish:F.finish,netG:num(F.netG)||1000,tareG:num(F.tareG),dia:num(F.dia)||1.75,loc:F.loc||null,
+  const list=F.pattern==="solid"?[F.colours[0]]:F.colours;
+  const body={brand,material,colour:F.colour.trim(),hex:list[0],colours:list,pattern:list.length>1?F.pattern:"solid",finish:F.finish,netG:num(F.netG)||1000,tareG:num(F.tareG),dia:num(F.dia)||1.75,loc:F.loc||null,
     nMin:num(F.nMin),nMax:num(F.nMax),bMin:num(F.bMin),bMax:num(F.bMax),dT:num(F.dT),dH:num(F.dH)};
   try{
     const bId=slug(brand), oldB=S.brands[bId];
@@ -875,7 +936,7 @@ async function submitForm(){
       await saveConfig({lastId:last});
     }
     const added=F.editId?null:parseInt(F.qty)||1;
-    F=null; crop=null;
+    F=null; crop=null; autoLogo(brand).then(ok=>{ if(ok) toast(brand+" logo added."); });
     toast(added?`Added ${first.toUpperCase()}${added>1?` and ${added-1} more`:""}. Sticker is in the queue.`:"Saved. Sticker is back in the queue.");
     go(first);
   }catch(e){ if(btn) btn.disabled=false; fail(e,"That spool didn't save"); }
@@ -958,54 +1019,134 @@ const parseCode = t => { const m=/(?:#|^)\s*(s\d{4,}|loc-[a-z0-9-]+)\s*$/i.exec(
 function openCrop(url,w,h,brand,box,back){
   const bx=(box&&box.length===4&&box.every(v=>typeof v==="number"))?[clamp(box[0],0,1),clamp(box[1],0,1),clamp(box[2],0,1),clamp(box[3],0,1)]:[.1,.1,.9,.45];
   if(bx[2]-bx[0]<.03||bx[3]-bx[1]<.02){ bx[0]=.1;bx[1]=.1;bx[2]=.9;bx[3]=.45; }
-  crop={url,w,h,brand,box:bx,back,clean:true};
+  crop={url,w,h,brand,box:bx,back};
 }
 const cropHTML = () => `<div class="card" id="cropCard"><h2>${esc(crop.brand)} logo</h2><p>Drag a box round the logo. It goes on every ${esc(crop.brand)} sticker.</p>
   <div class="cropwrap"><div class="crop" id="cropBox"><img src="${esc(crop.url)}" alt="Photo to crop"><i id="cropRect"></i></div></div>
-  <label class="check"><input type="checkbox" id="cropClean" ${crop.clean?"checked":""}><span>Clean up to black on white</span></label>
   <div class="btns"><button class="btn go" data-act="cropSave">Use this logo</button><button class="btn" data-act="cropSkip">Skip</button></div></div>`;
 function drawCrop(){
   const r=$("#cropRect"); if(!r||!crop) return; const [a,b,c,d]=crop.box;
   r.style.left=a*100+"%"; r.style.top=b*100+"%"; r.style.width=(c-a)*100+"%"; r.style.height=(d-b)*100+"%";
 }
-function cleanBW(ctx,w,h){
-  const im=ctx.getImageData(0,0,w,h), d=im.data, hist=new Array(256).fill(0);
-  for(let i=0;i<d.length;i+=4){ const v=(d[i]*.3+d[i+1]*.59+d[i+2]*.11)|0; hist[v]++; }
-  let total=w*h,sum=0,sb=0,wb=0,best=0,th=128; for(let i=0;i<256;i++) sum+=i*hist[i];
-  for(let i=0;i<256;i++){ wb+=hist[i]; if(!wb) continue; const wf=total-wb; if(!wf) break; sb+=i*hist[i]; const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf); if(v>best){best=v;th=i;} }
-  let dark=0; for(let i=0;i<=th;i++) dark+=hist[i];
-  const inv=dark>total/2;
-  for(let i=0;i<d.length;i+=4){ const v=d[i]*.3+d[i+1]*.59+d[i+2]*.11, on=inv?v>th:v<=th, o=on?0:255; d[i]=d[i+1]=d[i+2]=o; d[i+3]=255; }
+/* turns any logo into solid black on a transparent background, keeping soft edges so it prints smoothly */
+function blackLogo(ctx,w,h){
+  const im=ctx.getImageData(0,0,w,h), d=im.data;
+  let see=0; for(let i=3;i<d.length;i+=4) if(d[i]<128) see++;
+  if(see>(w*h)*.05){
+    for(let i=0;i<d.length;i+=4){ const lum=d[i]*.3+d[i+1]*.59+d[i+2]*.11, keep=lum>245?0:d[i+3]; d[i]=d[i+1]=d[i+2]=0; d[i+3]=keep; }
+  } else {
+    const hist=new Array(256).fill(0);
+    for(let i=0;i<d.length;i+=4){ const a=d[i+3]/255, v=(d[i]*.3+d[i+1]*.59+d[i+2]*.11)*a+255*(1-a); d[i]=v; hist[v|0]++; }
+    let total=w*h,sum=0,sb=0,wb=0,best=0,th=128; for(let i=0;i<256;i++) sum+=i*hist[i];
+    for(let i=0;i<256;i++){ wb+=hist[i]; if(!wb) continue; const wf=total-wb; if(!wf) break; sb+=i*hist[i]; const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf); if(v>best){best=v;th=i;} }
+    let dark=0; for(let i=0;i<=th;i++) dark+=hist[i];
+    const inv=dark>total/2, soft=14;
+    for(let i=0;i<d.length;i+=4){ const v=d[i], a=clamp((inv?v-th:th-v)/soft+.5,0,1); d[i]=d[i+1]=d[i+2]=0; d[i+3]=Math.round(a*255); }
+  }
   ctx.putImageData(im,0,0);
 }
 function trimWhite(c){
   const ctx=c.getContext("2d"),{width:w,height:h}=c,d=ctx.getImageData(0,0,w,h).data;
   let x0=w,y0=h,x1=-1,y1=-1;
-  for(let y=0;y<h;y++) for(let x=0;x<w;x++){ const i=(y*w+x)*4; if(d[i+3]>20&&(d[i]<235||d[i+1]<235||d[i+2]<235)){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; } }
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){ const i=(y*w+x)*4; if(d[i+3]>40){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; } }
   if(x1<0) return null;
   const o=document.createElement("canvas"); o.width=x1-x0+1; o.height=y1-y0+1; o.getContext("2d").drawImage(c,x0,y0,o.width,o.height,0,0,o.width,o.height); return o;
 }
 async function saveLogo(){
-  const clean=$("#cropClean")?.checked;
   const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=crop.url; });
   const [a,b,c,d]=crop.box, W=img.naturalWidth,H=img.naturalHeight;
-  const sw=Math.max(1,(c-a)*W), sh=Math.max(1,(d-b)*H), k=Math.min(1,720/Math.max(sw,sh));
-  let cv=document.createElement("canvas"); cv.width=Math.round(sw*k); cv.height=Math.round(sh*k);
-  const ctx=cv.getContext("2d",{willReadFrequently:true});
-  ctx.fillStyle="#fff"; ctx.fillRect(0,0,cv.width,cv.height); ctx.drawImage(img,a*W,b*H,sw,sh,0,0,cv.width,cv.height);
-  if(clean) cleanBW(ctx,cv.width,cv.height);
-  cv=trimWhite(cv);
-  if(!cv){ toast("That box looks empty. Drag it over the logo."); return; }
-  const src=cv.toDataURL("image/png"), id=slug(crop.brand), old=S.brands[id]||{};
-  const back=crop.back, brand=crop.brand; crop=null;
-  try{
-    await col("brands").doc(id).set({...old,name:old.name||brand,logo:src,logoW:cv.width,logoH:cv.height});
-    S.brands[id]={...old,id,name:old.name||brand,logo:src,logoW:cv.width,logoH:cv.height};
-    toast(brand+" logo saved.");
-  }catch(e){ fail(e,"That logo didn't save"); }
-  render();
+  const sw=Math.max(1,(c-a)*W), sh=Math.max(1,(d-b)*H), k=Math.min(1,1600/Math.max(sw,sh));
+  const cv=document.createElement("canvas"); cv.width=Math.round(sw*k); cv.height=Math.round(sh*k);
+  cv.getContext("2d",{willReadFrequently:true}).drawImage(img,a*W,b*H,sw,sh,0,0,cv.width,cv.height);
+  const brand=crop.brand, keep=await keepLogo(brand,cv,{from:"Your image"});
+  if(!keep){ toast("That box looks empty. Drag it over the logo."); return; }
+  crop=null; toast(brand+" logo saved."); render();
 }
-
+/* automatic logo lookup */
+const LD = {token:""};
+const siteFor = name => (S.brands[slug(name)]||{}).site || BRAND_SITES[String(name||"").trim().toLowerCase()] || "";
+const ldUrl = (name,size=800) => { if(!LD.token) return ""; const site=siteFor(name); const path=site?encodeURIComponent(site):"name/"+encodeURIComponent(name); return `https://img.logo.dev/${path}?token=${encodeURIComponent(LD.token)}&format=png&size=${size}&theme=light&greyscale=true&fallback=404`; };
+const logoCache = {};
+const logoData = b => { if(!b) return null; if(b.logo) return {src:b.logo,w:b.logoW,h:b.logoH,key:"logo-"+slug(b.name)}; return logoCache[slug(b.name)]||null; };
+const loadCross = url => new Promise((res,rej)=>{ const i=new Image(); i.crossOrigin="anonymous"; i.onload=()=>res(i); i.onerror=()=>rej(new Error("blocked")); i.src=url; });
+function inkCanvas(source,w,h){
+  const k=Math.min(1600/Math.max(w,h),1), c=document.createElement("canvas"); c.width=Math.max(1,Math.round(w*k)); c.height=Math.max(1,Math.round(h*k));
+  const ctx=c.getContext("2d",{willReadFrequently:true}); ctx.drawImage(source,0,0,c.width,c.height); blackLogo(ctx,c.width,c.height); return trimWhite(c);
+}
+async function svgInk(text){
+  const el=new DOMParser().parseFromString(text,"image/svg+xml").documentElement;
+  if(el.nodeName.toLowerCase()!=="svg") return null;
+  const vb=(el.getAttribute("viewBox")||"").trim().split(/[\s,]+/).map(Number);
+  const w=vb.length===4?vb[2]:parseFloat(el.getAttribute("width"))||100, h=vb.length===4?vb[3]:parseFloat(el.getAttribute("height"))||100, k=1600/Math.max(w,h);
+  el.setAttribute("width",w*k); el.setAttribute("height",h*k);
+  const img=await loadImg(new Blob([new XMLSerializer().serializeToString(el)],{type:"image/svg+xml"}));
+  return inkCanvas(img,w*k,h*k);
+}
+async function storeInk(brand,cv,extra){
+  const id=slug(brand), old=S.brands[id]||{name:brand};
+  const next={...old,name:old.name||brand,logo:cv.toDataURL("image/png"),logoW:cv.width,logoH:cv.height,logoFrom:extra.from};
+  delete next.logoLive; delete next.id;
+  await col("brands").doc(id).set(next); S.brands[id]={...next,id}; delete logoCache[id];
+  return true;
+}
+async function keepLogo(brand,source,extra){
+  const cv=inkCanvas(source,source.width||source.naturalWidth,source.height||source.naturalHeight);
+  return cv?storeInk(brand,cv,extra):false;
+}
+async function iconCandidate(name){
+  const s=ICON_SLUGS[String(name||"").trim().toLowerCase()]; if(!s) return null;
+  const r=await fetch(ICON_BASE+s+".svg").catch(()=>null); if(!r||!r.ok) return null;
+  return {kind:"svg",text:await r.text(),label:"Vector, Simple Icons"};
+}
+async function wikiCandidates(name){
+  const q=encodeURIComponent(`intitle:"${name}" intitle:logo`);
+  const r=await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrlimit=6&gsrsearch=${q}&prop=imageinfo&iiprop=url|mime&iiurlwidth=1600&format=json&origin=*`).catch(()=>null);
+  if(!r||!r.ok) return [];
+  const j=await r.json().catch(()=>null);
+  return Object.values(j?.query?.pages||{}).map(p=>p.imageinfo?.[0]).filter(i=>i&&/svg|png/.test(i.mime||"")).map(i=>({kind:"image",url:i.thumburl||i.url,label:/svg/.test(i.mime)?"Vector, Wikimedia":"PNG, Wikimedia"}));
+}
+async function findLogos(name){
+  const out=[], icon=await iconCandidate(name); if(icon) out.push(icon);
+  const ld=ldUrl(name); if(ld) out.push({kind:"live",url:ld,label:"PNG, Logo.dev"});
+  out.push(...await wikiCandidates(name));
+  return out;
+}
+async function useCandidate(name,c){
+  try{
+    if(c.kind==="svg"){ const cv=await svgInk(c.text); return cv?storeInk(name,cv,{from:c.label}):false; }
+    const img=await loadCross(c.url);
+    if(c.kind==="live"){
+      const id=slug(name), old=S.brands[id]||{name};
+      const next={...old,name:old.name||name,logoLive:true,logoFrom:c.label}; delete next.logo; delete next.logoW; delete next.logoH; delete next.id;
+      await col("brands").doc(id).set(next); S.brands[id]={...next,id};
+      const cv=inkCanvas(img,img.naturalWidth,img.naturalHeight);
+      if(cv) logoCache[id]={src:cv.toDataURL("image/png"),w:cv.width,h:cv.height,key:"logo-"+id};
+      return !!cv;
+    }
+    const cv=inkCanvas(img,img.naturalWidth,img.naturalHeight);
+    return cv?storeInk(name,cv,{from:c.label}):false;
+  }catch{ return false; }
+}
+/* quietly fills in a new manufacturer's logo from the sources that are an exact match */
+async function autoLogo(name){
+  const b=S.brands[slug(name)]; if(!name||(b&&(b.logo||b.logoLive))) return false;
+  const icon=await iconCandidate(name);
+  if(icon&&await useCandidate(name,icon)) return true;
+  const ld=ldUrl(name);
+  return ld?useCandidate(name,{kind:"live",url:ld}):false;
+}
+/* Logo.dev pictures are fetched fresh each time rather than stored */
+const loading=new Set();
+function ensureLogos(){
+  for(const b of Object.values(S.brands)){
+    const id=slug(b.name); if(!b.logoLive||b.logo||logoCache[id]||loading.has(id)||!LD.token) continue;
+    loading.add(id);
+    loadCross(ldUrl(b.name)).then(img=>{
+      const cv=inkCanvas(img,img.naturalWidth,img.naturalHeight);
+      if(cv){ logoCache[id]={src:cv.toDataURL("image/png"),w:cv.width,h:cv.height,key:"logo-"+id}; if(S.view==="stickers") render(); else if(S.view==="add"||S.view==="edit") formPreview(); }
+    }).catch(()=>{}).finally(()=>loading.delete(id));
+  }
+}
 /* import from Spool Reader */
 function parseImport(text){
   let j; try{ j=JSON.parse(text); }catch{ throw "That isn't a Spool Reader export."; }
@@ -1039,11 +1180,14 @@ async function runImport(){
   for(const [name,l] of Object.entries(Imp.logos)){
     if(!rows.some(r=>r.brand===name)||!l||!/^data:image\/png/.test(l.src||"")) continue;
     const id=slug(name), old=S.brands[id]||{};
-    col("brands").doc(id).set({...old,name:old.name||name,logo:l.src,logoW:l.w,logoH:l.h});
+    if(old.logo||old.logoLive) continue;
+    const next={...old,name:old.name||name,logo:l.src,logoW:l.w,logoH:l.h,logoFrom:"Spool Reader"}; delete next.id;
+    col("brands").doc(id).set(next); S.brands[id]={...next,id};
   }
   for(const r of rows){
     const base=lookup(r.brand,r.material), v=k=>num(r[k])??base[k];
-    const body={brand:r.brand,material:r.material,colour:r.colour||"",hex:hexOK(r.hex),finish:FINISH.includes(r.finish)?r.finish:"",netG:num(r.netG)||1000,tareG:num(r.tareG),dia:num(r.dia)||1.75,loc:Imp.loc||null,nMin:v("nMin"),nMax:v("nMax"),bMin:v("bMin"),bMax:v("bMax"),dT:v("dT"),dH:v("dH")};
+    const cols=colourList(r), pat=patternOf(r);
+    const body={brand:r.brand,material:r.material,colour:r.colour||"",hex:cols[0],colours:cols,pattern:pat,finish:FINISH.includes(r.finish)?r.finish:"",netG:num(r.netG)||1000,tareG:num(r.tareG),dia:num(r.dia)||1.75,loc:Imp.loc||null,nMin:v("nMin"),nMax:v("nMax"),bMin:v("bMin"),bMax:v("bMax"),dT:v("dT"),dH:v("dH")};
     const bId=slug(r.brand);
     if(!S.brands[bId]&&!Imp.logos[r.brand]) col("brands").doc(bId).set({name:r.brand,tareG:body.tareG||null});
     col("profiles").doc(profileId(r.brand,r.material)).set({brand:r.brand,material:r.material,nMin:body.nMin,nMax:body.nMax,bMin:body.bMin,bMax:body.bMax,dT:body.dT,dH:body.dH});
@@ -1053,14 +1197,29 @@ async function runImport(){
     }
   }
   saveConfig({lastId:last,imported:[...(S.settings.imported||[]).slice(-40),Imp.batch].filter(Boolean)});
+  for(const name of new Set(rows.map(r=>r.brand))) if(!Imp.logos[name]) autoLogo(name);
   Imp=null; toast(`Added ${total} spool${total===1?"":"s"}. Stickers are in the queue.`); go("stickers");
 }
 function stockExport(){
-  const spools=liveSpools().map(s=>({id:s.id,brand:s.brand,material:s.material,colour:s.colour||"",hex:s.hex||"",finish:s.finish||"",storage:locName(s.loc)}));
+  const spools=liveSpools().map(s=>({id:s.id,brand:s.brand,material:s.material,colour:s.colour||"",hex:colourList(s)[0],finish:s.finish||"",storage:locName(s.loc)}));
   return JSON.stringify({format:"spool-stock-list",version:1,exported:new Date().toISOString(),spools});
 }
 
 /* setup */
+let P=null; /* logo picker */
+function logoPanel(){
+  return `<div class="card" id="logoPanel"><h3>${esc(P.name)} logo</h3>
+    ${P.busy?`<div class="busy"><span class="spin"></span>Looking</div>`:P.items.length?`<div class="tiles">${P.items.map((c,i)=>`<button class="tile logoPick" data-act="logoUse" data-v="${i}"><img src="${esc(c.preview||c.url||"")}" alt="Option ${i+1}"><span>${esc(c.label)}</span></button>`).join("")}</div>`:`<p>Nothing found for ${esc(P.name)}. Upload a logo, or crop one in Spool Reader.</p>`}
+    <label class="field"><span>Manufacturer's website, if it's not found</span><input type="text" id="logoSite" autocapitalize="off" placeholder="example.com" value="${esc(siteFor(P.name))}"></label>
+    <div class="btns"><button class="btn" data-act="logoRetry">Search again</button><label class="btn" for="pickLogo" data-act="logoFor" data-v="${esc(P.name)}">Upload logo</label><button class="btn" data-act="logoClose">Close</button></div>
+  </div>`;
+}
+async function openPicker(name){
+  P={name,items:[],busy:true}; render();
+  const items=await findLogos(name);
+  for(const c of items) if(c.kind==="svg") c.preview="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(c.text);
+  if(P&&P.name===name){ P.items=items; P.busy=false; render(); }
+}
 function vSetup(){
   const rows=orderedLocs().map(l=>{const n=inLoc(l.id).length;return `<div class="setrow"><label class="field"><span>${esc(l.group&&l.group!==l.name?l.group:"Storage")}</span><input type="text" data-loc-name="${l.id}" value="${esc(l.name)}"></label><label class="field"><span>Holds</span><input type="number" inputmode="numeric" data-loc-cap="${l.id}" value="${esc(l.capacity??"")}"></label><button class="btn sm" data-act="locDel" data-v="${l.id}" ${n?"disabled":""} aria-label="Delete ${esc(l.name)}">Delete</button></div>`;}).join("");
   const bs=Object.values(S.brands).sort((a,b)=>a.name.localeCompare(b.name));
@@ -1071,8 +1230,12 @@ function vSetup(){
     <div class="btns"><button class="btn" data-act="printAllLocs">Queue all storage stickers</button></div>
   </div>
   <div class="card"><h2>Manufacturers and logos</h2>
-    ${bs.map(b=>`<div class="brandrow">${b.logo?`<img class="logo" src="${esc(b.logo)}" alt="${esc(b.name)} logo">`:`<span class="logo" style="display:grid;place-items:center;width:64px;color:#000;font-size:12px">No logo</span>`}<b>${esc(b.name)}</b><label class="btn sm" for="pickLogo" data-act="logoFor" data-v="${esc(b.name)}">${b.logo?"Change":"Add logo"}</label></div>`).join("")||"<p>Manufacturers appear here when you add a spool.</p>"}
+    ${bs.length?`<div class="btns"><button class="btn go" data-act="logosAll">Find missing logos</button></div>`:""}
+    ${bs.map(b=>{const l=logoData(b);return `<div class="brandrow">${l?`<img class="logo" src="${esc(l.src)}" alt="${esc(b.name)} logo">`:`<span class="logo" style="display:grid;place-items:center;width:64px;color:#000;font-size:12px">No logo</span>`}<span style="min-width:0"><b>${esc(b.name)}</b>${b.logoFrom?`<br>${esc(b.logoFrom)}`:""}</span><button class="btn sm" data-act="logoFind" data-v="${esc(b.name)}">${l?"Change":"Find logo"}</button></div>`;}).join("")||"<p>Manufacturers appear here when you add a spool.</p>"}
     ${crop?cropHTML():""}
+    ${P?logoPanel():""}
+    <label class="field"><span>Logo.dev publishable key (optional, for brands the free sources don't have)</span><input type="text" id="ldKey" autocapitalize="off" autocomplete="off" value="${esc(LD.token)}"></label>
+    <div class="btns"><button class="btn" data-act="ldSave">Save key</button></div>
   </div>
   <div class="card"><h2>Spool Reader</h2><p>Reads labels and identifies spools from photos. Give it your stock list so it can check against what you own.</p>
     <div class="btns">${CFG.readerUrl?`<a class="btn" href="${esc(CFG.readerUrl)}" target="_blank" rel="noopener">Open Spool Reader</a>`:""}<button class="btn" data-act="listCopy">Copy stock list</button><button class="btn" data-act="listSave">Download stock list</button><button class="btn" data-go="import">Import spools</button></div>
@@ -1103,6 +1266,23 @@ const actions={
   importPaste(){ try{ Imp=parseImport($("#importText").value); render(); }catch(m){ const n=$("#importErr"); n.hidden=false; n.textContent=m; } },
   importGo(){ const l=$("#importLoc"); Imp.loc=l?l.value:""; runImport(); },
   importCancel(){ Imp=null; render(); },
+  logoFind(el){ openPicker(el.dataset.v); },
+  logoClose(){ P=null; render(); },
+  async logoUse(el){
+    const c=P.items[+el.dataset.v], name=P.name; const ok=await useCandidate(name,c);
+    if(ok){ P=null; toast(name+" logo saved."); render(); } else toast("That image wouldn't load here. Try another, or save it and upload it.");
+  },
+  async logoRetry(){
+    const site=$("#logoSite").value.trim().replace(/^https?:\/\//,"").replace(/\/.*$/,""), id=slug(P.name), old=S.brands[id];
+    if(old&&site){ const next={...old,site}; delete next.id; await col("brands").doc(id).set(next); S.brands[id]={...next,id}; }
+    openPicker(P.name);
+  },
+  async logosAll(){
+    const todo=Object.values(S.brands).filter(b=>!logoData(b)); let n=0;
+    for(const b of todo) if(await autoLogo(b.name)) n++;
+    const left=todo.length-n; toast(left?`Found ${n}. ${left} still need one, so press Find logo on those.`:`Found ${n}.`); render();
+  },
+  ldSave(){ LD.token=$("#ldKey").value.trim(); db.doc("private/keys").set({logodev:LD.token}); document.activeElement?.blur(); toast("Saved."); },
   async listCopy(){ try{ await navigator.clipboard.writeText(stockExport()); toast("Stock list copied."); }catch{ toast("Couldn't copy here. Use Download instead."); } },
   listSave(){ saveFile("spool-stock-list.json",stockExport()); },
   camStart(){ Scanner.start(); },
@@ -1130,7 +1310,9 @@ const actions={
     ask(`Delete ${s.id.toUpperCase()}?`,"This removes it completely. If it has just run out, Mark used up keeps the record.",[["Delete",async()=>{ await col("spools").doc(s.id).delete(); toast("Deleted."); go("stock"); },"bad"],["Cancel",null]]);
   },
   delExamples(){ ask("Delete the examples?","Your own spools are not touched.",[["Delete",async()=>{ for(const s of Object.values(S.spools)) if(s.example) await col("spools").doc(s.id).delete(); toast("Examples deleted."); },"bad"],["Cancel",null]]); },
-  hex(el){ F.hex=el.dataset.v; F.hexTouched=true; const h=$("#f_hex"); if(h) h.value=F.hex; formPreview(); },
+  hex(el){ F.hex=el.dataset.v; F.colours[0]=F.hex; F.hexTouched=true; const h=$("#f_hex"); if(h) h.value=F.hex; formPreview(); },
+  colourAdd(){ readForm(); F.colours.push("#FFFFFF"); $("#colourRow").innerHTML=colourRow(); formPreview(); },
+  colourDrop(){ readForm(); F.colours.pop(); $("#colourRow").innerHTML=colourRow(); formPreview(); },
   logoFor(el){ pendingLogo=el.dataset.v; },
   codeGo(){ const c=parseCode($("#codeIn").value); if(c) handleScan(c,"code"); else toast("Codes look like S0012."); },
   pick(el){ if(el.checked) Q.skip.delete(el.dataset.v); else Q.skip.add(el.dataset.v); render(); },
@@ -1186,20 +1368,23 @@ document.addEventListener("change",async e=>{
   if(t.dataset&&t.dataset.imp!=null&&Imp){ const it=Imp.items.find(i=>String(i.key)===t.dataset.imp); if(it) it.on=t.checked; const l=$("#importLoc"); Imp.loc=l?l.value:""; render(); return; }
   if(t.id==="pickLogo"&&t.files[0]){
     const f=t.files[0]; t.value=""; if(S.view==="add"||S.view==="edit") readForm();
+    if(/svg/.test(f.type)){ const cv=await svgInk(await f.text()).catch(()=>null); if(cv&&await storeInk(pendingLogo,cv,{from:"Your vector"})){ P=null; toast(pendingLogo+" logo saved."); render(); } else toast("That vector file wouldn't open."); return; }
     const img=await loadImg(f), c=toCanvas(img,1600), blob=await canvasBlob(c,"image/png");
-    openCrop(URL.createObjectURL(blob),c.width,c.height,pendingLogo||"Logo",[0,0,1,1],S.view); render(); return;
+    P=null; openCrop(URL.createObjectURL(blob),c.width,c.height,pendingLogo||"Logo",[0,0,1,1],S.view); render(); return;
   }
 });
 document.addEventListener("input",e=>{
   const t=e.target;
+  if(t.dataset&&t.dataset.colour&&F){ F.colours[+t.dataset.colour]=t.value; formPreview(); return; }
   if(t.id==="q"){ S.filter.q=t.value; const box=$("#spoolList"); if(box) box.innerHTML=stockRows(); return; }
   if(t.id&&t.id.startsWith("f_")&&F){
     readForm();
     if(["f_nMin","f_nMax","f_bMin","f_bMax","f_dT","f_dH"].includes(t.id)){ F.touched=true; F.src="edited"; formPreview(); }
     else if(t.id==="f_hex"){ F.hexTouched=true; formPreview(); }
+    else if(t.id==="f_pattern"){ if(F.pattern!=="solid"&&F.colours.length<2) F.colours.push("#FFFFFF"); $("#colourRow").innerHTML=colourRow(); formPreview(); }
     else if(t.id==="f_colour"){
       const n=F.hexTouched?null:NAMED.find(([re])=>re.test(F.colour));
-      if(n){ F.hex=n[1]; const h=$("#f_hex"); if(h) h.value=n[1]; }
+      if(n){ F.hex=n[1]; F.colours[0]=n[1]; const h=$("#f_hex"); if(h) h.value=n[1]; }
       formPreview();
     }
     else if(t.id==="f_brand"||t.id==="f_material"){ if(F.src==="edited"||F.src==="label"){ F.touched=false; } refreshLookup(); }
