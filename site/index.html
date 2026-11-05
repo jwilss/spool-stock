@@ -438,7 +438,7 @@ function watch(){
     if(seen.size>=4){ clearTimeout(timer); S.stale=false; }
     if(key==="locs"&&snap.empty&&!snap.metadata.fromCache) seedStorages();
     S.ready=1; dataChanged();
-  },e=>{ clearTimeout(timer); toast("Lost the link to your stock. Reload the page."); });
+  },e=>{ clearTimeout(timer); S.loadErr=(e&&e.code)||"unknown"; if(S.ready) toast("Lost the link to your stock. Reload the page."); else render(); });
   sub("spools","spools"); sub("locations","locs"); sub("brands","brands"); sub("profiles","profiles");
   db.doc("config/main").onSnapshot(d=>{ S.settings=d.exists?{...d.data()}:{}; dataChanged(); },()=>{});
 }
@@ -572,7 +572,8 @@ function render(){
   });
   const m=$("#main");
   if(S.view!=="scan") Scanner.stop();
-  if(!db){ m.innerHTML=!CFG.firebase?SOURCE_NOTE:!started?`<div class="busy"><span class="spin"></span>Opening your stock</div>`:vLogin(); return; }
+  if(!db){ m.innerHTML=!CFG.firebase?SOURCE_NOTE:!started?`<div class="busy"><span class="spin"></span>Starting up</div>`:vLogin(); return; }
+  if(!S.ready&&S.loadErr){ m.innerHTML=`<div class="card"><h2>Can't open your stock</h2><p>${S.loadErr==="permission-denied"?"Firebase refused access. Open Firestore in the Firebase console, go to the Rules tab, paste in firestore.rules and press Publish, then reload this page.":"Firebase gave an error, so reload the page. If it keeps happening, tell Claude this code."}</p><p class="mono">${esc(S.loadErr)}</p></div>`; return; }
   if(!S.ready){ m.innerHTML=S.stale?`<div class="note warn">Can't reach your stock yet. Check your signal, it will load when it connects.</div>`:`<div class="busy"><span class="spin"></span>Opening your stock</div>`; return; }
   const v={stock:vStock,add:vForm,edit:vForm,scan:vScan,stickers:vStickers,setup:vSetup,spool:vSpool,loc:vLoc,import:vImport}[S.view]||vStock;
   m.innerHTML=(!navigator.onLine?`<div class="note warn">No signal. Changes are kept on this device and sync when you're back.</div>`:S.stale?`<div class="note warn">Showing your last saved copy. It may be out of date.</div>`:"")+v();
@@ -1244,8 +1245,8 @@ document.addEventListener("pointerdown",e=>{
   firebase.initializeApp(CFG.firebase);
   fs=firebase.firestore();
   try{ fs.settings({ignoreUndefinedProperties:true}); }catch{}
-  try{ await fs.enablePersistence({synchronizeTabs:true}); }catch{}
-  started=true;
+  try{ await Promise.race([fs.enablePersistence({synchronizeTabs:true}),new Promise(res=>setTimeout(res,4000))]); }catch{}
+  started=true; render();
   firebase.auth().onAuthStateChanged(u=>{
     if(!u){ uid=null; db=null; render(); return; }
     if(uid===u.uid) return;
