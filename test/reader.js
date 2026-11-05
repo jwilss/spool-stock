@@ -1,5 +1,5 @@
 const {chromium}=require('playwright');const fs=require('fs');const http=require('http');
-const raw=fs.readFileSync('/home/claude/spool/reader/spool-reader.html','utf8');
+const raw=fs.readFileSync(require('path').resolve(__dirname,'../reader/spool-reader.html'),'utf8');
 const skel=`<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style></head><body>${raw}</body></html>`;
 const srv=http.createServer((q,r)=>{r.setHeader('content-type','text/html');r.end(skel)}).listen(8767);
 const out=__dirname+'/out';const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)process.exitCode=1};
@@ -11,7 +11,7 @@ const out=__dirname+'/out';const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);i
  const png=out+'/label.png';
  await p.goto('http://localhost:8767/');await p.waitForSelector('#readDrop');
  await p.screenshot({path:out+'/reader-start.png',fullPage:true});
- await p.evaluate(()=>{window.__queue=[{brand:'Testbrand',material:'ASA Aero',colourName:'Sand',colourHex:'#D9C7A0',finish:'Matte',nozzleMin:250,nozzleMax:265,weightG:750,logoBox:[.05,.35,.95,.65],note:'Check the weight.'},{brand:null,material:'PETG HF',colourName:'Blue',colourHex:'#0057B8'}]});
+ await p.evaluate(()=>{window.__queue=[{brand:'Testbrand',material:'ASA Aero',colourName:'Sand',colourHex:'#D9C7A0',finish:'Matte',nozzleMin:250,nozzleMax:265,weightG:750,logoBox:[.05,.35,.95,.65],note:'Check the weight.'},{brand:null,material:'PLA Silk Tri',colourName:'Sunset',colourHex:'#E8541E',colours:['#E8541E','#7A1FA2','#1F6FE8'],pattern:'gradient'}]});
  await p.setInputFiles('#pickRead',[png,png]);await p.waitForFunction(()=>document.querySelectorAll('.thumbs img').length===2);
  ok((await p.textContent('[data-act=read]')).includes('Read 2 photos'),'two photos queued');
  await p.click('[data-act=read]');await p.waitForSelector('#cropBox');
@@ -25,7 +25,7 @@ const out=__dirname+'/out';const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);i
  await p.click('[data-act=download]');await p.waitForFunction(()=>window.__saved.length>0);
  const f=await p.evaluate(()=>window.__saved[0]);ok(f.filename==='spool-import.json','file named');
  const text=typeof f.bin==='string'?f.bin:'';fs.writeFileSync(out+'/reader-export.json',text);
- const j=JSON.parse(text);ok(j.format==='spool-stock-import'&&j.spools.length===2&&j.spools[0].qty===2&&j.logos.Testbrand&&!('thumb' in j.spools[0]),'export file shape');
+ const j=JSON.parse(text);ok(j.format==='spool-stock-import'&&j.spools.length===2&&j.spools[0].qty===2&&j.logos.Testbrand&&!('thumb' in j.spools[0])&&j.spools[1].pattern==='gradient'&&j.spools[1].colours.length===3,'export file shape');
  await p.reload();await p.waitForSelector('#tabs button');await p.waitForTimeout(200);ok((await p.textContent('#tabs')).includes('To export (2)'),'work survives a reload');
 
  // identify

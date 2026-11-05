@@ -10,6 +10,7 @@ Filament stock for Alduin (left P1S, fed by the Space Pi Plus) and Betsy (right 
 - `wrappers/windows/`: Electron shell around the site.
 - `.github/workflows/`: `site.yml` publishes the site, `apps.yml` builds the APK and exe.
 - `firestore.rules`: keeps each account to its own data.
+- `docs/`: images for the README, made with `test/shots.js`.
 - `test/`: `run.js` for the app, `reader.js` for Spool Reader. Both use stand-ins for Firebase and Claude.
 - `SETUP.md`: first time setup.
 
@@ -21,7 +22,8 @@ Filament stock for Alduin (left P1S, fed by the Space Pi Plus) and Betsy (right 
 - The Scan page runs a live camera: scan a spool, then a storage. A phone's normal camera also works through the link.
 - Spool Reader keeps its own list and hands spools over as a `spool-stock-import` JSON file. Spool Stock hands its stock back as a `spool-stock-list` file.
 - Print settings start from Bambu Lab's filament table, then the label, then your edits, remembered per filament.
-- Logos come from your own photos or files.
+- Logos are looked up by the app: Simple Icons for exact vector matches, Wikimedia Commons as choices, Logo.dev with an optional key. All are turned solid black on transparent. Logo.dev pictures are fetched fresh rather than stored.
+- Stickers are black except for the colour box: solid, triangles for split colours, or a left to right blend for gradients.
 
 ## Done
 
@@ -34,6 +36,8 @@ Filament stock for Alduin (left P1S, fed by the Space Pi Plus) and Betsy (right 
 - [x] Works with no signal
 - [x] CSV and JSON download
 - [x] Spool Reader: batch label reading, logo cropping, identify against stock
+- [x] Automatic logo lookup
+- [x] Black stickers with split and gradient colour boxes
 
 ## Check on first use
 
@@ -43,6 +47,8 @@ Filament stock for Alduin (left P1S, fed by the Space Pi Plus) and Betsy (right 
 - [ ] Sticker alignment on a test sheet
 - [ ] Stickers scanning once stuck to a spool
 - [ ] Real label photos in Spool Reader
+- [ ] Logo lookup against the real services
+- [ ] Colour box on real printed stickers
 
 ## Next
 

@@ -45,6 +45,18 @@ Spool Reader is the separate Claude artifact for photos. It's linked in Setup.
 2. **Download file** or **Copy** there, then in Spool Stock use **Add > Import from Spool Reader**.
 3. **Identify:** in Spool Stock use **Setup > Copy stock list**, then load it in Spool Reader's Identify tab.
 
+## Logos
+
+Logos are found for you when you add a manufacturer. Bambu Lab, Creality, Elegoo, Anycubic and Flashforge come through automatically as vectors. For others, open **Setup**, press **Find logo** and pick one.
+
+For the brands those sources miss, such as eSUN, Polymaker or SUNLU, add a free Logo.dev key:
+
+1. Sign up at https://www.logo.dev and copy your **publishable** key (it starts with `pk_`).
+2. Paste it under **Setup > Manufacturers and logos** and press **Save key**.
+3. Press **Find missing logos**.
+
+You can also upload your own SVG or PNG. Every logo is turned solid black on transparent.
+
 ## Printing stickers
 
 Print from a PC or a browser, at 100% or Actual size. Do a test on plain paper first using the outlines option.
