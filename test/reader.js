@@ -1,0 +1,45 @@
+const {chromium}=require('playwright');const fs=require('fs');const http=require('http');
+const raw=fs.readFileSync('/home/claude/spool/reader/spool-reader.html','utf8');
+const skel=`<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style></head><body>${raw}</body></html>`;
+const srv=http.createServer((q,r)=>{r.setHeader('content-type','text/html');r.end(skel)}).listen(8767);
+const out=__dirname+'/out';const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)process.exitCode=1};
+(async()=>{
+ const b=await chromium.launch();const ctx=await b.newContext({viewport:{width:400,height:820}});
+ await ctx.addInitScript({path:__dirname+'/mock-claude.js'});await ctx.route(/fonts\.g/,r=>r.abort());
+ const pg=await ctx.newPage();await pg.setContent('<div id=a style="width:800px;height:600px;background:#fff;display:grid;place-items:center;font:700 70px Arial">TESTBRAND</div>');await pg.locator('#a').screenshot({path:out+'/label.png'});await pg.close();
+ const p=await ctx.newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));p.on('console',m=>{if(m.type()==='error'&&!/fonts|ERR_FAILED/.test(m.text()))errs.push(m.text())});
+ const png=out+'/label.png';
+ await p.goto('http://localhost:8767/');await p.waitForSelector('#readDrop');
+ await p.screenshot({path:out+'/reader-start.png',fullPage:true});
+ await p.evaluate(()=>{window.__queue=[{brand:'Testbrand',material:'ASA Aero',colourName:'Sand',colourHex:'#D9C7A0',finish:'Matte',nozzleMin:250,nozzleMax:265,weightG:750,logoBox:[.05,.35,.95,.65],note:'Check the weight.'},{brand:null,material:'PETG HF',colourName:'Blue',colourHex:'#0057B8'}]});
+ await p.setInputFiles('#pickRead',[png,png]);await p.waitForFunction(()=>document.querySelectorAll('.thumbs img').length===2);
+ ok((await p.textContent('[data-act=read]')).includes('Read 2 photos'),'two photos queued');
+ await p.click('[data-act=read]');await p.waitForSelector('#cropBox');
+ ok((await p.textContent('#tabs')).includes('To export (2)'),'both spools listed');
+ await p.screenshot({path:out+'/reader-crop.png',fullPage:true});
+ await p.click('[data-act=cropSave]');await p.waitForSelector('img.logo');ok(true,'logo cropped');
+ await p.click('[data-act=download]');await p.waitForFunction(()=>document.querySelector('#toast').textContent.includes('manufacturer and material'));ok(true,'export blocked until every spool has a maker');
+ const bf=p.locator('input[data-f=brand]').nth(1);await bf.fill('eSUN');await bf.blur();await p.waitForTimeout(100);
+ const q=p.locator('input[data-f=qty]').first();await q.fill('2');await q.blur();await p.waitForTimeout(100);
+ await p.screenshot({path:out+'/reader-export.png',fullPage:true});
+ await p.click('[data-act=download]');await p.waitForFunction(()=>window.__saved.length>0);
+ const f=await p.evaluate(()=>window.__saved[0]);ok(f.filename==='spool-import.json','file named');
+ const text=typeof f.bin==='string'?f.bin:'';fs.writeFileSync(out+'/reader-export.json',text);
+ const j=JSON.parse(text);ok(j.format==='spool-stock-import'&&j.spools.length===2&&j.spools[0].qty===2&&j.logos.Testbrand&&!('thumb' in j.spools[0]),'export file shape');
+ await p.reload();await p.waitForSelector('#tabs button');await p.waitForTimeout(200);ok((await p.textContent('#tabs')).includes('To export (2)'),'work survives a reload');
+
+ // identify
+ await p.click('[data-tab=identify]');await p.waitForSelector('#identDrop');
+ await p.setInputFiles('#pickStock',out+'/spool-stock-list.json');await p.waitForFunction(()=>document.querySelector('#stockLine').textContent.includes('spools loaded'));ok(true,'stock list loads from the main app file');
+ await p.evaluate(()=>{window.__queue=[{read:['ASA'],matches:[{id:'s0002',confidence:82,why:'Same colour.'},{id:'nope',confidence:40,why:'x'}],bestGuess:{brand:'Polymaker',material:'TPU',colourName:'White',colourHex:'#F4F4F2',confidence:70},reasoning:'Hub fits.',checks:['Weigh it']}]});
+ await p.setInputFiles('#pickIdent',png);await p.waitForSelector('.thumbs img');await p.click('[data-act=identify]');await p.waitForSelector('.match');
+ const s=await p.evaluate(()=>window.__samples.at(-1));ok(s.prompt.includes('s0002 | Polymaker | TPU 95A'),'checks against the stock list');ok((await p.$$('.match')).length===1,'made-up codes dropped');
+ await p.screenshot({path:out+'/reader-identify.png',fullPage:true});
+ await p.click('[data-act=refKeep]');await p.waitForTimeout(100);
+ await p.evaluate(()=>{window.__queue=[{read:[],matches:[],bestGuess:{brand:'X',material:'PLA',confidence:50}}]});await p.click('[data-act=identify]');await p.waitForFunction(()=>window.__samples.length>=2);await p.waitForTimeout(200);
+ ok((await p.evaluate(()=>window.__samples.at(-1).images))===2,'kept photo sent next time');
+ await p.evaluate(()=>{window.__sampleErr={code:'not_granted'}});await p.click('[data-act=identify]');await p.waitForFunction(()=>document.querySelector('#view').textContent.includes('Permissions menu'));ok(true,'consent refusal explained');
+ await p.emulateMedia({colorScheme:'dark'});await p.screenshot({path:out+'/reader-dark.png',fullPage:true});
+ const w=await p.evaluate(()=>[document.documentElement.scrollWidth,innerWidth]);ok(w[0]<=w[1],'no sideways scroll');
+ console.log('errors',errs);ok(!errs.length,'no page errors');await b.close();srv.close();
+})().catch(e=>{console.error(e);process.exit(1)});
