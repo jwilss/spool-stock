@@ -1,0 +1,439 @@
+<title>Spool Reader</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: one column workbench. Same workshop look as Spool Stock: photo goes in at the top, editable spool cards come out below, yellow marks the action. */
+:root{
+  --bg:#E8ECEE; --panel:#F8FAFB; --panel2:#DFE5E8; --ink:#161C20; --muted:#55626A; --line:#C4CED3;
+  --tag:#FFC800; --tag-ink:#161C20; --warn:#A85600; --bad:#B3261E;
+  --disp:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Barlow","Helvetica Neue",Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#101518; --panel:#192126; --panel2:#232D33; --ink:#E9EFF2; --muted:#9BA9B1; --line:#303C43; --warn:#F0A94B; --bad:#F2857C; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#101518; --panel:#192126; --panel2:#232D33; --ink:#E9EFF2; --muted:#9BA9B1; --line:#303C43; --warn:#F0A94B; --bad:#F2857C; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.45 var(--body)}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3{font-family:var(--disp);font-weight:700;letter-spacing:.01em;line-height:1.1;margin:0;text-wrap:balance}
+h1{font-size:30px}h2{font-size:22px}h3{font-size:18px}
+p{margin:0}
+.wrap{max-width:820px;margin-inline:auto;width:100%;padding-block:14px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:14px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.brand{font:700 21px/1 var(--disp);letter-spacing:.05em;text-transform:uppercase;background:var(--tag);color:var(--tag-ink);padding:5px 9px 4px}
+.tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border:1px solid var(--line);background:var(--panel)}
+.tabs button{background:none;border:0;padding:10px 4px;font:600 18px/1 var(--disp);letter-spacing:.02em;cursor:pointer;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--bg)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:9px 14px;border:1px solid var(--line);background:var(--panel);font-weight:600;cursor:pointer;text-align:center;border-radius:2px}
+.btn.go{background:var(--tag);color:var(--tag-ink);border-color:var(--tag)}
+.btn.bad{color:var(--bad);border-color:var(--bad);background:none}
+.btn.sm{min-height:36px;padding:5px 10px;font-size:15px}
+.btn:disabled{opacity:.5;cursor:default}
+.btn:focus-visible,.tabs button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+.card{background:var(--panel);border:1px solid var(--line);padding:14px;display:grid;gap:12px;min-width:0}
+.field{display:grid;gap:4px;min-width:0}
+.field>span{font-size:14px;font-weight:600;color:var(--muted)}
+input[type=text],input[type=number],select,textarea{width:100%;min-height:44px;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:2px;min-width:0}
+input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border:1px solid var(--line);border-radius:2px;flex:none}
+.g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:end}
+.g4{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:end}
+@media (min-width:560px){.g4{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.drop{display:grid;justify-items:center;gap:4px;padding:22px 12px;border:2px dashed var(--line);background:var(--bg);text-align:center;cursor:pointer}
+.drop.over{border-color:var(--ink)}
+.thumbs{display:flex;flex-wrap:wrap;gap:6px}
+.thumbs img{width:84px;height:84px;object-fit:cover;border:1px solid var(--line)}
+.head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}
+.head img.t{width:56px;height:56px;object-fit:cover;border:1px solid var(--line)}
+.head .swatch{width:56px;height:56px;border:1px solid var(--line)}
+.logo{height:34px;max-width:120px;object-fit:contain;background:#fff;padding:2px;border:1px solid var(--line)}
+.note{border-left:4px solid var(--tag);background:var(--panel);padding:9px 12px}
+.note.warn{border-left-color:var(--warn)}
+.busy{display:flex;gap:10px;align-items:center;font-weight:600;flex-wrap:wrap}
+.spin{width:18px;height:18px;border:3px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+.match{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);padding:8px 10px;background:var(--bg)}
+.score{font:700 24px/1 var(--disp)}
+.mono{font-family:var(--mono)}
+.spec{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px;margin:0}
+.spec dt{font-size:14px;font-weight:600;color:var(--muted)}
+.spec dd{margin:0}
+.crop{position:relative;touch-action:none;user-select:none;line-height:0}
+.crop img{width:100%;height:auto;display:block;pointer-events:none}
+.crop i{position:absolute;border:2px solid var(--tag);box-shadow:0 0 0 2000px rgba(0,0,0,.45);pointer-events:none}
+.cropwrap{overflow:hidden}
+.tick{display:flex;gap:10px;align-items:center}
+.tick input{width:22px;height:22px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:40;background:var(--ink);color:var(--bg);padding:10px 12px;max-width:calc(100% - 32px);width:max-content;font-weight:500}
+</style>
+
+<div class="wrap">
+  <div class="top"><span class="brand">Spool Reader</span><span id="stockLine"></span></div>
+  <div class="tabs" role="tablist" id="tabs"></div>
+  <div id="view" style="display:grid;gap:14px"><div class="busy"><span class="spin"></span>Opening</div></div>
+</div>
+<div class="toast" id="toast" hidden></div>
+<input type="file" id="pickRead" accept="image/*" multiple hidden>
+<input type="file" id="pickIdent" accept="image/*" multiple hidden>
+<input type="file" id="pickLogo" accept="image/*" hidden>
+<input type="file" id="pickStock" accept=".json,application/json,text/plain" hidden>
+
+<script>
+"use strict";
+const FINISH=["","Matte","Glossy","Silk","Translucent","Sparkle","Marble","Dual colour"];
+const LABEL_PROMPT=`This photo shows a 3D printer filament spool, its box or its label, for my own stock list. Read it.
+Report only what the photo shows. Use null for anything you can't see. Don't guess print temperatures.
+Reply with only one JSON object:
+{"brand":string|null,"material":string|null (the full product name as printed, such as "PETG HF" or "PLA Silk+"),"colourName":string|null,"colourHex":"#rrggbb"|null (your estimate of the filament colour),"finish":"Matte"|"Glossy"|"Silk"|"Translucent"|"Sparkle"|"Marble"|"Dual colour"|null,"nozzleMin":number|null,"nozzleMax":number|null,"bedMin":number|null,"bedMax":number|null,"dryTemp":number|null,"dryHours":number|null,"weightG":number|null,"diameter":number|null,"logoBox":[x0,y0,x1,y1]|null (the manufacturer's logo as fractions 0 to 1 of image width and height),"note":string|null (one short sentence if something needs checking)}`;
+
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const slug=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"x";
+const num=v=>{const n=parseFloat(v);return Number.isFinite(n)?n:null;};
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const hexOK=h=>/^#[0-9a-f]{6}$/i.test(h||"")?h:"#9AA5AB";
+const local={get(k){try{return JSON.parse(localStorage.getItem(k));}catch{return null;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}};
+
+let db=null,sample=null,downloads=null,canRead=false,maxImages=4,started=false,ctl=null;
+const S={tab:local.get("tab")||"read",pending:{},logos:{},stock:null,ready:false};
+const R={files:[],busy:false,done:0,err:""};
+const I={photos:[],busy:false,result:null,err:""};
+const photoFor={}; // spool id or brand slug to the photo it came from, kept for this visit only
+let crop=null,toastT=null;
+
+function toast(m){const t=$("#toast");t.hidden=false;t.textContent=m;clearTimeout(toastT);toastT=setTimeout(()=>{t.hidden=true;},4500);}
+const fail=(e,what)=>toast(e&&e.code==="quota_exceeded"?`${what}: the store is full. Clear the export list first.`:`${what}. Check your signal and try again.`);
+const sampleErr=e=>({
+  not_granted:"Photo reading needs your OK to use Claude here. You can turn it on from this page's Permissions menu.",
+  sampling_disabled:"Claude isn't available on this account.",
+  rate_limited:"You've hit a usage limit. Try again in a while.",
+  session_expired:"Sign in to Claude again, then retry.",
+  image_rejected:"That photo couldn't be used. Try a JPEG or PNG.",
+  refused:"Claude wouldn't read that photo. Try a different one.",
+  invalid_json:"The answer came back garbled. Try again.",
+  images_unavailable:"Photos can't be sent from this view.",
+  cancelled:"",
+}[e&&e.code]??"Couldn't reach Claude. Check your signal and try again.");
+
+/* images */
+const loadImg=b=>new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=b instanceof Blob?URL.createObjectURL(b):b;});
+function toCanvas(img,max){
+  const k=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+  const c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*k);c.height=Math.round(img.naturalHeight*k);
+  c.getContext("2d",{willReadFrequently:true}).drawImage(img,0,0,c.width,c.height);return c;
+}
+const canvasBlob=(c,type="image/jpeg",q=.85)=>new Promise(r=>c.toBlob(r,type,q));
+const dataToBlob=src=>{const [h,b]=src.split(","),bin=atob(b),a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);return new Blob([a],{type:(h.match(/:(.*?);/)||[])[1]||"image/jpeg"});};
+function avgColour(c){
+  const ctx=c.getContext("2d"),w=c.width,h=c.height,d=ctx.getImageData(w*.15|0,h*.15|0,w*.7|0,h*.7|0).data;
+  let r=0,g=0,b=0,t=0;
+  for(let i=0;i<d.length;i+=40){const R=d[i],G=d[i+1],B=d[i+2],wt=(Math.max(R,G,B)-Math.min(R,G,B))+12;r+=R*wt;g+=G*wt;b+=B*wt;t+=wt;}
+  return [r/t,g/t,b/t];
+}
+const hexRGB=h=>{const v=parseInt(hexOK(h).slice(1),16);return [v>>16,(v>>8)&255,v&255];};
+async function prep(file){
+  const img=await loadImg(file),c=toCanvas(img,1600),blob=await canvasBlob(c);
+  return {blob,url:URL.createObjectURL(blob),thumb:toCanvas(img,160).toDataURL("image/jpeg",.6)};
+}
+
+/* views */
+function render(){
+  const n=Object.keys(S.pending).length;
+  $("#tabs").innerHTML=[["read","Read labels"],["identify","Identify"],["export",`To export (${n})`]].map(([k,t])=>`<button role="tab" data-tab="${k}" aria-selected="${S.tab===k}">${t}</button>`).join("");
+  $("#stockLine").textContent=S.stock?`${S.stock.spools.length} spools loaded`:"";
+  const v=$("#view");
+  if(!started){ v.innerHTML=`<div class="busy"><span class="spin"></span>Opening</div>`; return; }
+  if(!db){ v.innerHTML=`<div class="note warn">Open this page signed in to Claude to save your work.</div>`; }
+  else v.innerHTML="";
+  v.innerHTML+=(crop?vCrop():"")+({read:vRead,identify:vIdentify,export:vExport}[S.tab]||vRead)();
+  if(crop) drawCrop();
+}
+const noRead=()=>canRead?"":`<div class="note warn">Photo reading needs Claude, so open this page in Claude while signed in.</div>`;
+function vRead(){
+  const c=R.files.length;
+  return `${noRead()}<div class="card">
+    <h2>Read labels</h2>
+    <label class="drop" for="pickRead" id="readDrop"><b>Add label photos</b><span>One spool per photo. Take several and do them in one go.</span></label>
+    ${c?`<div class="thumbs">${R.files.map(p=>`<img src="${p.url}" alt="Label photo">`).join("")}</div>`:""}
+    <div class="btns"><button class="btn go" data-act="read" ${c&&!R.busy&&canRead?"":"disabled"}>Read ${c||""} photo${c===1?"":"s"}</button>${c&&!R.busy?`<button class="btn" data-act="readClear">Clear</button>`:""}${R.busy?`<button class="btn" data-act="stop">Stop</button>`:""}</div>
+    ${R.busy?`<div class="busy"><span class="spin"></span>Reading ${R.done+1} of ${c}</div>`:""}
+    ${R.err?`<div class="note warn">${esc(R.err)}</div>`:""}
+  </div>
+  ${Object.keys(S.pending).length?`<div class="btns"><button class="btn" data-tab="export">Check and export ${Object.keys(S.pending).length}</button></div>`:""}`;
+}
+function vIdentify(){
+  const r=I.result;
+  return `${noRead()}${vStock()}<div class="card">
+    <h2>Identify a spool</h2>
+    <label class="drop" for="pickIdent" id="identDrop"><b>Add photos of the spool</b><span>The side, the hub, any label, and the filament in good light.</span></label>
+    ${I.photos.length?`<div class="thumbs">${I.photos.map(p=>`<img src="${p.url}" alt="Spool photo">`).join("")}</div>`:""}
+    <div class="btns"><button class="btn go" data-act="identify" ${I.photos.length&&!I.busy&&canRead?"":"disabled"}>Check this spool</button>${I.photos.length?`<button class="btn" data-act="identClear">Clear</button>`:""}${I.busy?`<button class="btn" data-act="stop">Stop</button>`:""}</div>
+    ${I.busy?`<div class="busy"><span class="spin"></span>Comparing. This can take a minute.</div>`:""}
+    ${I.err?`<div class="note warn">${esc(I.err)}</div>`:""}
+  </div>${r?vResult(r):""}`;
+}
+function vStock(){
+  if(S.stock) return `<div class="card"><div class="head" style="grid-template-columns:minmax(0,1fr) auto"><span>Checking against ${S.stock.spools.length} spools from Spool Stock.</span><label class="btn sm" for="pickStock">Update</label></div></div>`;
+  return `<div class="card"><h3>Load your stock list</h3><p>In Spool Stock, open Setup and copy or download the stock list. Without it, Claude can only say what the spool looks like.</p>
+    <div class="btns"><label class="btn" for="pickStock">Choose the file</label></div>
+    <label class="field"><span>Or paste it here</span><textarea id="stockText" rows="2"></textarea></label>
+    <div class="btns"><button class="btn" data-act="stockPaste">Load</button></div></div>`;
+}
+function vResult(r){
+  const list=S.stock?S.stock.spools:[];
+  const ms=(Array.isArray(r.matches)?r.matches:[]).map(m=>({...m,s:list.find(x=>x.id===m.id)})).filter(m=>m.s);
+  const g=r.bestGuess||{};
+  return `${S.stock?`<div class="card"><h2>Closest in your stock</h2>${ms.length?ms.map(m=>`<div class="match"><div style="min-width:0"><b>${esc(m.s.material)} ${esc(m.s.colour)}</b> <span class="mono">${esc(m.s.id.toUpperCase())}</span><div>${esc(m.s.brand)}, ${esc(m.s.storage)}</div><div>${esc(m.why||"")}</div><div class="btns" style="margin-top:6px"><button class="btn sm" data-act="refKeep" data-v="${esc(m.s.id)}">Yes, keep this photo for next time</button></div></div><div class="score">${clamp(num(m.confidence)||0,0,100)}%</div></div>`).join(""):`<p>Nothing in your stock looks like a match.</p>`}</div>`:""}
+  <div class="card"><h2>What it looks like</h2>
+    <dl class="spec">
+      <div><dt>Manufacturer</dt><dd>${esc(g.brand||"Unknown")}</dd></div>
+      <div><dt>Material</dt><dd>${esc(g.material||"Unknown")}</dd></div>
+      <div><dt>Colour</dt><dd>${esc(g.colourName||"Unknown")}</dd></div>
+      <div><dt>Confidence</dt><dd>${clamp(num(g.confidence)||0,0,100)}%</dd></div>
+    </dl>
+    ${Array.isArray(r.read)&&r.read.length?`<p><b>Text it could read:</b> ${esc(r.read.join(", "))}</p>`:""}
+    ${r.reasoning?`<p>${esc(r.reasoning)}</p>`:""}
+    ${Array.isArray(r.checks)&&r.checks.length?`<div><b>To be sure:</b><ul style="margin:4px 0 0;padding-left:20px">${r.checks.map(c=>`<li>${esc(c)}</li>`).join("")}</ul></div>`:""}
+    <div class="btns"><button class="btn go" data-act="identAdd">Add to export list</button></div>
+  </div>`;
+}
+function vExport(){
+  const ps=Object.values(S.pending).sort((a,b)=>(a.addedAt||0)-(b.addedAt||0));
+  if(!ps.length) return `<div class="card"><h2>Nothing to export yet</h2><p>Spools you read or identify land here for checking, then go across to Spool Stock in one file.</p><div class="btns"><button class="btn go" data-tab="read">Read labels</button></div></div>`;
+  return `<div class="card"><h2>${ps.length} spool${ps.length===1?"":"s"} ready</h2>
+    <p>Check them, then import the file in Spool Stock under Add, Import from Spool Reader.</p>
+    <div class="btns"><button class="btn go" data-act="download">Download file</button><button class="btn" data-act="copy">Copy</button><button class="btn" data-act="clearAsk">Clear list</button></div>
+    <div id="clearBox" hidden class="btns"><button class="btn bad" data-act="clearAll">Yes, clear them all</button></div>
+    <textarea id="copyBox" rows="3" hidden aria-label="Export text"></textarea>
+  </div>${ps.map(cardHTML).join("")}`;
+}
+function cardHTML(p){
+  const logo=S.logos[slug(p.brand)];
+  const f=(k,t,type="number",extra="")=>`<label class="field"><span>${t}</span><input type="${type}" data-f="${k}" data-id="${p.id}" value="${esc(p[k])}" ${extra}></label>`;
+  return `<div class="card">
+    <div class="head">${p.thumb?`<img class="t" src="${esc(p.thumb)}" alt="">`:`<span class="swatch" style="background:${hexOK(p.hex)}"></span>`}<div style="min-width:0"><b>${esc(p.material||"Material needed")} ${esc(p.colour||"")}</b><div>${esc(p.brand||"Manufacturer needed")}</div></div><button class="btn sm" data-act="remove" data-v="${p.id}">Remove</button></div>
+    ${p.note?`<div class="note">${esc(p.note)}</div>`:""}
+    <div class="g2">${f("brand","Manufacturer","text")}${f("material","Material name","text")}</div>
+    <div class="g2">${f("colour","Colour name","text")}<label class="field"><span>Colour</span><input type="color" data-f="hex" data-id="${p.id}" value="${hexOK(p.hex)}"></label></div>
+    <div class="g2"><label class="field"><span>Finish</span><select data-f="finish" data-id="${p.id}">${FINISH.map(x=>`<option ${p.finish===x?"selected":""}>${x}</option>`).join("")}</select></label>${f("qty","How many","number",'inputmode="numeric" min="1" max="20"')}</div>
+    <div class="g2">${f("netG","Filament weight (g)")}${f("dia","Diameter (mm)")}</div>
+    <div class="g4">${f("nMin","Nozzle min")}${f("nMax","Nozzle max")}${f("bMin","Bed min")}${f("bMax","Bed max")}</div>
+    <div class="g2">${f("dT","Dry at (°C)")}${f("dH","Dry for (hours)")}</div>
+    <p>Blank print settings get typical values in Spool Stock.</p>
+    <div class="head" style="grid-template-columns:auto minmax(0,1fr)">${logo?`<img class="logo" src="${esc(logo.src)}" alt="Logo">`:""}<div class="btns">${photoFor[slug(p.brand)]?`<button class="btn sm" data-act="cropFrom" data-v="${esc(p.brand)}">${logo?"Change logo":"Crop logo from photo"}</button>`:""}<label class="btn sm" for="pickLogo" data-act="logoFor" data-v="${esc(p.brand)}">${logo?"Upload a different logo":"Upload logo"}</label></div></div>
+  </div>`;
+}
+
+/* reading */
+async function runRead(){
+  R.busy=true;R.err="";R.done=0;render();ctl=new AbortController();
+  const queue=[...R.files];
+  try{
+    for(const ph of queue){
+      const r=await sample.json(LABEL_PROMPT,{images:ph.blob,signal:ctl.signal});
+      const id="p"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+      const doc={brand:str(r.brand),material:str(r.material),colour:str(r.colourName),hex:hexOK(r.colourHex),finish:FINISH.includes(r.finish)?r.finish:"",netG:num(r.weightG)||1000,qty:1,dia:num(r.diameter)||1.75,nMin:num(r.nozzleMin),nMax:num(r.nozzleMax),bMin:num(r.bedMin),bMax:num(r.bedMax),dT:num(r.dryTemp),dH:num(r.dryHours),note:str(r.note),thumb:ph.thumb,addedAt:Date.now()};
+      await save("pending",id,doc);
+      const key=slug(doc.brand);
+      photoFor[key]=ph.url;
+      if(doc.brand&&!S.logos[key]&&!crop&&Array.isArray(r.logoBox)) openCrop(ph.url,doc.brand,r.logoBox);
+      R.files=R.files.filter(x=>x!==ph);R.done++;
+      if(R.files.length) { R.done=queue.length-R.files.length; render(); }
+    }
+    S.tab="export";local.set("tab","export");
+  }catch(e){ R.err=sampleErr(e); }
+  R.busy=false;render();
+}
+const str=v=>v==null?"":String(v).trim();
+async function save(c,id,doc){
+  S[c==="pending"?"pending":"logos"][id]={...doc,id};
+  if(db) await db.collection(c).doc(id).set(doc);
+}
+/* identify */
+async function runIdentify(){
+  I.busy=true;I.err="";I.result=null;render();
+  try{
+    const caps=await sample.limits().catch(()=>null);maxImages=caps?.images?.maxCount||4;
+    const mine=I.photos.slice(0,Math.max(1,maxImages-1)),blobs=mine.map(p=>p.blob);
+    const list=S.stock?S.stock.spools:[];
+    const room=Math.min(maxImages-blobs.length,8),refs=[];
+    if(room>0&&db&&list.length){
+      const snap=await db.collection("refs").get().catch(()=>null);
+      if(snap&&!snap.empty){
+        const have=new Set(snap.docs.map(d=>d.id)),target=avgColour(toCanvas(await loadImg(blobs[0]),320));
+        const near=list.filter(s=>have.has(s.id)).map(s=>{const c=hexRGB(s.hex);return{id:s.id,d:Math.hypot(c[0]-target[0],c[1]-target[1],c[2]-target[2])};}).sort((a,b)=>a.d-b.d).slice(0,room);
+        for(const n of near){const d=snap.docs.find(x=>x.id===n.id);blobs.push(dataToBlob(d.data().src));refs.push(n.id);}
+      }
+    }
+    const cat=list.map(s=>[s.id,s.brand,s.material,s.colour,s.hex,s.finish,s.storage].join(" | ")).join("\n");
+    const prompt=`I'm trying to identify a 3D printer filament spool that isn't well marked.
+Images 1 to ${mine.length} are photos of the unknown spool.${refs.length?` The next ${refs.length} images are my own photos of known spools, in this order: ${refs.join(", ")}.`:""}
+
+My stock list (code | manufacturer | material | colour | hex | finish | storage):
+${cat||"(not loaded)"}
+
+Read any text, part numbers or hub marks. Look at spool construction (cardboard or plastic, hub shape, ribbing, windows, reusable or refill), winding, filament colour, sheen and translucency. Compare with the stock list and known spool designs from filament manufacturers. Colours in photos shift with lighting, so don't rely on colour alone. Be honest about how sure you are, and don't invent a match.
+
+Reply with only one JSON object:
+{"read":[strings of text seen],"matches":[{"id":"code from my list","confidence":0-100,"why":"one short sentence"}] (at most 3, best first, empty if nothing fits),"bestGuess":{"brand":string|null,"material":string|null,"colourName":string|null,"colourHex":"#rrggbb"|null,"confidence":0-100},"reasoning":"two short sentences at most","checks":["short practical checks to confirm it, such as weighing the empty spool or a test print temperature"]}`;
+    ctl=new AbortController();
+    const r=await sample.json(prompt,{images:blobs,signal:ctl.signal,cache:false});
+    I.result=r&&typeof r==="object"?r:null;
+    if(!I.result) I.err="The answer came back empty. Try again with a clearer photo.";
+  }catch(e){ I.err=sampleErr(e); }
+  I.busy=false;render();
+}
+/* stock list */
+function loadStock(text){
+  let j; try{ j=JSON.parse(text); }catch{ toast("That isn't a stock list from Spool Stock."); return; }
+  let spools=j&&j.spools;
+  if(spools&&!Array.isArray(spools)) spools=Object.values(spools).filter(s=>s.status!=="used").map(s=>({id:s.id,brand:s.brand,material:s.material,colour:s.colour||"",hex:s.hex||"",finish:s.finish||"",storage:""}));
+  if(!Array.isArray(spools)){ toast("That isn't a stock list from Spool Stock."); return; }
+  S.stock={spools,loaded:Date.now()};
+  if(db) db.doc("stock/list").set(S.stock).catch(e=>fail(e,"Couldn't keep that list"));
+  toast(`Loaded ${spools.length} spools.`);render();
+}
+/* export */
+function exportText(){
+  const ps=Object.values(S.pending);
+  const logos={};
+  for(const p of ps){const l=S.logos[slug(p.brand)];if(l&&p.brand)logos[p.brand]={src:l.src,w:l.w,h:l.h};}
+  const spools=ps.map(({brand,material,colour,hex,finish,netG,qty,dia,nMin,nMax,bMin,bMax,dT,dH})=>({brand,material,colour,hex,finish,netG,qty:clamp(parseInt(qty)||1,1,20),dia,nMin,nMax,bMin,bMax,dT,dH}));
+  return JSON.stringify({format:"spool-stock-import",version:1,batch:Math.random().toString(36).slice(2,12),exported:new Date().toISOString(),spools,logos});
+}
+function missing(){ return Object.values(S.pending).filter(p=>!p.brand||!p.material).length; }
+/* logo crop */
+function openCrop(url,brand,box){
+  let b=(box&&box.length===4&&box.every(v=>typeof v==="number"))?box.map(v=>clamp(v,0,1)):[.1,.1,.9,.45];
+  if(b[2]-b[0]<.03||b[3]-b[1]<.02) b=[.1,.1,.9,.45];
+  crop={url,brand,box:b};
+}
+const vCrop=()=>`<div class="card"><h2>${esc(crop.brand)} logo</h2><p>Drag a box round the logo. It goes on every ${esc(crop.brand)} sticker.</p>
+  <div class="cropwrap"><div class="crop" id="cropBox"><img src="${esc(crop.url)}" alt="Photo to crop"><i id="cropRect"></i></div></div>
+  <label class="tick"><input type="checkbox" id="cropClean" checked><span>Clean up to black on white</span></label>
+  <div class="btns"><button class="btn go" data-act="cropSave">Use this logo</button><button class="btn" data-act="cropSkip">Skip</button></div></div>`;
+function drawCrop(){const r=$("#cropRect");if(!r||!crop)return;const [a,b,c,d]=crop.box;r.style.left=a*100+"%";r.style.top=b*100+"%";r.style.width=(c-a)*100+"%";r.style.height=(d-b)*100+"%";}
+function cleanBW(ctx,w,h){
+  const im=ctx.getImageData(0,0,w,h),d=im.data,hist=new Array(256).fill(0);
+  for(let i=0;i<d.length;i+=4)hist[(d[i]*.3+d[i+1]*.59+d[i+2]*.11)|0]++;
+  let total=w*h,sum=0,sb=0,wb=0,best=0,th=128;for(let i=0;i<256;i++)sum+=i*hist[i];
+  for(let i=0;i<256;i++){wb+=hist[i];if(!wb)continue;const wf=total-wb;if(!wf)break;sb+=i*hist[i];const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf);if(v>best){best=v;th=i;}}
+  let dark=0;for(let i=0;i<=th;i++)dark+=hist[i];
+  const inv=dark>total/2;
+  for(let i=0;i<d.length;i+=4){const v=d[i]*.3+d[i+1]*.59+d[i+2]*.11,on=inv?v>th:v<=th,o=on?0:255;d[i]=d[i+1]=d[i+2]=o;d[i+3]=255;}
+  ctx.putImageData(im,0,0);
+}
+function trimWhite(c){
+  const ctx=c.getContext("2d"),{width:w,height:h}=c,d=ctx.getImageData(0,0,w,h).data;
+  let x0=w,y0=h,x1=-1,y1=-1;
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;if(d[i+3]>20&&(d[i]<235||d[i+1]<235||d[i+2]<235)){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}}
+  if(x1<0)return null;
+  const o=document.createElement("canvas");o.width=x1-x0+1;o.height=y1-y0+1;o.getContext("2d").drawImage(c,x0,y0,o.width,o.height,0,0,o.width,o.height);return o;
+}
+async function saveLogo(){
+  const clean=$("#cropClean")?.checked,img=await loadImg(crop.url);
+  const [a,b,c,d]=crop.box,W=img.naturalWidth,H=img.naturalHeight,sw=Math.max(1,(c-a)*W),sh=Math.max(1,(d-b)*H),k=Math.min(1,480/Math.max(sw,sh));
+  let cv=document.createElement("canvas");cv.width=Math.round(sw*k);cv.height=Math.round(sh*k);
+  const ctx=cv.getContext("2d",{willReadFrequently:true});ctx.fillStyle="#fff";ctx.fillRect(0,0,cv.width,cv.height);ctx.drawImage(img,a*W,b*H,sw,sh,0,0,cv.width,cv.height);
+  if(clean)cleanBW(ctx,cv.width,cv.height);
+  cv=trimWhite(cv);
+  if(!cv){toast("That box looks empty. Drag it over the logo.");return;}
+  const id=slug(crop.brand),brand=crop.brand;crop=null;
+  try{await save("logos",id,{name:brand,src:cv.toDataURL("image/png"),w:cv.width,h:cv.height});toast(brand+" logo saved.");}catch(e){fail(e,"That logo didn't save");}
+  render();
+}
+/* events */
+let pendingLogo="";
+const actions={
+  read(){runRead();},
+  readClear(){R.files=[];R.err="";render();},
+  stop(){ctl?.abort();},
+  identify(){runIdentify();},
+  identClear(){I.photos=[];I.result=null;I.err="";render();},
+  async identAdd(){
+    const g=I.result?.bestGuess||{},id="p"+Date.now().toString(36);
+    await save("pending",id,{brand:str(g.brand),material:str(g.material),colour:str(g.colourName),hex:hexOK(g.colourHex),finish:"",netG:1000,qty:1,dia:1.75,nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,note:"From a photo match, so check the details.",thumb:I.photos[0]?.thumb||"",addedAt:Date.now()}).catch(e=>fail(e,"That didn't save"));
+    S.tab="export";render();
+  },
+  async refKeep(el){
+    const p=I.photos[0];if(!p||!db)return;
+    const src=toCanvas(await loadImg(p.blob),560).toDataURL("image/jpeg",.68);
+    try{await db.collection("refs").doc(el.dataset.v).set({src});toast("Kept for future checks.");}catch(e){fail(e,"That photo didn't save");}
+  },
+  stockPaste(){loadStock($("#stockText").value);},
+  remove(el){delete S.pending[el.dataset.v];if(db)db.collection("pending").doc(el.dataset.v).delete().catch(e=>fail(e,"That didn't delete"));render();},
+  async download(){
+    if(missing()){toast("Add the manufacturer and material on every spool first.");return;}
+    if(!downloads){toast("Downloads aren't available here. Use Copy instead.");return;}
+    try{await downloads.save({filename:"spool-import.json",data:exportText()});toast("Saved. Clear the list once it's imported.");}catch(e){if(e&&e.code!=="declined")toast("Couldn't save the file. Use Copy instead.");}
+  },
+  async copy(){
+    if(missing()){toast("Add the manufacturer and material on every spool first.");return;}
+    const t=exportText();
+    try{await navigator.clipboard.writeText(t);toast("Copied. Paste it into Import from Spool Reader.");}
+    catch{const b=$("#copyBox");b.hidden=false;b.value=t;b.select();toast("Select all of this box and copy it.");}
+  },
+  clearAsk(){$("#clearBox").hidden=false;},
+  clearAll(){const ids=Object.keys(S.pending);S.pending={};if(db)ids.forEach(id=>db.collection("pending").doc(id).delete().catch(()=>{}));render();},
+  logoFor(el){pendingLogo=el.dataset.v;},
+  cropFrom(el){openCrop(photoFor[slug(el.dataset.v)],el.dataset.v,null);render();scrollTo(0,0);},
+  cropSave(){saveLogo();},
+  cropSkip(){crop=null;render();},
+};
+document.addEventListener("click",e=>{
+  const t=e.target.closest("[data-tab]");if(t){S.tab=t.dataset.tab;local.set("tab",S.tab);render();return;}
+  const a=e.target.closest("[data-act]");if(a&&actions[a.dataset.act])actions[a.dataset.act](a);
+});
+document.addEventListener("change",async e=>{
+  const t=e.target;
+  if(t.dataset&&t.dataset.f){
+    const p=S.pending[t.dataset.id];if(!p)return;
+    const k=t.dataset.f,v=t.type==="number"?num(t.value):t.value;p[k]=v;
+    if(db)db.collection("pending").doc(p.id).update({[k]:v}).catch(er=>fail(er,"That change didn't save"));
+    if(["brand","material","colour"].includes(k))render();
+    return;
+  }
+  if(t.id==="pickRead"&&t.files.length){const fs=[...t.files];t.value="";for(const f of fs)R.files.push(await prep(f));R.err="";render();return;}
+  if(t.id==="pickIdent"&&t.files.length){const fs=[...t.files];t.value="";for(const f of fs)I.photos.push(await prep(f));I.result=null;I.err="";render();return;}
+  if(t.id==="pickStock"&&t.files[0]){const f=t.files[0];t.value="";loadStock(await f.text());return;}
+  if(t.id==="pickLogo"&&t.files[0]){const f=t.files[0];t.value="";const p=await prep(f);photoFor[slug(pendingLogo)]=p.url;openCrop(p.url,pendingLogo,[0,0,1,1]);render();scrollTo(0,0);}
+});
+document.addEventListener("dragover",e=>{const d=e.target.closest&&e.target.closest(".drop");if(d){e.preventDefault();d.classList.add("over");}});
+document.addEventListener("dragleave",e=>{const d=e.target.closest&&e.target.closest(".drop");if(d)d.classList.remove("over");});
+document.addEventListener("drop",async e=>{
+  const d=e.target.closest&&e.target.closest(".drop");if(!d)return;e.preventDefault();
+  const fs=[...e.dataTransfer.files].filter(f=>f.type.startsWith("image/")),box=d.id==="readDrop"?R.files:I.photos;
+  for(const f of fs)box.push(await prep(f));render();
+});
+addEventListener("paste",async e=>{
+  const fs=[...(e.clipboardData?.files||[])].filter(f=>f.type.startsWith("image/"));if(!fs.length)return;
+  const box=S.tab==="identify"?I.photos:R.files;for(const f of fs)box.push(await prep(f));render();
+});
+document.addEventListener("pointerdown",e=>{
+  const b=e.target.closest&&e.target.closest("#cropBox");if(!b||!crop)return;
+  const r=b.getBoundingClientRect(),pos=ev=>[clamp((ev.clientX-r.left)/r.width,0,1),clamp((ev.clientY-r.top)/r.height,0,1)],s=pos(e);
+  b.setPointerCapture(e.pointerId);
+  const mv=ev=>{const p=pos(ev);crop.box=[Math.min(s[0],p[0]),Math.min(s[1],p[1]),Math.max(s[0],p[0]),Math.max(s[1],p[1])];drawCrop();};
+  const up=()=>{b.removeEventListener("pointermove",mv);b.removeEventListener("pointerup",up);};
+  b.addEventListener("pointermove",mv);b.addEventListener("pointerup",up);
+});
+/* start */
+(async()=>{
+  render();
+  if(!window.claude){started=true;render();return;}
+  [db,sample,downloads]=await Promise.all([claude.use("db"),claude.use("sample"),claude.use("downloads")]);
+  if(sample){const caps=await sample.limits().catch(()=>null);canRead=!!caps?.images;maxImages=caps?.images?.maxCount||4;}
+  started=true;render();
+  if(!db)return;
+  const busyView=()=>{const el=document.activeElement;return (crop||(el&&el.matches&&el.matches("input,textarea,select")));};
+  const refresh=()=>{if(!busyView())render();};
+  const timer=setTimeout(()=>toast("Can't reach your saved work yet. Check your signal."),10000);
+  db.collection("pending").onSnapshot(s=>{clearTimeout(timer);const o={};s.docs.forEach(d=>o[d.id]={...d.data(),id:d.id});S.pending=o;refresh();},()=>{});
+  db.collection("logos").onSnapshot(s=>{const o={};s.docs.forEach(d=>o[d.id]={...d.data(),id:d.id});S.logos=o;refresh();},()=>{});
+  db.doc("stock/list").onSnapshot(d=>{S.stock=d.exists?d.data():null;refresh();},()=>{});
+})();
+</script>

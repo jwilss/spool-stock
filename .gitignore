@@ -1,0 +1,4 @@
+node_modules/
+dist/
+wrappers/android/android/
+test/out/

@@ -1,0 +1,14 @@
+{
+  "name": "spool-stock",
+  "productName": "Spool Stock",
+  "version": "1.0.0",
+  "description": "Filament stock",
+  "author": "Jack Wilson",
+  "main": "main.js",
+  "devDependencies": {"electron": "33.2.1", "electron-builder": "25.1.8"},
+  "build": {
+    "appId": "uk.jwilss.spoolstock",
+    "directories": {"output": "dist"},
+    "win": {"target": ["portable"], "icon": "build/icon.png", "artifactName": "SpoolStock.exe"}
+  }
+}

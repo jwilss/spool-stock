@@ -1,0 +1,7 @@
+{
+  "appId": "uk.jwilss.spoolstock",
+  "appName": "Spool Stock",
+  "webDir": "www",
+  "server": {"url": "https://jwilss.github.io/spool-stock/", "cleartext": false},
+  "android": {"appendUserAgent": "SpoolStockApp"}
+}

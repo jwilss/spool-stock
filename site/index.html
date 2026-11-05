@@ -1,0 +1,1260 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Spool Stock</title>
+<meta name="theme-color" content="#FFC800">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: a workshop stock board. Storages are drawn as racks of spools, the filament colour and remaining weight drive the graphics, yellow marks the action. */
+:root{
+  --bg:#E8ECEE; --panel:#F8FAFB; --panel2:#DFE5E8; --ink:#161C20; --muted:#55626A; --line:#C4CED3;
+  --tag:#FFC800; --tag-ink:#161C20; --good:#17764A; --warn:#A85600; --bad:#B3261E;
+  --disp:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Barlow","Helvetica Neue",Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#101518; --panel:#192126; --panel2:#232D33; --ink:#E9EFF2; --muted:#9BA9B1; --line:#303C43;
+  --good:#4CC38A; --warn:#F0A94B; --bad:#F2857C; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#101518; --panel:#192126; --panel2:#232D33; --ink:#E9EFF2; --muted:#9BA9B1; --line:#303C43;
+  --good:#4CC38A; --warn:#F0A94B; --bad:#F2857C; color-scheme:dark}
+[hidden]{display:none!important}
+html{padding-top:env(safe-area-inset-top,0px)}
+body{margin:0}
+img{max-width:100%}
+*{box-sizing:border-box}
+a.btn{text-decoration:none}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.45 var(--body);-webkit-tap-highlight-color:transparent}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3{font-family:var(--disp);font-weight:700;letter-spacing:.01em;line-height:1.1;margin:0;text-wrap:balance}
+h1{font-size:30px}h2{font-size:22px}h3{font-size:18px}
+p{margin:0}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.shell{display:grid;grid-template-columns:1fr;grid-template-rows:auto 1fr;min-height:100%}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:12px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font:700 21px/1 var(--disp);letter-spacing:.05em;text-transform:uppercase;background:var(--tag);color:var(--tag-ink);padding:5px 9px 4px;border:0;cursor:pointer}
+.main{padding-block:16px 112px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:18px;align-content:start;min-width:0;max-width:980px;width:100%;margin-inline:auto}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:20;display:grid;grid-template-columns:repeat(4,1fr);background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
+.nav button{background:none;border:0;padding:9px 2px 8px;display:grid;justify-items:center;gap:2px;font:600 15px/1 var(--disp);letter-spacing:.03em;color:var(--muted);cursor:pointer}
+.nav button svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.nav button[aria-current="page"]{color:var(--ink);box-shadow:inset 0 3px 0 var(--tag)}
+.nav .scan{color:var(--tag-ink);background:var(--tag)}
+.nav .scan[aria-current="page"]{color:var(--tag-ink);box-shadow:none}
+@media (min-width:860px){
+  .shell{grid-template-columns:150px 1fr;grid-template-rows:auto 1fr}
+  .top{grid-column:1/-1}
+  .nav{position:sticky;top:0;align-self:start;grid-template-columns:1fr;border-top:0;border-right:0;background:none;padding:14px 0 0 max(16px,env(safe-area-inset-left,0px))}
+  .nav button{grid-template-columns:24px 1fr;justify-items:start;align-items:center;gap:8px;padding:10px;font-size:17px}
+  .nav button[aria-current="page"]{box-shadow:inset 3px 0 0 var(--tag)}
+  .main{padding-bottom:40px}
+}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:9px 14px;border:1px solid var(--line);background:var(--panel);font-weight:600;cursor:pointer;text-align:center;border-radius:2px}
+.btn.go{background:var(--tag);color:var(--tag-ink);border-color:var(--tag)}
+.btn.bad{color:var(--bad);border-color:var(--bad);background:none}
+.btn.sm{min-height:36px;padding:5px 10px;font-size:15px}
+.btn:disabled{opacity:.5;cursor:default}
+.btn:focus-visible,.nav button:focus-visible,.slot:focus-visible,.row:focus-visible,.cell:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+.card{background:var(--panel);border:1px solid var(--line);padding:14px;display:grid;gap:12px;min-width:0}
+.field{display:grid;gap:4px;min-width:0}
+.field>span,.lab{font-size:14px;font-weight:600;color:var(--muted)}
+input[type=text],input[type=number],input[type=search],select,textarea{width:100%;min-height:44px;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:2px;min-width:0}
+input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border:1px solid var(--line);border-radius:2px}
+.g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:end}
+.g4{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:end}
+@media (min-width:560px){.g4{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.split{display:grid;gap:16px;grid-template-columns:1fr}
+@media (min-width:760px){.split{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);align-items:start}}
+/* racks */
+.summary{font:600 19px/1.2 var(--disp);letter-spacing:.02em}
+.racks{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))}
+.rack{background:var(--panel);border:1px solid var(--line);padding:10px;display:grid;gap:8px;align-content:start;min-width:0}
+.rack h3{display:flex;justify-content:space-between;gap:8px}
+.slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.slot{background:var(--bg);border:1px solid var(--line);padding:6px 2px 5px;display:grid;justify-items:center;gap:2px;cursor:pointer;min-width:0}
+.slot small{font:500 12px/1 var(--mono)}
+.slot.empty{border-style:dashed}
+.shelf{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:44px;cursor:pointer;background:var(--bg);border:1px solid var(--line);padding:6px;width:100%;text-align:left}
+.disc{display:block;flex:none}
+.disc .fl{fill:var(--panel2);stroke:var(--muted);stroke-width:2}
+.disc .hub{fill:var(--panel);stroke:var(--muted);stroke-width:2}
+.disc .hole{fill:var(--bg);stroke:var(--muted);stroke-width:2}
+.disc .fil{stroke:rgba(0,0,0,.28);stroke-width:1}
+/* list */
+.tools{display:grid;gap:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--panel);padding:5px 10px;min-height:34px;font-size:15px;font-weight:500;cursor:pointer;border-radius:2px}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.list{display:grid;gap:6px}
+.row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);padding:8px 10px;width:100%;text-align:left;cursor:pointer}
+.row b{font-weight:600;display:block;overflow-wrap:anywhere}
+.row .sub{display:block;color:var(--muted);font-size:15px;overflow-wrap:anywhere}
+.row .end{text-align:right;font-size:14px;line-height:1.25}
+.pill{display:inline-block;font:600 13px/1 var(--body);padding:3px 6px;border:1px solid currentColor;border-radius:2px;white-space:nowrap}
+.pill.low{color:var(--warn)}.pill.ex{color:var(--muted)}.pill.good{color:var(--good)}
+.bar{height:6px;background:var(--panel2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ink)}
+.bar.low i{background:var(--warn)}
+/* spool page */
+.spoolhead{display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px;align-items:center}
+.code{font:600 15px/1 var(--mono);letter-spacing:.04em}
+.spec{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
+.spec div{min-width:0}
+.spec dt{font-size:14px;font-weight:600;color:var(--muted)}
+.spec dd{margin:0;font-family:var(--mono);font-size:15px}
+.movegroup{display:grid;gap:6px}
+.movegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px}
+.movegrid.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.movegrid.four .move{padding:6px 6px;font-size:15px}
+.movegrid.four small{font:500 12px/1.1 var(--mono)}
+.move{min-height:52px;display:grid;gap:1px;align-content:center;justify-items:start;text-align:left;background:var(--bg);border:1px solid var(--line);padding:6px 9px;cursor:pointer;font-weight:600}
+.move small{font-weight:400;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
+.move[aria-current="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.move[aria-current="true"] small{color:inherit}
+.note{border-left:4px solid var(--tag);background:var(--panel);padding:9px 12px}
+.note.warn{border-left-color:var(--warn)}
+.hist{display:grid;gap:3px;font-size:15px}
+/* stickers */
+.sticker{background:#fff;border:1px solid var(--line);display:block;max-width:100%;height:auto}
+.sheetmap{display:grid;gap:2px;background:var(--panel2);padding:6px;max-width:300px;width:100%}
+.cell{aspect-ratio:var(--ar);background:var(--panel);border:1px solid var(--line);cursor:pointer;padding:0;min-width:0}
+.cell.used{background:repeating-linear-gradient(45deg,var(--panel2),var(--panel2) 3px,var(--bg) 3px,var(--bg) 6px)}
+.cell.next{background:var(--tag);border-color:var(--tag-ink)}
+.check{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);padding:8px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.tile{position:relative;display:block;cursor:pointer;min-width:0}
+.tile input{position:absolute;top:4px;right:4px;width:22px;height:22px;margin:0}
+.tile .sticker{width:100%}
+.tile:has(input:not(:checked)) .sticker{opacity:.35}
+.sheetfirst{order:2}
+@media (max-width:759px){.sheetfirst{order:0}.queuecard{order:1}}
+.check input{width:22px;height:22px}
+/* photo */
+.drop{display:grid;justify-items:center;gap:8px;padding:20px 12px;border:2px dashed var(--line);background:var(--panel);text-align:center;cursor:pointer}
+.drop.over{border-color:var(--ink)}
+.thumbs{display:flex;flex-wrap:wrap;gap:6px}
+.thumbs img{width:84px;height:84px;object-fit:cover;border:1px solid var(--line)}
+.logo{height:34px;max-width:120px;object-fit:contain;background:#fff;padding:2px;border:1px solid var(--line)}
+.crop{position:relative;touch-action:none;user-select:none;line-height:0;max-width:100%}
+.crop img{width:100%;height:auto;display:block;pointer-events:none}
+.crop i{position:absolute;border:2px solid var(--tag);box-shadow:0 0 0 2000px rgba(0,0,0,.45);pointer-events:none}
+.cropwrap{overflow:hidden}
+.match{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);padding:8px;background:var(--bg)}
+.score{font:700 22px/1 var(--disp)}
+.swatches{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sw{width:30px;height:30px;border:1px solid var(--muted);cursor:pointer;padding:0}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:40;background:var(--ink);color:var(--bg);padding:10px 12px;display:flex;gap:12px;align-items:center;max-width:calc(100% - 32px);width:max-content;font-weight:500}
+.toast button{background:none;border:1px solid currentColor;color:inherit;padding:4px 9px;cursor:pointer;font-weight:600}
+.modal{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.5);display:grid;place-items:center;padding:16px}
+.modal>div{background:var(--panel);border:1px solid var(--line);padding:16px;display:grid;gap:12px;max-width:440px;width:100%}
+.busy{display:flex;gap:10px;align-items:center;font-weight:600}
+.spin{width:18px;height:18px;border:3px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+.setrow{display:grid;grid-template-columns:minmax(0,1fr) 84px auto;gap:6px;align-items:end}
+.brandrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border-top:1px solid var(--line);padding-top:8px}
+.camwrap{position:relative;aspect-ratio:4/3;background:#000;overflow:hidden;max-height:60vh;width:100%}
+.camwrap video{width:100%;height:100%;object-fit:cover;display:block}
+.camwrap i{position:absolute;inset:14%;border:3px solid var(--tag);pointer-events:none}
+.scanstate{font:700 22px/1.15 var(--disp);min-height:50px;display:grid;align-items:center}
+.scanstate.held{background:var(--tag);color:var(--tag-ink);padding:8px 10px}
+.authcard{max-width:420px;margin-inline:auto;width:100%}
+.authbad{color:var(--bad);font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <header class="top">
+    <button class="brand" data-go="stock">Spool Stock</button>
+    <button class="btn sm" data-go="setup">Setup</button>
+  </header>
+  <nav class="nav" aria-label="Main">
+    <button data-go="stock" data-nav="stock"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>Stock</button>
+    <button data-go="add" data-nav="add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add</button>
+    <button class="scan" data-go="scan" data-nav="scan"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><path d="M9 12h6"/></svg>Scan</button>
+    <button data-go="stickers" data-nav="stickers"><svg viewBox="0 0 24 24"><path d="M5 4h14v11l-5 5H5z"/><path d="M19 15h-5v5"/></svg>Stickers</button>
+  </nav>
+  <main class="main" id="main"><div class="busy"><span class="spin"></span>Opening your stock</div></main>
+</div>
+<div id="toast" class="toast" hidden></div>
+<div id="modal" class="modal" hidden></div>
+<input type="file" id="pickScan" accept="image/*" capture="environment" hidden>
+<input type="file" id="pickLogo" accept="image/*" hidden>
+<input type="file" id="pickImport" accept=".json,application/json,text/plain" hidden>
+
+<script src="config.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="vendor/jsQR.js"></script>
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="vendor/firebase-app-compat.js"></script>
+<script src="vendor/firebase-auth-compat.js"></script>
+<script src="vendor/firebase-firestore-compat.js"></script>
+<script>
+"use strict";
+const CFG = window.SPOOL_CONFIG || {};
+const PAGE_URL = CFG.siteUrl || (location.origin + location.pathname);
+const IS_APP = /SpoolStockApp/.test(navigator.userAgent);
+
+/* Typical settings from Bambu Lab's filament guide material table (bed values for smooth PEI / high temp plate). */
+const MATERIALS = [
+  {key:"PETG-CF", re:/PETG[\s-]*(CF|GF)/i, n:[240,270], b:[60,80], d:[70,8], ams:true},
+  {key:"PETG",    re:/PETG|\bHF\b/i,       n:[240,270], b:[60,80], d:[70,8], ams:true},
+  {key:"PLA-CF",  re:/PLA[\s-]*(CF|GF)/i,  n:[210,240], b:[45,65], d:[55,8], ams:true},
+  {key:"PLA",     re:/PLA/i,               n:[190,240], b:[45,65], d:[55,8], ams:true},
+  {key:"ABS",     re:/ABS/i,               n:[240,280], b:[90,100],d:[80,8], ams:true},
+  {key:"ASA",     re:/ASA/i,               n:[240,280], b:[90,100],d:[80,8], ams:true},
+  {key:"TPU",     re:/TPU|TPE/i,           n:[200,250], b:[35,45], d:[70,8], ams:false},
+  {key:"PET-CF",  re:/PET[\s-]*(CF|GF)/i,  n:[260,300], b:[100,120],d:[80,12],ams:false},
+  {key:"PPA-CF",  re:/PPA/i,               n:[285,320], b:[100,120],d:null,  ams:false},
+  {key:"PPS",     re:/PPS/i,               n:[285,330], b:[100,120],d:null,  ams:true},
+  {key:"PA-CF",   re:/(PA|PAHT|PA6|PA12)[\s-]*(CF|GF)/i, n:[260,300], b:[100,120],d:[80,12],ams:true},
+  {key:"PA",      re:/\bPA\b|PAHT|PA6|PA12|nylon/i,      n:[260,290], b:[100,120],d:[80,12],ams:true},
+  {key:"PC",      re:/\bPC\b|polycarbonate/i,            n:[260,290], b:[100,120],d:[80,8], ams:true},
+  {key:"PVA",     re:/PVA|BVOH/i,          n:[190,240], b:[45,65], d:[55,8], ams:true},
+];
+const BRANDS = ["Bambu Lab","eSUN","Polymaker","SUNLU","Overture","Prusament","ELEGOO","JAYO","Creality","Anycubic","Kingroon","Fiberlogy","Extrudr","ColorFabb","Spectrum","Hatchbox","3DJake","Geeetech","Eryone","AMOLEN","Siraya Tech","Flashforge","Fillamentum","Recreus","NinjaTek","Das Filament","Azurefilm","Rosa3D","Devil Design"];
+const FINISH = ["","Matte","Glossy","Silk","Translucent","Sparkle","Marble","Dual colour"];
+const COLOURS = ["#111111","#FFFFFF","#8A8D8F","#C8102E","#FF6A13","#FFD100","#00843D","#0057B8","#6D2077","#7B4B2A"];
+const NAMED = [[/\bblack\b/i,"#111111"],[/\bwhite\b/i,"#F4F4F2"],[/\b(grey|gray|silver)\b/i,"#8A8D8F"],[/\bred\b/i,"#C8102E"],[/\borange\b/i,"#FF6A13"],[/\byellow\b/i,"#FFD100"],[/\bgold\b/i,"#C9A227"],[/\bgreen\b/i,"#00843D"],[/\bblue\b/i,"#0057B8"],[/\b(purple|violet)\b/i,"#6D2077"],[/\bpink\b/i,"#E86FA5"],[/\bbrown\b/i,"#7B4B2A"],[/\b(beige|sand|cream)\b/i,"#D9C7A0"]];
+const SHEETS = [
+  {id:"l7160",name:"63.5 x 38.1 mm, 21 per sheet (L7160 size)",w:63.5,h:38.1,cols:3,rows:7,left:7.25,top:15.15,px:66,py:38.1},
+  {id:"l7161",name:"63.5 x 46.6 mm, 18 per sheet (L7161 size)",w:63.5,h:46.6,cols:3,rows:6,left:7.25,top:8.7,px:66,py:46.6},
+  {id:"l7163",name:"99.1 x 38.1 mm, 14 per sheet (L7163 size)",w:99.1,h:38.1,cols:2,rows:7,left:4.65,top:15.15,px:101.6,py:38.1},
+];
+const LOW_G = 150, MOVE_WINDOW = 5*60*1000;
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const slug = s => String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") || "x";
+const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+const clamp = (v,a,b) => Math.min(b,Math.max(a,v));
+const range = (a,b) => a==null&&b==null ? "" : (a==null||b==null||a===b) ? String(a??b) : a+"-"+b;
+const local = {
+  get(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch{ return null; } },
+  set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} },
+  del(k){ try{ localStorage.removeItem(k); }catch{} },
+};
+const ago = t => {
+  if(!t) return "";
+  const d = Math.floor((Date.now()-t)/864e5);
+  if(d<=0) return "today"; if(d===1) return "yesterday"; if(d<60) return d+" days ago";
+  return new Date(t).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+};
+const when = t => new Date(t).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
+
+/* ---------- state ---------- */
+const S = {spools:{},locs:{},brands:{},profiles:{},settings:{},ready:0,view:"stock",param:null,filter:{q:"",mat:"",loc:"",tab:"active"},stale:false};
+let db=null, fs=null, uid=null, F=null, crop=null, Imp=null;
+let internal=false, booted=false, started=false;
+const SOURCE_NOTE=`<div class="card"><h2>Almost set up</h2><p>Add your Firebase details to config.js, as described in SETUP.md, then reload.</p></div>`;
+const col = n => db.collection(n);
+
+/* Firestore keeps working with no signal: a write lands in the local copy at once and its promise only settles when the server answers, so the app never waits on it. */
+function quiet(p){ Promise.resolve(p).catch(e=>fail(e,"A change didn't save")); return Promise.resolve(); }
+function wrapDoc(ref){ return {id:ref.id,path:ref.path,get:()=>ref.get(),set:d=>quiet(ref.set(d)),update:d=>quiet(ref.update(d)),delete:()=>quiet(ref.delete()),onSnapshot:(n,e)=>ref.onSnapshot({includeMetadataChanges:true},n,e)}; }
+function wrapCol(ref){ return {path:ref.path,doc:id=>wrapDoc(ref.doc(id)),onSnapshot:(n,e)=>ref.onSnapshot({includeMetadataChanges:true},n,e)}; }
+
+/* Saving files */
+const downloads={
+  async save({filename,data}){
+    if(IS_APP) throw {code:"app"};
+    const url=URL.createObjectURL(data instanceof Blob?data:new Blob([data]));
+    const a=document.createElement("a"); a.href=url; a.download=filename; document.body.append(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+    return {status:"saved"};
+  },
+};
+const liveSpools = () => Object.values(S.spools).filter(s=>s.status!=="used");
+const locName = id => { const l=S.locs[id]; return !l ? "No storage set" : (l.group && l.group!==l.name ? l.group+" "+l.name : l.name); };
+const orderedLocs = () => Object.values(S.locs).sort((a,b)=>(a.order??99)-(b.order??99)||a.name.localeCompare(b.name));
+const groups = () => { const m=new Map(); for(const l of orderedLocs()){ const g=l.group||l.name; if(!m.has(g)) m.set(g,[]); m.get(g).push(l);} return [...m]; };
+const inLoc = id => liveSpools().filter(s=>s.loc===id);
+const isExample = s => !!s.example;
+const hexOK = h => /^#[0-9a-f]{6}$/i.test(h||"") ? h : "#9AA5AB";
+const pct = s => s.netG ? clamp((s.remainG??s.netG)/s.netG,0,1) : 1;
+const isLow = s => (s.remainG??s.netG??9999) <= LOW_G;
+
+function disc(s,size=44){
+  const hex = s ? hexOK(s.hex) : null;
+  const r = s ? 24 + 23*Math.max(pct(s),.06) : 0;
+  return `<svg class="disc" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true"><circle class="fl" cx="50" cy="50" r="48"/>${s?`<circle class="fil" cx="50" cy="50" r="${r.toFixed(1)}" fill="${hex}"/>`:""}<circle class="hub" cx="50" cy="50" r="22"/><circle class="hole" cx="50" cy="50" r="9"/></svg>`;
+}
+
+/* ---------- print settings lookup ---------- */
+const profileId = (b,m) => slug(b)+"__"+slug(m);
+const baseMat = m => MATERIALS.find(x=>x.re.test(m||""));
+function lookup(brand,material){
+  const p = S.profiles[profileId(brand,material)];
+  if(p) return {nMin:p.nMin,nMax:p.nMax,bMin:p.bMin,bMax:p.bMax,dT:p.dT,dH:p.dH,src:"saved"};
+  const m = baseMat(material);
+  if(m) return {nMin:m.n[0],nMax:m.n[1],bMin:m.b[0],bMax:m.b[1],dT:m.d?m.d[0]:null,dH:m.d?m.d[1]:null,src:"typical",base:m.key};
+  return {nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,src:"none"};
+}
+const srcText = i => ({
+  saved:"Saved from the last spool of this filament.",
+  typical:`Typical for ${i.base}. Change them if the spool says different and they will be kept for this filament.`,
+  edited:"Your own values, kept for this filament.",
+  none:"I don't know this material, so fill these in and they will be kept for this filament.",
+}[i.src]||"");
+
+/* ---------- QR ---------- */
+const qrUrl = code => PAGE_URL+"#"+code;
+const qrCache = new Map();
+function qrMatrix(text){
+  if(qrCache.has(text)) return qrCache.get(text);
+  const q = qrcode(0,"M"); q.addData(text); q.make();
+  const n = q.getModuleCount(), m=[];
+  for(let r=0;r<n;r++){ const row=[]; for(let c=0;c<n;c++) row.push(q.isDark(r,c)); m.push(row); }
+  qrCache.set(text,m); return m;
+}
+
+/* ---------- sticker layout, in mm ---------- */
+let measurer=null;
+function tw(text,pt,font,bold){
+  if(!measurer && window.jspdf) measurer=new jspdf.jsPDF({unit:"mm",format:"a4"});
+  if(measurer){ measurer.setFont(font==="mono"?"courier":"helvetica",bold?"bold":"normal"); return measurer.getStringUnitWidth(text)*pt*25.4/72; }
+  return text.length*pt*.54*25.4/72;
+}
+function fit(text,maxW,pt,minPt,font,bold){
+  let s=pt; while(s>minPt && tw(text,s,font,bold)>maxW) s-=.25;
+  let t=text; while(t.length>2 && tw(t,s,font,bold)>maxW) t=t.slice(0,-2).trimEnd()+".";
+  return {text:t,pt:s};
+}
+const safe = t => String(t??"").replace(/[^\x20-\x7E\xA0-\xFF]/g,"");
+function logoFit(b,boxW,boxH){
+  if(!b||!b.logo) return null;
+  const a=(b.logoW||3)/(b.logoH||1); let w=boxW,h=w/a; if(h>boxH){h=boxH;w=h*a;}
+  return {w,h,src:b.logo};
+}
+function spoolOps(sp,W,H){
+  const m=2.2, ops=[], idH=3.8;
+  const qs=Math.min(H-2*m-idH,W*.42);
+  ops.push({t:"qr",x:m,y:m,s:qs,text:qrUrl(sp.id)});
+  ops.push({t:"text",x:m+qs/2,y:m+qs+3.2,text:sp.id.toUpperCase(),pt:10,font:"mono",bold:1,align:"center"});
+  const x=m+qs+2.2, cw=W-x-m;
+  const lineH=3.05, specLines=3, logoH=Math.min(8.2,H*.22);
+  const brand=S.brands[slug(sp.brand)];
+  const lf=logoFit(brand,cw,logoH);
+  if(lf) ops.push({t:"img",x,y:m,w:lf.w,h:lf.h,src:lf.src});
+  else { const f=fit(safe(sp.brand)||"Unknown",cw,12,7,"sans",1); ops.push({t:"text",x,y:m+Math.min(logoH-1.2,3.6),text:f.text,pt:f.pt,font:"sans",bold:1}); }
+  let y=m+(lf?lf.h:Math.min(logoH-1.2,4.4))+1.2;
+  const mat=fit(safe(sp.material)||"Filament",cw,17,9,"sans",1);
+  y+=mat.pt*.3528*.76; ops.push({t:"text",x,y,text:mat.text,pt:mat.pt,font:"sans",bold:1}); y+=1.5;
+  const sw=4; ops.push({t:"rect",x,y,w:sw,h:sw,fill:hexOK(sp.hex),stroke:"#000000"});
+  const cn=fit(safe(sp.colour)||"",cw-sw-1.3,9,6.5,"sans",0);
+  ops.push({t:"text",x:x+sw+1.3,y:y+3.05,text:cn.text,pt:cn.pt,font:"sans"});
+  y+=sw+1;
+  const rows=[["Nozzle",range(sp.nMin,sp.nMax),"C"],["Bed",range(sp.bMin,sp.bMax),"C"],["Dry",sp.dT?(sp.dT+" C  "+(sp.dH?sp.dH+" h":"")):"",""]];
+  const free=H-m-y, step=Math.min(free/specLines,3.5);
+  rows.forEach((r,i)=>{
+    const yy=y+step*(i+.8);
+    ops.push({t:"text",x,y:yy,text:r[0],pt:7.5,font:"sans",bold:1});
+    const v = r[1] ? (r[2]? r[1]+" °"+r[2] : r[1].replace(" C"," °C")) : "-";
+    ops.push({t:"text",x:x+11,y:yy,text:v,pt:7.5,font:"sans"});
+  });
+  return ops;
+}
+function locOps(l,W,H){
+  const m=2.2, ops=[], qs=Math.min(H-2*m,W*.42);
+  ops.push({t:"qr",x:m,y:m,s:qs,text:qrUrl("loc-"+l.id)});
+  const x=m+qs+2.5, cw=W-x-m;
+  const g=l.group&&l.group!==l.name;
+  const a=fit(safe(g?l.group:l.name),cw,20,10,"sans",1);
+  ops.push({t:"text",x,y:H/2-(g?.8:-2.2),text:a.text,pt:a.pt,font:"sans",bold:1});
+  if(g){ const b=fit(safe(l.name),cw,15,9,"sans",0); ops.push({t:"text",x,y:H/2+6,text:b.text,pt:b.pt,font:"sans"}); }
+  return ops;
+}
+const itemOps = (it,W,H) => it.kind==="loc" ? locOps(it.data,W,H) : spoolOps(it.data,W,H);
+
+function opsToSVG(ops,W,H){
+  let o="";
+  for(const p of ops){
+    if(p.t==="rect") o+=`<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="${p.fill}" stroke="${p.stroke}" stroke-width=".15"/>`;
+    if(p.t==="img") o+=`<image x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" href="${esc(p.src)}" preserveAspectRatio="xMinYMin meet"/>`;
+    if(p.t==="text"){
+      const fam=p.font==="mono"?"Courier New,Courier,monospace":"Helvetica,Arial,sans-serif";
+      o+=`<text x="${p.x}" y="${p.y}" font-family="${fam}" font-size="${(p.pt*.3528).toFixed(3)}" font-weight="${p.bold?700:400}" text-anchor="${p.align==="center"?"middle":"start"}" fill="#000">${esc(p.text)}</text>`;
+    }
+    if(p.t==="qr"){
+      const mx=qrMatrix(p.text), n=mx.length, u=p.s/n; let d="";
+      mx.forEach((row,r)=>row.forEach((on,c)=>{ if(on) d+=`M${(p.x+c*u).toFixed(3)} ${(p.y+r*u).toFixed(3)}h${u.toFixed(3)}v${u.toFixed(3)}h-${u.toFixed(3)}z`; }));
+      o+=`<path d="${d}" fill="#000"/>`;
+    }
+  }
+  return `<svg class="sticker" viewBox="0 0 ${W} ${H}" width="${W*4}" height="${H*4}" role="img" aria-label="Sticker preview"><rect width="${W}" height="${H}" fill="#fff"/>${o}</svg>`;
+}
+const imgFormat = src => /^data:image\/jpe?g/i.test(src) ? "JPEG" : "PNG";
+function opsToPDF(doc,ops,ox,oy){
+  for(const p of ops){
+    const x=ox+p.x,y=oy+p.y;
+    if(p.t==="rect"){ doc.setDrawColor(p.stroke); doc.setLineWidth(.15); doc.setFillColor(p.fill); doc.rect(x,y,p.w,p.h,"FD"); }
+    if(p.t==="img"){ try{ doc.addImage(p.src,imgFormat(p.src),x,y,p.w,p.h); }catch(e){} }
+    if(p.t==="text"){
+      doc.setFont(p.font==="mono"?"courier":"helvetica",p.bold?"bold":"normal"); doc.setFontSize(p.pt); doc.setTextColor(0,0,0);
+      doc.text(p.text,x,y,{align:p.align==="center"?"center":"left"});
+    }
+    if(p.t==="qr"){
+      const mx=qrMatrix(p.text), n=mx.length, u=p.s/n; doc.setFillColor(0,0,0);
+      mx.forEach((row,r)=>{ let c=0; while(c<n){ if(!row[c]){c++;continue;} let e=c; while(e<n&&row[e]) e++; doc.rect(x+c*u,y+r*u,(e-c)*u,u+.012,"F"); c=e; } });
+    }
+  }
+}
+function curSheet(){
+  const st=S.settings.sheet||{};
+  if(st.id==="custom"&&st.custom) return {id:"custom",name:"Custom",...st.custom};
+  return SHEETS.find(s=>s.id===st.id)||SHEETS[0];
+}
+function buildPDF(items,start,opts){
+  const sh=curSheet(), doc=new jspdf.jsPDF({unit:"mm",format:"a4",compress:true});
+  const per=sh.cols*sh.rows; let i=start%per, page=0;
+  for(const it of items){
+    const c=i%sh.cols, r=Math.floor(i/sh.cols);
+    const x=sh.left+c*sh.px+(opts.nx||0), y=sh.top+r*sh.py+(opts.ny||0);
+    opsToPDF(doc,itemOps(it,sh.w,sh.h),x,y);
+    if(opts.outline){ doc.setDrawColor(150); doc.setLineWidth(.1); doc.rect(x,y,sh.w,sh.h); }
+    i++; if(i>=per && it!==items[items.length-1]){ i=0; page++; doc.addPage("a4"); }
+  }
+  return {doc,next:i%per};
+}
+
+/* ---------- data ---------- */
+function watch(){
+  const timer=setTimeout(()=>{ if(!S.ready){ S.stale=true; render(); } },10000);
+  const seen=new Set();
+  const sub=(name,key)=>col(name).onSnapshot(snap=>{
+    const o={}; snap.docs.forEach(d=>o[d.id]={...d.data(),id:d.id}); S[key]=o;
+    if(!snap.metadata.fromCache) seen.add(key);
+    if(seen.size>=4){ clearTimeout(timer); S.stale=false; }
+    if(key==="locs"&&snap.empty&&!snap.metadata.fromCache) seedStorages();
+    S.ready=1; dataChanged();
+  },e=>{ clearTimeout(timer); toast("Lost the link to your stock. Reload the page."); });
+  sub("spools","spools"); sub("locations","locs"); sub("brands","brands"); sub("profiles","profiles");
+  db.doc("config/main").onSnapshot(d=>{ S.settings=d.exists?{...d.data()}:{}; dataChanged(); },()=>{});
+}
+let seeded=false;
+async function seedStorages(){
+  if(seeded) return; seeded=true;
+  const d=await db.doc("config/main").get().catch(()=>null);
+  if(d&&d.exists&&d.data().seeded) return;
+  const add=(id,name,group,kind,capacity,order,extra={})=>col("locations").doc(id).set({name,group,kind,capacity,order,wantLabel:true,...extra});
+  add("pi-1","Slot 1","Space Pi Plus (Alduin)","dryer",1,1,{maxC:70});
+  add("pi-2","Slot 2","Space Pi Plus (Alduin)","dryer",1,2,{maxC:70});
+  let o=10;
+  for(const a of [1,2]) for(const n of [1,2,3,4]) add(`ams${a}-${n}`,`Slot ${n}`,`AMS ${a} (Betsy)`,"ams",1,++o);
+  add("rack-top","Top shelf","Rack","shelf",10,21);
+  add("rack-bottom","Bottom shelf","Rack","shelf",10,22);
+  saveConfig({seeded:true});
+}
+let dataTimer=null;
+function dataChanged(){
+  clearTimeout(dataTimer);
+  dataTimer=setTimeout(()=>{
+    if(!booted){ booted=true; route(true); return; }
+    const el=document.activeElement;
+    if(S.view==="scan") return;
+    if(["add","edit","setup","import"].includes(S.view)) { if(S.view==="setup"&&!(el&&el.closest&&el.closest("#main")&&el.matches("input,select,textarea"))) render(); return; }
+    if(el&&el.closest&&el.closest("#main")&&el.matches("input[type=text],input[type=number],input[type=search],textarea")) return;
+    render();
+  },60);
+}
+const fail = (e,what) => toast(e&&e.code==="resource-exhausted" ? `${what}: the free daily limit is used up. It resets tomorrow.` : e&&e.code==="permission-denied" ? `${what}: sign in again.` : `${what}. Check your signal and try again.`);
+async function saveConfig(patch){
+  const next={...S.settings,...patch}; S.settings=next;
+  try{ await db.doc("config/main").set(next); }catch(e){ fail(e,"Couldn't save that setting"); }
+}
+function nextIds(n){
+  let hi=S.settings.lastId||0;
+  for(const id of Object.keys(S.spools)){ const v=parseInt(id.slice(1),10); if(v<9000&&v>hi) hi=v; }
+  const out=[]; for(let i=1;i<=n;i++) out.push("s"+String(hi+i).padStart(4,"0"));
+  return {ids:out,last:hi+n};
+}
+
+/* ---------- moving ---------- */
+async function doMove(id,to,opts={}){
+  const sp=S.spools[id]; if(!sp) return;
+  const from=sp.loc||null;
+  if(from===to){ toast("Already in "+locName(to)); return; }
+  const l=S.locs[to];
+  const patch={loc:to,status:"active",history:[{at:Date.now(),from,to},...(sp.history||[])].slice(0,30)};
+  if(l&&l.kind==="dryer") patch.lastDried=Date.now();
+  try{
+    await col("spools").doc(id).update(patch);
+    if(opts.swap) await col("spools").doc(opts.swap).update({loc:from,history:[{at:Date.now(),from:to,to:from},...(S.spools[opts.swap].history||[])].slice(0,30)});
+    S.spools[id]={...sp,...patch}; if(S.view==="scan") Scanner.moved(id,to,hotNote(sp,l)); else render();
+    const hot=hotNote(sp,l);
+    toast(`${id.toUpperCase()} moved to ${locName(to)}.${hot}`,"Undo",async()=>{
+      await col("spools").doc(id).update({loc:from,status:sp.status||"active",history:sp.history||[],lastDried:sp.lastDried||null});
+      if(opts.swap) await col("spools").doc(opts.swap).update({loc:to,history:S.spools[opts.swap].history?.slice(1)||[]});
+    });
+  }catch(e){ fail(e,"That move didn't save"); }
+}
+const hotNote = (sp,l) => l&&l.maxC&&sp.dT>l.maxC ? ` It wants ${sp.dT} °C and this dryer stops at ${l.maxC} °C.` : "";
+function tryMove(id,to){
+  const sp=S.spools[id], l=S.locs[to]; if(!sp||!l) return;
+  const m=baseMat(sp.material);
+  const check2=()=>{
+    const here=inLoc(to).filter(s=>s.id!==id);
+    if(l.capacity && here.length>=l.capacity){
+      if(l.capacity===1){
+        const o=here[0];
+        ask(`${locName(to)} is taken`,`${o.material} ${o.colour||""} (${o.id.toUpperCase()}) is in there. Swap them, so it goes to ${locName(sp.loc)}?`,[["Swap",()=>doMove(id,to,{swap:o.id}),"go"],["Cancel",null]]);
+      } else ask(`${locName(to)} is full`,`It holds ${l.capacity}. Move something out first, or raise the limit in Setup.`,[["OK",null]]);
+      return;
+    }
+    doMove(id,to);
+  };
+  if(l.kind==="ams" && m && !m.ams) ask(`${m.key} in the AMS`,`Bambu Lab lists ${m.key} as not suitable for the AMS. Move it anyway?`,[["Move anyway",check2,"go"],["Cancel",null]]);
+  else check2();
+}
+function handleScan(code,source){
+  if(!code){ toast("That isn't one of your stickers."); return; }
+  if(/^s\d+/.test(code)){
+    if(!S.spools[code]){ go(code); return; }
+    if(source==="page"&&S.view==="scan"){ Scanner.take(code); return; }
+    local.set("pending",{id:code,at:Date.now()}); S.scanned=code;
+    go(code); return;
+  }
+  const id=code.replace(/^loc-/,"");
+  if(!S.locs[id]){ toast("That storage isn't in the system any more."); return; }
+  if(source==="page"&&S.view==="scan"){ Scanner.take(code); return; }
+  const p=local.get("pending");
+  go(code);
+  if(p&&Date.now()-p.at<MOVE_WINDOW&&S.spools[p.id]){ local.del("pending"); tryMove(p.id,id); }
+}
+
+/* ---------- routing ---------- */
+const VIEWS=["stock","add","scan","stickers","setup","import"];
+function go(v){
+  internal=true;
+  if(location.hash==="#"+v){ internal=false; route(false); return; }
+  location.hash=v;
+}
+addEventListener("hashchange",()=>{ const ext=!internal; internal=false; if(booted) route(ext); });
+function route(external){
+  const h=location.hash.slice(1).toLowerCase()||"stock";
+  if(external&&(/^s\d+/.test(h)||h.startsWith("loc-"))){ S.view=h.startsWith("loc-")?"loc":"spool"; S.param=h.replace(/^loc-/,""); handleArrival(h); return; }
+  if(/^s\d+/.test(h)){ S.view="spool"; S.param=h; }
+  else if(h.startsWith("edit-")){ S.view="edit"; S.param=h.slice(5); }
+  else if(h.startsWith("loc-")){ S.view="loc"; S.param=h.slice(4); }
+  else if(VIEWS.includes(h)){ S.view=h; S.param=null; }
+  else { S.view="stock"; S.param=null; }
+  if(S.view==="add"&&!F) newDraft();
+  if(S.view==="edit") editDraft(S.param);
+  render(); try{ scrollTo(0,0); }catch{}
+}
+function handleArrival(code){
+  // a sticker was scanned with the phone's own camera and opened this link
+  if(code.startsWith("loc-")){
+    const id=code.slice(4), p=local.get("pending");
+    render();
+    if(p&&Date.now()-p.at<MOVE_WINDOW&&S.spools[p.id]&&S.locs[id]){ local.del("pending"); tryMove(p.id,id); }
+  } else {
+    if(S.spools[code]) local.set("pending",{id:code,at:Date.now()});
+    S.scanned=code; render();
+  }
+}
+
+/* ---------- views ---------- */
+function render(){
+  document.querySelectorAll("[data-nav]").forEach(b=>{
+    if(b.dataset.nav===S.view||(S.view==="edit"&&b.dataset.nav==="add")) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current");
+  });
+  const m=$("#main");
+  if(S.view!=="scan") Scanner.stop();
+  if(!db){ m.innerHTML=!CFG.firebase?SOURCE_NOTE:!started?`<div class="busy"><span class="spin"></span>Opening your stock</div>`:vLogin(); return; }
+  if(!S.ready){ m.innerHTML=S.stale?`<div class="note warn">Can't reach your stock yet. Check your signal, it will load when it connects.</div>`:`<div class="busy"><span class="spin"></span>Opening your stock</div>`; return; }
+  const v={stock:vStock,add:vForm,edit:vForm,scan:vScan,stickers:vStickers,setup:vSetup,spool:vSpool,loc:vLoc,import:vImport}[S.view]||vStock;
+  m.innerHTML=(!navigator.onLine?`<div class="note warn">No signal. Changes are kept on this device and sync when you're back.</div>`:S.stale?`<div class="note warn">Showing your last saved copy. It may be out of date.</div>`:"")+v();
+  if(S.view==="scan") Scanner.attach();
+  if(S.view==="add"||S.view==="edit") formPreview();
+  if(crop) drawCrop();
+}
+
+function vLogin(){
+  return `<form class="card authcard" id="authForm">
+    <h2>Sign in</h2>
+    <label class="field"><span>Email</span><input type="text" inputmode="email" autocomplete="username" autocapitalize="off" id="authEmail" required></label>
+    <label class="field"><span>Password</span><input type="password" autocomplete="current-password" id="authPass" required style="width:100%;min-height:44px;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:2px"></label>
+    <p class="authbad" id="authErr" hidden></p>
+    <div class="btns"><button class="btn go" type="submit">Sign in</button><button class="btn" type="button" data-act="authCreate">Create account</button><button class="btn" type="button" data-act="authReset">Forgot password</button></div>
+  </form>`;
+}
+function authMsg(e){
+  return ({"auth/invalid-credential":"That email or password isn't right.","auth/wrong-password":"That email or password isn't right.","auth/user-not-found":"That email or password isn't right.","auth/email-already-in-use":"There's already an account with that email.","auth/weak-password":"Use at least 6 characters.","auth/invalid-email":"That doesn't look like an email address.","auth/network-request-failed":"No connection. Try again with signal.","auth/admin-restricted-operation":"New accounts are switched off for this app."}[e&&e.code])||"Couldn't sign in. Try again.";
+}
+const authErr = e => { const n=$("#authErr"); if(n){ n.hidden=false; n.textContent=authMsg(e); } };
+function vStock(){
+  const live=liveSpools(), kg=live.reduce((a,s)=>a+(s.remainG??s.netG??0),0)/1000, low=live.filter(isLow).length;
+  const hasEx=Object.values(S.spools).some(isExample);
+  let racks="";
+  for(const [g,ls] of groups()){
+    const isSlots=ls.length>1&&ls.every(l=>l.capacity===1);
+    if(isSlots){
+      racks+=`<section class="rack"><h3>${esc(g)}</h3><div class="slots" style="grid-template-columns:repeat(${ls.length},minmax(0,1fr))">${ls.map(l=>{const s=inLoc(l.id)[0];return `<button class="slot ${s?"":"empty"}" data-go="loc-${l.id}" aria-label="${esc(locName(l.id))}">${disc(s,40)}<small>${s?esc(s.id.toUpperCase()):esc(l.name.replace(/\D/g,"")||l.name)}</small></button>`;}).join("")}</div></section>`;
+    } else for(const l of ls){
+      const here=inLoc(l.id);
+      racks+=`<section class="rack"><h3>${esc(locName(l.id))}<span class="mono">${here.length}${l.capacity?"/"+l.capacity:""}</span></h3><button class="shelf" data-go="loc-${l.id}" aria-label="Open ${esc(locName(l.id))}">${here.length?here.slice(0,12).map(s=>disc(s,32)).join("")+(here.length>12?`<span class="mono">+${here.length-12}</span>`:""):`<span class="muted">Empty</span>`}</button></section>`;
+    }
+  }
+  const mats=[...new Set(live.map(s=>baseMat(s.material)?.key||s.material))].sort();
+  const f=S.filter;
+  const q=f.q.toLowerCase();
+  let rows=(f.tab==="used"?Object.values(S.spools).filter(s=>s.status==="used"):live).filter(s=>{
+    if(f.tab==="low"&&!isLow(s)) return false;
+    if(f.mat&&(baseMat(s.material)?.key||s.material)!==f.mat) return false;
+    if(q&&![s.id,s.brand,s.material,s.colour,s.finish,locName(s.loc)].join(" ").toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a,b)=>a.id.localeCompare(b.id));
+  const list=rows.map(rowHTML).join("");
+  return `<div class="summary">${live.length} spool${live.length===1?"":"s"}, ${kg.toFixed(1)} kg${low?`, ${low} low`:""}</div>
+  ${hasEx?`<div class="note">The spools marked Example are only there to show how this works. <button class="btn sm" data-act="delExamples">Delete examples</button></div>`:""}
+  <div class="racks">${racks||`<div class="card">Add your storages in Setup.</div>`}</div>
+  <div class="tools">
+    <input type="search" id="q" aria-label="Search spools" placeholder="Search brand, material, colour or code" value="${esc(f.q)}">
+    <div class="chips">
+      ${[["active","All"],["low","Low"],["used","Used up"]].map(([k,t])=>`<button class="chip" data-act="tab" data-v="${k}" aria-pressed="${f.tab===k}">${t}</button>`).join("")}
+      ${mats.map(m=>`<button class="chip" data-act="mat" data-v="${esc(m)}" aria-pressed="${f.mat===m}">${esc(m)}</button>`).join("")}
+    </div>
+  </div>
+  <div class="list" id="spoolList">${list||emptyList(live.length)}</div>`;
+}
+const emptyList = n => n ? `<div class="card">Nothing matches that search.</div>` : `<div class="card"><h3>No spools yet</h3><p>Add your first one and it joins the sticker queue.</p><div class="btns"><button class="btn go" data-go="add">Add a spool</button></div></div>`;
+function rowHTML(s){
+  const p=Math.round(pct(s)*100);
+  return `<button class="row" data-go="${s.id}">${disc(s)}<span style="min-width:0"><b>${esc(s.material)} ${esc(s.colour||"")}</b><span class="sub">${esc(s.brand)}, ${esc(s.status==="used"?"used up":locName(s.loc))}</span></span><span class="end"><span class="mono">${esc(s.id.toUpperCase())}</span><br>${s.example?`<span class="pill ex">Example</span>`:isLow(s)&&s.status!=="used"?`<span class="pill low">Low</span>`:`<span class="mono">${s.remainG??s.netG??"?"} g</span>`}</span></button>`;
+}
+
+function vSpool(){
+  const s=S.spools[S.param];
+  if(!s) return `<div class="card"><h2>${esc((S.param||"").toUpperCase())} isn't in your stock</h2><p>It may have been deleted, or the sticker was printed before the spool was saved.</p><div class="btns"><button class="btn" data-go="stock">Back to stock</button><button class="btn go" data-go="add">Add a spool</button></div></div>`;
+  const p=local.get("pending");
+  const scanned=S.scanned===s.id&&p&&p.id===s.id&&Date.now()-p.at<MOVE_WINDOW;
+  const rem=s.remainG??s.netG??0, lowC=isLow(s)?"low":"";
+  const moveBtn=(l,four)=>{
+    const here=inLoc(l.id).filter(x=>x.id!==s.id), cur=s.loc===l.id;
+    const sub=cur?"Here":l.capacity===1?(here[0]?(four?esc(here[0].id.toUpperCase()):esc(here[0].material+" "+(here[0].colour||""))):"Free"):here.length+(l.capacity?" of "+l.capacity:(here.length===1?" spool":" spools"));
+    return `<button class="move" data-act="move" data-loc="${l.id}" aria-label="${esc(locName(l.id))}" ${cur?'aria-current="true"':""}><span>${esc(l.name)}</span><small>${sub}</small></button>`;
+  };
+  const multi=groups().filter(([,ls])=>ls.length>1), single=groups().filter(([,ls])=>ls.length===1).map(([,ls])=>ls[0]);
+  const moves=multi.map(([g,ls])=>`<div class="movegroup"><div class="lab">${esc(g)}</div><div class="movegrid ${ls.length===4?"four":""}">${ls.map(l=>moveBtn(l,ls.length===4)).join("")}</div></div>`).join("")
+    +(single.length?`<div class="movegroup">${multi.length?`<div class="lab">Other storage</div>`:""}<div class="movegrid">${single.map(l=>moveBtn(l,false)).join("")}</div></div>`:"");
+  const hist=(s.history||[]).slice(0,6).map(h=>`<div>${when(h.at)}: ${esc(locName(h.from))} to ${esc(locName(h.to))}</div>`).join("");
+  return `<div class="spoolhead">${disc(s,84)}<div style="min-width:0"><div class="code">${esc(s.id.toUpperCase())}${s.example?' <span class="pill ex">Example</span>':""}${s.status==="used"?' <span class="pill ex">Used up</span>':""}</div><h1>${esc(s.material)}</h1><div>${esc(s.brand)}${s.colour?", "+esc(s.colour):""}${s.finish?", "+esc(s.finish):""}</div></div></div>
+  ${scanned?`<div class="note"><b>Scanned.</b> Tap a storage below, or scan a storage sticker in the next 5 minutes to file it there.</div>`:""}
+  <div class="card"><h2>Move to</h2>${moves||"Add storages in Setup first."}</div>
+  <div class="split">
+    <div class="card">
+      <h2>Remaining</h2>
+      <div><div class="bar ${lowC}"><i style="width:${Math.round(pct(s)*100)}%"></i></div><p class="mono" style="margin-top:6px">${rem} g of ${s.netG??"?"} g</p></div>
+      <div class="g2">
+        <label class="field"><span>Grams left</span><input type="number" inputmode="numeric" id="remG" value="${rem}"></label>
+        <label class="field"><span>Or scale reading, spool on</span><input type="number" inputmode="numeric" id="scaleG" placeholder="${s.tareG?"Takes off "+s.tareG+" g":"Set empty spool first"}"></label>
+      </div>
+      <div class="btns"><button class="btn go" data-act="saveRemain">Save weight</button><button class="btn" data-act="usedUp">${s.status==="used"?"Back in stock":"Mark used up"}</button></div>
+    </div>
+    <div class="card">
+      <h2>Print settings</h2>
+      <dl class="spec" style="margin:0">
+        <div><dt>Nozzle</dt><dd>${esc(range(s.nMin,s.nMax))||"-"} °C</dd></div>
+        <div><dt>Bed</dt><dd>${esc(range(s.bMin,s.bMax))||"-"} °C</dd></div>
+        <div><dt>Dry</dt><dd>${s.dT?`${s.dT} °C ${s.dH||""} h`:"-"}</dd></div>
+        <div><dt>Last in dryer</dt><dd>${s.lastDried?ago(s.lastDried):"Not logged"}</dd></div>
+        <div><dt>Diameter</dt><dd>${esc(s.dia||1.75)} mm</dd></div>
+        <div><dt>Empty spool</dt><dd>${s.tareG?s.tareG+" g":"Not set"}</dd></div>
+      </dl>
+      <div class="btns"><button class="btn" data-go="edit-${s.id}">Edit</button><button class="btn" data-act="reprint">Print sticker again</button></div>
+    </div>
+  </div>
+  ${hist?`<div class="card"><h2>Moves</h2><div class="hist">${hist}</div></div>`:""}
+  <div class="btns"><button class="btn bad" data-act="delSpool">Delete spool</button></div>`;
+}
+
+function vLoc(){
+  const l=S.locs[S.param];
+  if(!l) return `<div class="card"><h2>That storage is gone</h2><div class="btns"><button class="btn" data-go="stock">Back to stock</button></div></div>`;
+  const here=inLoc(l.id);
+  return `<div><div class="code">Storage</div><h1>${esc(locName(l.id))}</h1></div>
+  <div class="list">${here.map(rowHTML).join("")||`<div class="card">Nothing in here. Scan a spool, then scan this storage's sticker to file it.</div>`}</div>
+  <div class="btns"><button class="btn" data-act="printLoc">Add sticker to queue</button></div>`;
+}
+
+function vScan(){
+  const t=local.get("scanTarget")||"";
+  const opts=orderedLocs().map(l=>`<option value="${l.id}" ${t===l.id?"selected":""}>${esc(locName(l.id))}</option>`).join("");
+  return `<div class="card">
+    <div class="camwrap" id="camWrap" hidden><video id="cam" playsinline muted></video><i></i></div>
+    <div class="scanstate" id="scanState"></div>
+    <div class="btns" id="camBtns"><button class="btn go" id="camStart" data-act="camStart">Start camera</button><button class="btn" id="camStop" data-act="camStop" hidden>Stop camera</button><label class="btn" for="pickScan">Take a photo instead</label><button class="btn" id="heldOpen" data-act="heldOpen" hidden>Open spool</button></div>
+    <div id="scanOut" hidden></div>
+  </div>
+  <div class="card">
+    <label class="field"><span>Send every spool straight to</span><select id="scanTarget"><option value="">Ask me: scan a storage sticker next</option>${opts}</select></label>
+    <label class="field"><span>Sticker won't read? Type the code</span><input type="text" id="codeIn" autocapitalize="off" autocomplete="off" placeholder="S0012"></label>
+    <div class="btns"><button class="btn" data-act="codeGo">Open</button></div>
+  </div>`;
+}
+
+/* live camera scanner: scan a spool, then a storage */
+const Scanner={
+  stream:null, timer:0, last:"", lastAt:0, held:null, msg:"", canvas:null, det:null,
+  say(text,held){ const n=$("#scanState"); if(n){ n.textContent=text; n.classList.toggle("held",!!held); } const o=$("#heldOpen"); if(o) o.hidden=!this.held; },
+  attach(){
+    this.say(this.msg||"Scan a spool sticker",!!this.held);
+    if(this.stream) this.show();
+    else if(local.get("camOK")) this.start();
+  },
+  show(){
+    const v=$("#cam"); if(!v) return;
+    $("#camWrap").hidden=false; $("#camStart").hidden=true; $("#camStop").hidden=false;
+    v.srcObject=this.stream; v.play().catch(()=>{});
+    clearInterval(this.timer); this.timer=setInterval(()=>this.tick(),180);
+  },
+  async start(){
+    if(!navigator.mediaDevices?.getUserMedia){ this.say("This browser can't use the camera. Take a photo instead."); return; }
+    try{
+      this.stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}}});
+      local.set("camOK",true);
+      if("BarcodeDetector" in window){ try{ this.det=new BarcodeDetector({formats:["qr_code"]}); }catch{} }
+      if(S.view==="scan") this.show(); else this.stop();
+    }catch(e){ local.del("camOK"); this.say("Camera blocked. Allow it in your settings, or take a photo instead."); }
+  },
+  stop(){
+    clearInterval(this.timer); this.timer=0;
+    if(this.stream){ this.stream.getTracks().forEach(t=>t.stop()); this.stream=null; }
+    const w=$("#camWrap"); if(w){ w.hidden=true; $("#camStart").hidden=false; $("#camStop").hidden=true; }
+  },
+  busy:false,
+  async tick(){
+    const v=$("#cam"); if(!v||v.readyState<2||this.busy||!$("#modal").hidden) return;
+    this.busy=true;
+    try{
+      let raw=null;
+      if(this.det){ const r=await this.det.detect(v).catch(()=>[]); raw=r[0]?.rawValue||null; }
+      if(!raw&&window.jsQR){
+        const c=this.canvas||(this.canvas=document.createElement("canvas")), k=Math.min(1,800/v.videoWidth);
+        c.width=v.videoWidth*k|0; c.height=v.videoHeight*k|0;
+        const x=c.getContext("2d",{willReadFrequently:true}); x.drawImage(v,0,0,c.width,c.height);
+        raw=jsQR(x.getImageData(0,0,c.width,c.height).data,c.width,c.height,{inversionAttempts:"dontInvert"})?.data||null;
+      }
+      if(raw) this.found(raw);
+    } finally { this.busy=false; }
+  },
+  found(raw){
+    const code=parseCode(raw), now=Date.now();
+    if(!code||(code===this.last&&now-this.lastAt<3000)) return;
+    this.last=code; this.lastAt=now;
+    try{ navigator.vibrate&&navigator.vibrate(60); }catch{}
+    this.take(code);
+  },
+  take(code){
+    if(/^s\d+/.test(code)){
+      const sp=S.spools[code];
+      if(!sp){ this.msg=`${code.toUpperCase()} isn't in your stock`; this.held=null; this.say(this.msg); return; }
+      const target=local.get("scanTarget");
+      if(target&&S.locs[target]){ this.held=null; tryMove(code,target); return; }
+      this.held=code; this.msg=`${code.toUpperCase()} ${sp.material} ${sp.colour||""}. Now scan a storage`; this.say(this.msg,true);
+    } else {
+      const id=code.replace(/^loc-/,"");
+      if(!S.locs[id]){ this.msg="That storage isn't in the system any more"; this.say(this.msg); return; }
+      if(!this.held){ this.msg=`That's ${locName(id)}. Scan a spool first`; this.say(this.msg); return; }
+      const h=this.held; this.held=null; tryMove(h,id);
+    }
+  },
+  moved(id,to,note){ this.msg=`${id.toUpperCase()} is in ${locName(to)}.${note||""} Scan the next spool`; this.say(this.msg); },
+};
+
+/* form */
+function blankDraft(){ return {brand:"",material:"",colour:"",hex:"#111111",finish:"",netG:1000,dia:1.75,tareG:"",loc:"",qty:1,nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,src:"none",touched:false}; }
+function newDraft(){ F=blankDraft(); F.editId=null; }
+function editDraft(id){
+  if(F&&F.editId===id) return;
+  const s=S.spools[id]; F=blankDraft(); if(!s) return;
+  Object.assign(F,{editId:id,brand:s.brand,material:s.material,colour:s.colour||"",hex:hexOK(s.hex),finish:s.finish||"",netG:s.netG,dia:s.dia||1.75,tareG:s.tareG||"",loc:s.loc||"",nMin:s.nMin,nMax:s.nMax,bMin:s.bMin,bMax:s.bMax,dT:s.dT,dH:s.dH,src:"saved",touched:true});
+}
+function vForm(){
+  const e=!!F.editId;
+  const names=[...new Set([...Object.values(S.brands).map(b=>b.name),...BRANDS])];
+  const mats=[...new Set([...Object.values(S.profiles).map(p=>p.material),...MATERIALS.map(m=>m.key)])];
+  const opts=orderedLocs().map(l=>`<option value="${l.id}" ${F.loc===l.id?"selected":""}>${esc(locName(l.id))}</option>`).join("");
+  return `<div><h1>${e?"Edit "+esc(F.editId.toUpperCase()):"Add a spool"}</h1></div>
+  ${e?"":`<div class="btns"><button class="btn" data-go="import">Import from Spool Reader</button></div>`}
+  ${crop?cropHTML():""}
+  <div class="split">
+    <form class="card" id="spoolForm">
+      <div class="g2">
+        <label class="field"><span>Manufacturer</span><input type="text" id="f_brand" list="brandList" value="${esc(F.brand)}" required></label>
+        <label class="field"><span>Material name</span><input type="text" id="f_material" list="matList" placeholder="PETG HF" value="${esc(F.material)}" required></label>
+      </div>
+      <datalist id="brandList">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>
+      <datalist id="matList">${mats.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>
+      <div class="g2">
+        <label class="field"><span>Colour name</span><input type="text" id="f_colour" value="${esc(F.colour)}"></label>
+        <label class="field"><span>Finish</span><select id="f_finish">${FINISH.map(x=>`<option ${F.finish===x?"selected":""}>${x}</option>`).join("")}</select></label>
+      </div>
+      <div class="swatches"><input type="color" id="f_hex" value="${esc(F.hex)}" aria-label="Filament colour">${COLOURS.map(c=>`<button type="button" class="sw" style="background:${c}" data-act="hex" data-v="${c}" aria-label="Use colour ${c}"></button>`).join("")}</div>
+      <div class="g2">
+        <label class="field"><span>Filament weight (g)</span><input type="number" inputmode="numeric" id="f_netG" value="${esc(F.netG)}"></label>
+        <label class="field"><span>Empty spool (g)</span><input type="number" inputmode="numeric" id="f_tareG" value="${esc(F.tareG)}"></label>
+      </div>
+      <div class="g2">
+        <label class="field"><span>Goes in</span><select id="f_loc"><option value="">No storage yet</option>${opts}</select></label>
+        ${e?`<label class="field"><span>Diameter (mm)</span><input type="number" step="0.01" id="f_dia" value="${esc(F.dia)}"></label>`:`<label class="field"><span>How many identical spools</span><input type="number" inputmode="numeric" min="1" max="20" id="f_qty" value="${esc(F.qty)}"></label>`}
+      </div>
+      <h3>Print settings</h3>
+      <div class="g4">
+        <label class="field"><span>Nozzle min</span><input type="number" inputmode="numeric" id="f_nMin" value="${esc(F.nMin)}"></label>
+        <label class="field"><span>Nozzle max</span><input type="number" inputmode="numeric" id="f_nMax" value="${esc(F.nMax)}"></label>
+        <label class="field"><span>Bed min</span><input type="number" inputmode="numeric" id="f_bMin" value="${esc(F.bMin)}"></label>
+        <label class="field"><span>Bed max</span><input type="number" inputmode="numeric" id="f_bMax" value="${esc(F.bMax)}"></label>
+      </div>
+      <div class="g2">
+        <label class="field"><span>Dry at (°C)</span><input type="number" inputmode="numeric" id="f_dT" value="${esc(F.dT)}"></label>
+        <label class="field"><span>Dry for (hours)</span><input type="number" inputmode="numeric" id="f_dH" value="${esc(F.dH)}"></label>
+      </div>
+      <p id="srcNote"></p>
+      <div class="btns"><button class="btn go" type="submit" id="saveSpool">${e?"Save changes":"Add to stock"}</button>${e?`<button type="button" class="btn" data-go="${F.editId}">Cancel</button>`:""}</div>
+    </form>
+    <div class="card"><h3>Sticker</h3><div id="preview"></div><div id="logoHint"></div></div>
+  </div>`;
+}
+const fields=["brand","material","colour","finish","hex","netG","tareG","loc","qty","dia","nMin","nMax","bMin","bMax","dT","dH"];
+function readForm(){ for(const k of fields){ const el=$("#f_"+k); if(el) F[k]=el.value; } }
+function writePrint(){ for(const k of ["nMin","nMax","bMin","bMax","dT","dH"]){ const el=$("#f_"+k); if(el) el.value=F[k]??""; } }
+function draftSpool(){ return {id:F.editId||nextIds(1).ids[0],brand:F.brand,material:F.material,colour:F.colour,hex:F.hex,nMin:num(F.nMin),nMax:num(F.nMax),bMin:num(F.bMin),bMax:num(F.bMax),dT:num(F.dT),dH:num(F.dH)}; }
+function formPreview(){
+  const sh=curSheet(), box=$("#preview"); if(!box) return;
+  box.innerHTML=opsToSVG(spoolOps(draftSpool(),sh.w,sh.h),sh.w,sh.h);
+  const n=$("#srcNote"); if(n) n.textContent=srcText(F);
+  const hint=$("#logoHint"); if(hint){
+    const b=S.brands[slug(F.brand)];
+    hint.innerHTML=F.brand&&!(b&&b.logo)?`<div class="btns" style="margin-top:8px"><label class="btn sm" for="pickLogo" data-act="logoFor" data-v="${esc(F.brand)}">Add ${esc(F.brand)} logo</label></div>`:"";
+  }
+}
+function refreshLookup(){
+  if(F.touched) { formPreview(); return; }
+  const i=lookup(F.brand,F.material);
+  Object.assign(F,{nMin:i.nMin,nMax:i.nMax,bMin:i.bMin,bMax:i.bMax,dT:i.dT,dH:i.dH,src:i.src,base:i.base});
+  const b=S.brands[slug(F.brand)]; if(b&&b.tareG&&!F.tareG){ F.tareG=b.tareG; const t=$("#f_tareG"); if(t) t.value=b.tareG; }
+  writePrint(); formPreview();
+}
+async function submitForm(){
+  readForm();
+  if(!F.brand.trim()||!F.material.trim()){ toast("Add the manufacturer and material name."); return; }
+  const btn=$("#saveSpool"); if(btn) btn.disabled=true;
+  const now=Date.now(), brand=F.brand.trim(), material=F.material.trim();
+  const body={brand,material,colour:F.colour.trim(),hex:F.hex,finish:F.finish,netG:num(F.netG)||1000,tareG:num(F.tareG),dia:num(F.dia)||1.75,loc:F.loc||null,
+    nMin:num(F.nMin),nMax:num(F.nMax),bMin:num(F.bMin),bMax:num(F.bMax),dT:num(F.dT),dH:num(F.dH)};
+  try{
+    const bId=slug(brand), oldB=S.brands[bId];
+    await col("brands").doc(bId).set({...(oldB||{}),name:oldB?.name||brand,tareG:body.tareG||oldB?.tareG||null});
+    await col("profiles").doc(profileId(brand,material)).set({brand,material,nMin:body.nMin,nMax:body.nMax,bMin:body.bMin,bMax:body.bMax,dT:body.dT,dH:body.dH});
+    let first;
+    if(F.editId){
+      first=F.editId;
+      const old=S.spools[F.editId];
+      const rem=(old.remainG!=null&&old.remainG>body.netG)?body.netG:old.remainG;
+      await col("spools").doc(F.editId).update({...body,remainG:rem,labelled:false});
+    } else {
+      const n=clamp(parseInt(F.qty)||1,1,20), {ids,last}=nextIds(n); first=ids[0];
+      for(const id of ids){
+        const doc={...body,remainG:body.netG,status:"active",labelled:false,addedAt:now,history:body.loc?[{at:now,from:null,to:body.loc}]:[]};
+        await col("spools").doc(id).set(doc); S.spools[id]={...doc,id};
+      }
+      await saveConfig({lastId:last});
+    }
+    const added=F.editId?null:parseInt(F.qty)||1;
+    F=null; crop=null;
+    toast(added?`Added ${first.toUpperCase()}${added>1?` and ${added-1} more`:""}. Sticker is in the queue.`:"Saved. Sticker is back in the queue.");
+    go(first);
+  }catch(e){ if(btn) btn.disabled=false; fail(e,"That spool didn't save"); }
+}
+
+/* stickers */
+function queue(){
+  const a=[];
+  for(const s of Object.values(S.spools)) if(s.status!=="used"&&!s.labelled&&!s.example) a.push({kind:"spool",data:s,key:"s:"+s.id});
+  for(const l of orderedLocs()) if(l.wantLabel) a.push({kind:"loc",data:l,key:"l:"+l.id});
+  return a;
+}
+const Q={skip:new Set(),nx:null,ny:null,outline:false};
+function vStickers(){
+  const sh=curSheet(), st=S.settings.sheet||{}, per=sh.cols*sh.rows, start=(st.start||0)%per;
+  const q=queue(), chosen=q.filter(i=>!Q.skip.has(i.key));
+  const cells=[]; for(let i=0;i<per;i++){ const k=i<start?"used":(i-start<chosen.length?"next":""); cells.push(`<button class="cell ${k}" data-act="cell" data-v="${i}" aria-label="Start at sticker ${i+1}"></button>`); }
+  const c=st.custom||{w:63.5,h:38.1,cols:3,rows:7,left:7.25,top:15.15,px:66,py:38.1};
+  return `<div><h1>Stickers</h1></div>
+  <div class="split">
+    <div class="card queuecard">
+      <h2>Next to print</h2>
+      ${q.length?`<div class="tiles">${q.map(i=>`<label class="tile"><input type="checkbox" data-act="pick" data-v="${esc(i.key)}" aria-label="Print this sticker" ${Q.skip.has(i.key)?"":"checked"}>${opsToSVG(itemOps(i,sh.w,sh.h),sh.w,sh.h)}</label>`).join("")}</div>`:`<p>Nothing waiting. New spools land here automatically, and you can reprint any sticker from its spool page.</p>`}
+    </div>
+    <div class="card sheetfirst">
+      <h2>Sheet</h2>
+      <label class="field"><span>Sticker size</span><select id="sheetSel">${SHEETS.map(s=>`<option value="${s.id}" ${sh.id===s.id?"selected":""}>${esc(s.name)}</option>`).join("")}<option value="custom" ${sh.id==="custom"?"selected":""}>Custom size</option></select></label>
+      ${sh.id==="custom"?`<div class="g4">${[["w","Width"],["h","Height"],["cols","Across"],["rows","Down"],["left","Left edge"],["top","Top edge"],["px","Step across"],["py","Step down"]].map(([k,t])=>`<label class="field"><span>${t}</span><input type="number" step="0.01" id="cu_${k}" value="${esc(c[k])}"></label>`).join("")}</div>`:""}
+      <div class="lab">Tap the first free sticker on your sheet</div>
+      <div class="sheetmap" style="grid-template-columns:repeat(${sh.cols},1fr);--ar:${sh.w}/${sh.h}">${cells.join("")}</div>
+      <div class="g2">
+        <label class="field"><span>Nudge right (mm)</span><input type="number" step="0.1" id="nudgeX" value="${esc(st.nx??0)}"></label>
+        <label class="field"><span>Nudge down (mm)</span><input type="number" step="0.1" id="nudgeY" value="${esc(st.ny??0)}"></label>
+      </div>
+      <label class="check"><input type="checkbox" id="outline" ${Q.outline?"checked":""}><span>Print sticker outlines, for a test on plain paper</span></label>
+      ${IS_APP?`<p>Print stickers from your PC or a browser. The Android app can't save PDFs.</p>`:`<button class="btn go" data-act="pdf" ${chosen.length?"":"disabled"}>Download PDF (${chosen.length})</button>
+      <p>Print at 100% or Actual size. Fit to page will throw the stickers out of line.</p>`}
+    </div>
+  </div>`;
+}
+async function makePDF(){
+  const items=queue().filter(i=>!Q.skip.has(i.key)); if(!items.length) return;
+  const st=S.settings.sheet||{}, sh=curSheet(), start=(st.start||0)%(sh.cols*sh.rows);
+  if(!window.jspdf){ toast("The PDF maker didn't load. Reload the page and try again."); return; }
+  const {doc,next}=buildPDF(items,start,{nx:num(st.nx)||0,ny:num(st.ny)||0,outline:Q.outline});
+  try{
+    await downloads.save({filename:"spool-stickers.pdf",data:new Blob([doc.output("arraybuffer")],{type:"application/pdf"})});
+  }catch(e){ toast("Couldn't save the PDF here. Try from a computer."); return; }
+  if(Q.outline){ toast("Test sheet saved. Stickers stay in the queue."); return; }
+  try{
+    for(const it of items){
+      if(it.kind==="spool") await col("spools").doc(it.data.id).update({labelled:true});
+      else await col("locations").doc(it.data.id).update({wantLabel:false});
+    }
+    await saveConfig({sheet:{...st,start:next}});
+    toast("Saved. Those stickers are marked as printed.");
+  }catch(e){ fail(e,"PDF saved, but the queue didn't update"); }
+}
+
+/* image helpers */
+const loadImg = blob => new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=URL.createObjectURL(blob); });
+function toCanvas(img,max){
+  const k=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+  const c=document.createElement("canvas"); c.width=Math.round(img.naturalWidth*k); c.height=Math.round(img.naturalHeight*k);
+  c.getContext("2d",{willReadFrequently:true}).drawImage(img,0,0,c.width,c.height); return c;
+}
+const canvasBlob = (c,type="image/jpeg",q=.85) => new Promise(r=>c.toBlob(r,type,q));
+async function decodeQR(file){
+  const img=await loadImg(file);
+  if("BarcodeDetector" in window){ try{ const r=await new BarcodeDetector({formats:["qr_code"]}).detect(img); if(r[0]) return r[0].rawValue; }catch{} }
+  for(const max of [1400,900,600,2200]){
+    const c=toCanvas(img,max), d=c.getContext("2d").getImageData(0,0,c.width,c.height);
+    const q=jsQR(d.data,c.width,c.height,{inversionAttempts:"attemptBoth"}); if(q) return q.data;
+  }
+  return null;
+}
+const parseCode = t => { const m=/(?:#|^)\s*(s\d{4,}|loc-[a-z0-9-]+)\s*$/i.exec(String(t||"").trim()); return m?m[1].toLowerCase():null; };
+
+/* logo crop */
+function openCrop(url,w,h,brand,box,back){
+  const bx=(box&&box.length===4&&box.every(v=>typeof v==="number"))?[clamp(box[0],0,1),clamp(box[1],0,1),clamp(box[2],0,1),clamp(box[3],0,1)]:[.1,.1,.9,.45];
+  if(bx[2]-bx[0]<.03||bx[3]-bx[1]<.02){ bx[0]=.1;bx[1]=.1;bx[2]=.9;bx[3]=.45; }
+  crop={url,w,h,brand,box:bx,back,clean:true};
+}
+const cropHTML = () => `<div class="card" id="cropCard"><h2>${esc(crop.brand)} logo</h2><p>Drag a box round the logo. It goes on every ${esc(crop.brand)} sticker.</p>
+  <div class="cropwrap"><div class="crop" id="cropBox"><img src="${esc(crop.url)}" alt="Photo to crop"><i id="cropRect"></i></div></div>
+  <label class="check"><input type="checkbox" id="cropClean" ${crop.clean?"checked":""}><span>Clean up to black on white</span></label>
+  <div class="btns"><button class="btn go" data-act="cropSave">Use this logo</button><button class="btn" data-act="cropSkip">Skip</button></div></div>`;
+function drawCrop(){
+  const r=$("#cropRect"); if(!r||!crop) return; const [a,b,c,d]=crop.box;
+  r.style.left=a*100+"%"; r.style.top=b*100+"%"; r.style.width=(c-a)*100+"%"; r.style.height=(d-b)*100+"%";
+}
+function cleanBW(ctx,w,h){
+  const im=ctx.getImageData(0,0,w,h), d=im.data, hist=new Array(256).fill(0);
+  for(let i=0;i<d.length;i+=4){ const v=(d[i]*.3+d[i+1]*.59+d[i+2]*.11)|0; hist[v]++; }
+  let total=w*h,sum=0,sb=0,wb=0,best=0,th=128; for(let i=0;i<256;i++) sum+=i*hist[i];
+  for(let i=0;i<256;i++){ wb+=hist[i]; if(!wb) continue; const wf=total-wb; if(!wf) break; sb+=i*hist[i]; const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf); if(v>best){best=v;th=i;} }
+  let dark=0; for(let i=0;i<=th;i++) dark+=hist[i];
+  const inv=dark>total/2;
+  for(let i=0;i<d.length;i+=4){ const v=d[i]*.3+d[i+1]*.59+d[i+2]*.11, on=inv?v>th:v<=th, o=on?0:255; d[i]=d[i+1]=d[i+2]=o; d[i+3]=255; }
+  ctx.putImageData(im,0,0);
+}
+function trimWhite(c){
+  const ctx=c.getContext("2d"),{width:w,height:h}=c,d=ctx.getImageData(0,0,w,h).data;
+  let x0=w,y0=h,x1=-1,y1=-1;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){ const i=(y*w+x)*4; if(d[i+3]>20&&(d[i]<235||d[i+1]<235||d[i+2]<235)){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; } }
+  if(x1<0) return null;
+  const o=document.createElement("canvas"); o.width=x1-x0+1; o.height=y1-y0+1; o.getContext("2d").drawImage(c,x0,y0,o.width,o.height,0,0,o.width,o.height); return o;
+}
+async function saveLogo(){
+  const clean=$("#cropClean")?.checked;
+  const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=crop.url; });
+  const [a,b,c,d]=crop.box, W=img.naturalWidth,H=img.naturalHeight;
+  const sw=Math.max(1,(c-a)*W), sh=Math.max(1,(d-b)*H), k=Math.min(1,720/Math.max(sw,sh));
+  let cv=document.createElement("canvas"); cv.width=Math.round(sw*k); cv.height=Math.round(sh*k);
+  const ctx=cv.getContext("2d",{willReadFrequently:true});
+  ctx.fillStyle="#fff"; ctx.fillRect(0,0,cv.width,cv.height); ctx.drawImage(img,a*W,b*H,sw,sh,0,0,cv.width,cv.height);
+  if(clean) cleanBW(ctx,cv.width,cv.height);
+  cv=trimWhite(cv);
+  if(!cv){ toast("That box looks empty. Drag it over the logo."); return; }
+  const src=cv.toDataURL("image/png"), id=slug(crop.brand), old=S.brands[id]||{};
+  const back=crop.back, brand=crop.brand; crop=null;
+  try{
+    await col("brands").doc(id).set({...old,name:old.name||brand,logo:src,logoW:cv.width,logoH:cv.height});
+    S.brands[id]={...old,id,name:old.name||brand,logo:src,logoW:cv.width,logoH:cv.height};
+    toast(brand+" logo saved.");
+  }catch(e){ fail(e,"That logo didn't save"); }
+  render();
+}
+
+/* import from Spool Reader */
+function parseImport(text){
+  let j; try{ j=JSON.parse(text); }catch{ throw "That isn't a Spool Reader export."; }
+  if(!j||j.format!=="spool-stock-import"||!Array.isArray(j.spools)) throw "That isn't a Spool Reader export.";
+  const items=j.spools.filter(x=>x&&x.brand&&x.material).map((x,i)=>({...x,key:i,on:true,qty:clamp(parseInt(x.qty)||1,1,20)}));
+  if(!items.length) throw "That export has no spools in it.";
+  return {batch:String(j.batch||""),items,logos:j.logos&&typeof j.logos==="object"?j.logos:{},loc:""};
+}
+function vImport(){
+  const opts=orderedLocs().map(l=>`<option value="${l.id}" ${Imp&&Imp.loc===l.id?"selected":""}>${esc(locName(l.id))}</option>`).join("");
+  if(!Imp) return `<div><h1>Import from Spool Reader</h1></div>
+  <div class="card">
+    <div class="btns"><label class="btn go" for="pickImport">Choose the export file</label></div>
+    <label class="field"><span>Or paste the export here</span><textarea id="importText" rows="5"></textarea></label>
+    <div class="btns"><button class="btn" data-act="importPaste">Check it</button></div>
+    <p class="authbad" id="importErr" hidden></p>
+  </div>`;
+  const done=(S.settings.imported||[]).includes(Imp.batch)&&Imp.batch;
+  const n=Imp.items.filter(i=>i.on).reduce((a,i)=>a+i.qty,0);
+  return `<div><h1>Import from Spool Reader</h1></div>
+  ${done?`<div class="note warn">You've already imported this file. Importing it again adds the spools a second time.</div>`:""}
+  <div class="card">
+    <label class="field"><span>Put them all in</span><select id="importLoc"><option value="">No storage yet</option>${opts}</select></label>
+    <div class="list">${Imp.items.map(i=>{const t=i.nMin==null?lookup(i.brand,i.material):i;return `<label class="check"><input type="checkbox" data-imp="${i.key}" ${i.on?"checked":""}><span><b>${esc(i.material)} ${esc(i.colour||"")}</b>${i.qty>1?` x ${i.qty}`:""}<br>${esc(i.brand)}, nozzle ${esc(range(t.nMin,t.nMax))||"not set"}${Imp.logos[i.brand]?", with logo":""}</span></label>`;}).join("")}</div>
+    <div class="btns"><button class="btn go" data-act="importGo" ${n?"":"disabled"}>Add ${n} spool${n===1?"":"s"}</button><button class="btn" data-act="importCancel">Cancel</button></div>
+  </div>`;
+}
+async function runImport(){
+  const now=Date.now(), rows=Imp.items.filter(i=>i.on), total=rows.reduce((a,i)=>a+i.qty,0);
+  const {ids,last}=nextIds(total); let n=0;
+  for(const [name,l] of Object.entries(Imp.logos)){
+    if(!rows.some(r=>r.brand===name)||!l||!/^data:image\/png/.test(l.src||"")) continue;
+    const id=slug(name), old=S.brands[id]||{};
+    col("brands").doc(id).set({...old,name:old.name||name,logo:l.src,logoW:l.w,logoH:l.h});
+  }
+  for(const r of rows){
+    const base=lookup(r.brand,r.material), v=k=>num(r[k])??base[k];
+    const body={brand:r.brand,material:r.material,colour:r.colour||"",hex:hexOK(r.hex),finish:FINISH.includes(r.finish)?r.finish:"",netG:num(r.netG)||1000,tareG:num(r.tareG),dia:num(r.dia)||1.75,loc:Imp.loc||null,nMin:v("nMin"),nMax:v("nMax"),bMin:v("bMin"),bMax:v("bMax"),dT:v("dT"),dH:v("dH")};
+    const bId=slug(r.brand);
+    if(!S.brands[bId]&&!Imp.logos[r.brand]) col("brands").doc(bId).set({name:r.brand,tareG:body.tareG||null});
+    col("profiles").doc(profileId(r.brand,r.material)).set({brand:r.brand,material:r.material,nMin:body.nMin,nMax:body.nMax,bMin:body.bMin,bMax:body.bMax,dT:body.dT,dH:body.dH});
+    for(let i=0;i<r.qty;i++){
+      const id=ids[n++], doc={...body,remainG:body.netG,status:"active",labelled:false,addedAt:now,history:body.loc?[{at:now,from:null,to:body.loc}]:[]};
+      col("spools").doc(id).set(doc); S.spools[id]={...doc,id};
+    }
+  }
+  saveConfig({lastId:last,imported:[...(S.settings.imported||[]).slice(-40),Imp.batch].filter(Boolean)});
+  Imp=null; toast(`Added ${total} spool${total===1?"":"s"}. Stickers are in the queue.`); go("stickers");
+}
+function stockExport(){
+  const spools=liveSpools().map(s=>({id:s.id,brand:s.brand,material:s.material,colour:s.colour||"",hex:s.hex||"",finish:s.finish||"",storage:locName(s.loc)}));
+  return JSON.stringify({format:"spool-stock-list",version:1,exported:new Date().toISOString(),spools});
+}
+
+/* setup */
+function vSetup(){
+  const rows=orderedLocs().map(l=>{const n=inLoc(l.id).length;return `<div class="setrow"><label class="field"><span>${esc(l.group&&l.group!==l.name?l.group:"Storage")}</span><input type="text" data-loc-name="${l.id}" value="${esc(l.name)}"></label><label class="field"><span>Holds</span><input type="number" inputmode="numeric" data-loc-cap="${l.id}" value="${esc(l.capacity??"")}"></label><button class="btn sm" data-act="locDel" data-v="${l.id}" ${n?"disabled":""} aria-label="Delete ${esc(l.name)}">Delete</button></div>`;}).join("");
+  const bs=Object.values(S.brands).sort((a,b)=>a.name.localeCompare(b.name));
+  return `<div><h1>Setup</h1></div>
+  <div class="card"><h2>Storages</h2>
+    ${rows||"<p>No storages yet.</p>"}
+    <div class="setrow"><label class="field"><span>New storage</span><input type="text" id="newLoc"></label><label class="field"><span>Holds</span><input type="number" inputmode="numeric" id="newCap"></label><button class="btn sm go" data-act="locAdd">Add</button></div>
+    <div class="btns"><button class="btn" data-act="printAllLocs">Queue all storage stickers</button></div>
+  </div>
+  <div class="card"><h2>Manufacturers and logos</h2>
+    ${bs.map(b=>`<div class="brandrow">${b.logo?`<img class="logo" src="${esc(b.logo)}" alt="${esc(b.name)} logo">`:`<span class="logo" style="display:grid;place-items:center;width:64px;color:#000;font-size:12px">No logo</span>`}<b>${esc(b.name)}</b><label class="btn sm" for="pickLogo" data-act="logoFor" data-v="${esc(b.name)}">${b.logo?"Change":"Add logo"}</label></div>`).join("")||"<p>Manufacturers appear here when you add a spool.</p>"}
+    ${crop?cropHTML():""}
+  </div>
+  <div class="card"><h2>Spool Reader</h2><p>Reads labels and identifies spools from photos. Give it your stock list so it can check against what you own.</p>
+    <div class="btns">${CFG.readerUrl?`<a class="btn" href="${esc(CFG.readerUrl)}" target="_blank" rel="noopener">Open Spool Reader</a>`:""}<button class="btn" data-act="listCopy">Copy stock list</button><button class="btn" data-act="listSave">Download stock list</button><button class="btn" data-go="import">Import spools</button></div>
+  </div>
+  ${CFG.repo&&!IS_APP?`<div class="card"><h2>Apps</h2><p>The Android app and Windows exe are on the releases page.</p><div class="btns"><a class="btn" href="https://github.com/${esc(CFG.repo)}/releases/latest" target="_blank" rel="noopener">Open releases</a></div></div>`:""}
+  <div class="card"><h2>Account</h2><p>${esc(firebase.auth().currentUser?.email||"")}</p><div class="btns"><button class="btn" data-act="signOut">Sign out</button></div></div>
+  <div class="card"><h2>Backup</h2><div class="btns"><button class="btn" data-act="csv">Download spool list (CSV)</button><button class="btn" data-act="json">Download full backup (JSON)</button></div></div>`;
+}
+
+/* ---------- modal + toast ---------- */
+let toastT=null;
+function toast(msg,label,fn){
+  const t=$("#toast"); t.hidden=false; t.innerHTML=`<span>${esc(msg)}</span>`;
+  if(label){ const b=document.createElement("button"); b.textContent=label; b.onclick=()=>{ t.hidden=true; fn&&fn(); }; t.append(b); }
+  clearTimeout(toastT); toastT=setTimeout(()=>{ t.hidden=true; },label?9000:4500);
+}
+function ask(title,msg,btns){
+  const m=$("#modal"); m.hidden=false;
+  m.innerHTML=`<div role="dialog" aria-modal="true"><h2>${esc(title)}</h2><p>${esc(msg)}</p><div class="btns" id="askBtns"></div></div>`;
+  btns.forEach(([t,fn,cls])=>{ const b=document.createElement("button"); b.className="btn "+(cls||""); b.textContent=t; b.onclick=()=>{ m.hidden=true; fn&&fn(); }; $("#askBtns").append(b); });
+}
+
+/* ---------- events ---------- */
+const actions={
+  async authCreate(){ const e=$("#authEmail").value.trim(), p=$("#authPass").value; try{ await firebase.auth().createUserWithEmailAndPassword(e,p); }catch(x){ authErr(x); } },
+  async authReset(){ const e=$("#authEmail").value.trim(); if(!e){ toast("Type your email first."); return; } try{ await firebase.auth().sendPasswordResetEmail(e); toast("Reset email sent."); }catch(x){ authErr(x); } },
+  async signOut(){ await firebase.auth().signOut(); location.hash=""; location.reload(); },
+  importPaste(){ try{ Imp=parseImport($("#importText").value); render(); }catch(m){ const n=$("#importErr"); n.hidden=false; n.textContent=m; } },
+  importGo(){ const l=$("#importLoc"); Imp.loc=l?l.value:""; runImport(); },
+  importCancel(){ Imp=null; render(); },
+  async listCopy(){ try{ await navigator.clipboard.writeText(stockExport()); toast("Stock list copied."); }catch{ toast("Couldn't copy here. Use Download instead."); } },
+  listSave(){ saveFile("spool-stock-list.json",stockExport()); },
+  camStart(){ Scanner.start(); },
+  camStop(){ Scanner.stop(); local.del("camOK"); },
+  heldOpen(){ const h=Scanner.held; if(h) go(h); },
+  tab(el){ S.filter.tab=el.dataset.v; render(); },
+  mat(el){ S.filter.mat=S.filter.mat===el.dataset.v?"":el.dataset.v; render(); },
+  move(el){ tryMove(S.param,el.dataset.loc); },
+  async saveRemain(){
+    const s=S.spools[S.param], sc=num($("#scaleG").value); let v=num($("#remG").value);
+    if(sc!=null){ if(!s.tareG){ toast("Set the empty spool weight first, using Edit."); return; } v=Math.max(0,sc-s.tareG); }
+    if(v==null) return;
+    try{ await col("spools").doc(s.id).update({remainG:Math.round(v)}); toast("Weight saved."); document.activeElement?.blur(); render(); }catch(e){ fail(e,"That weight didn't save"); }
+  },
+  async usedUp(){
+    const s=S.spools[S.param], used=s.status==="used";
+    await col("spools").doc(s.id).update(used?{status:"active"}:{status:"used",loc:null});
+    toast(used?"Back in stock.":`${s.id.toUpperCase()} marked used up.`,used?null:"Undo",()=>col("spools").doc(s.id).update({status:"active",loc:s.loc}));
+  },
+  async reprint(){ await col("spools").doc(S.param).update({labelled:false}); toast("Sticker added to the queue."); },
+  async printLoc(){ await col("locations").doc(S.param).update({wantLabel:true}); toast("Storage sticker added to the queue."); },
+  async printAllLocs(){ for(const l of orderedLocs()) await col("locations").doc(l.id).update({wantLabel:true}); toast("All storage stickers added to the queue."); },
+  delSpool(){
+    const s=S.spools[S.param];
+    ask(`Delete ${s.id.toUpperCase()}?`,"This removes it completely. If it has just run out, Mark used up keeps the record.",[["Delete",async()=>{ await col("spools").doc(s.id).delete(); toast("Deleted."); go("stock"); },"bad"],["Cancel",null]]);
+  },
+  delExamples(){ ask("Delete the examples?","Your own spools are not touched.",[["Delete",async()=>{ for(const s of Object.values(S.spools)) if(s.example) await col("spools").doc(s.id).delete(); toast("Examples deleted."); },"bad"],["Cancel",null]]); },
+  hex(el){ F.hex=el.dataset.v; F.hexTouched=true; const h=$("#f_hex"); if(h) h.value=F.hex; formPreview(); },
+  logoFor(el){ pendingLogo=el.dataset.v; },
+  codeGo(){ const c=parseCode($("#codeIn").value); if(c) handleScan(c,"code"); else toast("Codes look like S0012."); },
+  pick(el){ if(el.checked) Q.skip.delete(el.dataset.v); else Q.skip.add(el.dataset.v); render(); },
+  cell(el){ saveConfig({sheet:{...(S.settings.sheet||{}),start:parseInt(el.dataset.v)}}); render(); },
+  pdf(){ makePDF(); },
+  async locAdd(){
+    const name=$("#newLoc").value.trim(); if(!name) return;
+    let id=slug(name), n=2; while(S.locs[id]) id=slug(name)+"-"+n++;
+    const order=Math.max(0,...Object.values(S.locs).map(l=>l.order??0))+1;
+    await col("locations").doc(id).set({name,group:"",kind:/dry/i.test(name)?"dryer":"shelf",capacity:num($("#newCap").value),order,wantLabel:true});
+    document.activeElement?.blur(); render(); toast(name+" added. Its sticker is in the queue.");
+  },
+  async locDel(el){ await col("locations").doc(el.dataset.v).delete(); render(); },
+  cropSave(){ saveLogo(); },
+  cropSkip(){ crop=null; render(); },
+  async csv(){
+    const h=["code","manufacturer","material","colour","hex","finish","storage","remaining_g","net_g","nozzle","bed","status"];
+    const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
+    const rows=Object.values(S.spools).filter(s=>!s.example).sort((a,b)=>a.id.localeCompare(b.id)).map(s=>[s.id,s.brand,s.material,s.colour,s.hex,s.finish,s.status==="used"?"Used up":locName(s.loc),s.remainG,s.netG,range(s.nMin,s.nMax),range(s.bMin,s.bMax),s.status].map(q).join(","));
+    saveFile("spool-stock.csv",[h.join(","),...rows].join("\n"));
+  },
+  async json(){
+    saveFile("spool-stock-backup.json",JSON.stringify({saved:new Date().toISOString(),spools:S.spools,locations:S.locs,brands:S.brands,profiles:S.profiles,config:S.settings},null,1));
+  },
+};
+let pendingLogo=null;
+async function saveFile(filename,data){
+  try{ await downloads.save({filename,data}); }catch(e){ toast(e&&e.code==="app"?"Download this from your PC or a browser.":"Couldn't save that file here."); }
+}
+document.addEventListener("click",e=>{
+  const g=e.target.closest("[data-go]"); if(g){ e.preventDefault(); if(F&&F.editId&&S.view==="edit"&&g.dataset.go!==S.view) F=null; go(g.dataset.go); return; }
+  const a=e.target.closest("[data-act]"); if(a&&a.dataset.act!=="pick"&&actions[a.dataset.act]) actions[a.dataset.act](a);
+});
+document.addEventListener("change",async e=>{
+  const t=e.target;
+  if(t.dataset&&t.dataset.act==="pick"){ actions.pick(t); return; }
+  if(t.id==="scanTarget"){ if(t.value) local.set("scanTarget",t.value); else local.del("scanTarget"); return; }
+  if(t.id==="sheetSel"){ const st={...(S.settings.sheet||{}),id:t.value,start:0}; if(t.value==="custom"&&!st.custom) st.custom={w:63.5,h:38.1,cols:3,rows:7,left:7.25,top:15.15,px:66,py:38.1}; await saveConfig({sheet:st}); render(); return; }
+  if(t.id&&t.id.startsWith("cu_")){ const st=S.settings.sheet||{}, c={...(st.custom||{})}; c[t.id.slice(3)]=num(t.value)||0; await saveConfig({sheet:{...st,custom:c}}); render(); return; }
+  if(t.id==="nudgeX"||t.id==="nudgeY"){ const st=S.settings.sheet||{}; await saveConfig({sheet:{...st,[t.id==="nudgeX"?"nx":"ny"]:num(t.value)||0}}); return; }
+  if(t.id==="outline"){ Q.outline=t.checked; return; }
+  if(t.dataset.locName){ const n=t.value.trim(); if(n) await col("locations").doc(t.dataset.locName).update({name:n}); return; }
+  if(t.dataset.locCap){ await col("locations").doc(t.dataset.locCap).update({capacity:num(t.value)}); return; }
+  if(t.id==="pickScan"&&t.files[0]){
+    const f=t.files[0]; t.value="";
+    const out=$("#scanOut"); if(out){ out.hidden=false; out.innerHTML=`<div class="busy"><span class="spin"></span>Reading the sticker</div>`; }
+    const raw=await decodeQR(f).catch(()=>null); if(out){ out.hidden=true; out.innerHTML=""; }
+    const code=parseCode(raw);
+    if(code) handleScan(code,"page"); else toast(raw?"That code isn't one of your stickers.":"Couldn't find a code in that photo. Get closer and try again.");
+    return;
+  }
+  if(t.id==="pickImport"&&t.files[0]){ const f=t.files[0]; t.value=""; try{ Imp=parseImport(await f.text()); render(); }catch(m){ toast(String(m)); } return; }
+  if(t.dataset&&t.dataset.imp!=null&&Imp){ const it=Imp.items.find(i=>String(i.key)===t.dataset.imp); if(it) it.on=t.checked; const l=$("#importLoc"); Imp.loc=l?l.value:""; render(); return; }
+  if(t.id==="pickLogo"&&t.files[0]){
+    const f=t.files[0]; t.value=""; if(S.view==="add"||S.view==="edit") readForm();
+    const img=await loadImg(f), c=toCanvas(img,1600), blob=await canvasBlob(c,"image/png");
+    openCrop(URL.createObjectURL(blob),c.width,c.height,pendingLogo||"Logo",[0,0,1,1],S.view); render(); return;
+  }
+});
+document.addEventListener("input",e=>{
+  const t=e.target;
+  if(t.id==="q"){ S.filter.q=t.value; const box=$("#spoolList"); if(box) box.innerHTML=stockRows(); return; }
+  if(t.id&&t.id.startsWith("f_")&&F){
+    readForm();
+    if(["f_nMin","f_nMax","f_bMin","f_bMax","f_dT","f_dH"].includes(t.id)){ F.touched=true; F.src="edited"; formPreview(); }
+    else if(t.id==="f_hex"){ F.hexTouched=true; formPreview(); }
+    else if(t.id==="f_colour"){
+      const n=F.hexTouched?null:NAMED.find(([re])=>re.test(F.colour));
+      if(n){ F.hex=n[1]; const h=$("#f_hex"); if(h) h.value=n[1]; }
+      formPreview();
+    }
+    else if(t.id==="f_brand"||t.id==="f_material"){ if(F.src==="edited"||F.src==="label"){ F.touched=false; } refreshLookup(); }
+    else formPreview();
+  }
+});
+function stockRows(){
+  const f=S.filter,q=f.q.toLowerCase(), live=liveSpools();
+  const rows=(f.tab==="used"?Object.values(S.spools).filter(s=>s.status==="used"):live).filter(s=>{
+    if(f.tab==="low"&&!isLow(s)) return false;
+    if(f.mat&&(baseMat(s.material)?.key||s.material)!==f.mat) return false;
+    if(q&&![s.id,s.brand,s.material,s.colour,s.finish,locName(s.loc)].join(" ").toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a,b)=>a.id.localeCompare(b.id));
+  return rows.map(rowHTML).join("")||emptyList(live.length);
+}
+document.addEventListener("submit",async e=>{
+  e.preventDefault();
+  if(e.target.id==="spoolForm") submitForm();
+  if(e.target.id==="authForm"){ try{ await firebase.auth().signInWithEmailAndPassword($("#authEmail").value.trim(),$("#authPass").value); }catch(x){ authErr(x); } }
+});
+addEventListener("online",()=>{ if(db&&!["add","edit","scan","setup"].includes(S.view)) render(); });
+addEventListener("offline",()=>{ if(db&&!["add","edit","scan","setup"].includes(S.view)) render(); });
+addEventListener("paste",e=>{
+  const f=[...(e.clipboardData?.files||[])].find(x=>x.type.startsWith("image/")); if(!f) return;
+  if((S.view==="add"||S.view==="edit")&&F&&F.brand){ pendingLogo=F.brand; readForm(); const dt=new DataTransfer(); dt.items.add(f); const p=$("#pickLogo"); p.files=dt.files; p.dispatchEvent(new Event("change",{bubbles:true})); }
+});
+/* crop dragging */
+document.addEventListener("pointerdown",e=>{
+  const b=e.target.closest&&e.target.closest("#cropBox"); if(!b||!crop) return;
+  const r=b.getBoundingClientRect(), pos=ev=>[clamp((ev.clientX-r.left)/r.width,0,1),clamp((ev.clientY-r.top)/r.height,0,1)], s=pos(e);
+  b.setPointerCapture(e.pointerId);
+  const mv=ev=>{ const p=pos(ev); crop.box=[Math.min(s[0],p[0]),Math.min(s[1],p[1]),Math.max(s[0],p[0]),Math.max(s[1],p[1])]; drawCrop(); };
+  const up=()=>{ b.removeEventListener("pointermove",mv); b.removeEventListener("pointerup",up); };
+  b.addEventListener("pointermove",mv); b.addEventListener("pointerup",up);
+});
+
+/* ---------- start ---------- */
+(async()=>{
+  render();
+  if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+  if(!CFG.firebase||!window.firebase){ started=true; render(); return; }
+  firebase.initializeApp(CFG.firebase);
+  fs=firebase.firestore();
+  try{ fs.settings({ignoreUndefinedProperties:true}); }catch{}
+  try{ await fs.enablePersistence({synchronizeTabs:true}); }catch{}
+  started=true;
+  firebase.auth().onAuthStateChanged(u=>{
+    if(!u){ uid=null; db=null; render(); return; }
+    if(uid===u.uid) return;
+    uid=u.uid;
+    const base=`users/${uid}/`;
+    db={collection:n=>wrapCol(fs.collection(base+n)),doc:p=>wrapDoc(fs.doc(base+p))};
+    render(); watch();
+  });
+})();
+</script>
+</body>
+</html>
