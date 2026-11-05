@@ -47,15 +47,13 @@ Spool Reader is the separate Claude artifact for photos. It's linked in Setup.
 
 ## Logos
 
-Logos are found for you when you add a manufacturer. Bambu Lab, Creality, Elegoo, Anycubic and Flashforge come through automatically as vectors. For others, open **Setup**, press **Find logo** and pick one.
+Each logo only has to be found once. It's saved to your account, so every device and every future sticker pulls it from there.
 
-For the brands those sources miss, such as eSUN, Polymaker or SUNLU, add a free Logo.dev key:
+- **Bambu Lab, Creality, Elegoo, Anycubic and Flashforge** come through automatically as vectors.
+- **Other brands:** open **Setup**, press **Find logo** and pick one if Wikimedia has it.
+- **If nothing's found:** upload an SVG or PNG once, or crop it from a label photo in Spool Reader.
 
-1. Sign up at https://www.logo.dev and copy your **publishable** key (it starts with `pk_`).
-2. Paste it under **Setup > Manufacturers and logos** and press **Save key**.
-3. Press **Find missing logos**.
-
-You can also upload your own SVG or PNG. Every logo is turned solid black on transparent.
+Every logo is turned solid black on transparent. No API keys are needed.
 
 ## Printing stickers
 
