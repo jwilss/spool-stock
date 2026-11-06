@@ -178,6 +178,15 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .typepick input:checked+span small{color:inherit}
 .typepick input:focus-visible+span{outline:2px solid var(--ink);outline-offset:2px}
 .hint{color:var(--muted);font-size:14px}
+.picks{max-height:264px;overflow:auto;margin-top:-8px;border:1px solid var(--line);border-top:0;background:var(--bg)}
+.pick{display:grid;gap:1px;width:100%;min-height:44px;padding:7px 10px;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);cursor:pointer}
+.pick:last-child{border-bottom:0}
+.pick:hover,.pick:focus-visible{background:var(--panel2)}
+.pick b{font-weight:600;overflow-wrap:anywhere}
+.pick small{color:var(--muted);font-size:14px}
+.picknone{padding:9px 10px;color:var(--muted);font-size:15px}
+.catcols{display:grid;gap:4px}
+.catcols .swatches{max-height:148px;overflow:auto}
 .logoPick{background:#fff;border:1px solid var(--line);padding:6px;display:grid;gap:4px;cursor:pointer;color:#000;font-size:13px;text-align:center}
 .logoPick img{height:56px;width:100%;object-fit:contain}
 .brandrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border-top:1px solid var(--line);padding-top:8px}
@@ -354,17 +363,39 @@ function disc(s,size=44){
 }
 
 /* ---------- print settings lookup ---------- */
+/* Filament catalogue: manufacturers and their own product names, from SpoolmanDB. Fetched once and kept for offline use. */
+let CAT=null;
+const norm = s => String(s||"").toLowerCase().replace(/[™®]/g,"").replace(/[^a-z0-9+.]+/g," ").trim();
+const ALIASES = [["high speed","hs"],["high flow","hf"],["carbon fibre","cf"],["carbon fiber","cf"],["glass fibre","gf"],["glass fiber","gf"]];
+function searchText(...parts){
+  let t=norm(parts.join(" "));
+  for(const [a,b] of ALIASES){ if(t.includes(a)) t+=" "+b; else if(new RegExp(b+"\\b").test(t)) t+=" "+a; }
+  return t;
+}
+const matches = (hay,q) => norm(q).split(" ").filter(Boolean).every(w=>hay.includes(w));
+async function loadCatalogue(){
+  try{
+    const r=await fetch("catalogue.json"); if(!r.ok) return;
+    const j=await r.json(), map={};
+    for(const [name,lines] of Object.entries(j.brands)) map[slug(name)]={name,lines:lines.map(l=>({...l,hay:searchText(l.n,l.m,l.a)}))};
+    CAT=map;
+  }catch{}
+}
+const catBrand = name => CAT?.[slug(name)];
+const catLine = (brand,material) => catBrand(brand)?.lines.find(l=>norm(l.n)===norm(material));
 const profileId = (b,m) => slug(b)+"__"+slug(m);
 const baseMat = m => MATERIALS.find(x=>x.re.test(m||""));
 function lookup(brand,material){
   const p = S.profiles[profileId(brand,material)];
   if(p) return {nMin:p.nMin,nMax:p.nMax,bMin:p.bMin,bMax:p.bMax,dT:p.dT,dH:p.dH,src:"saved"};
-  const m = baseMat(material);
+  const m = baseMat(material), c = catLine(brand,material);
+  if(c&&c.t&&c.b) return {nMin:c.t[0],nMax:c.t[1],bMin:c.b[0],bMax:c.b[1],dT:m?.d?.[0]??null,dH:m?.d?.[1]??null,src:"catalogue",base:m?.key};
   if(m) return {nMin:m.n[0],nMax:m.n[1],bMin:m.b[0],bMax:m.b[1],dT:m.d?m.d[0]:null,dH:m.d?m.d[1]:null,src:"typical",base:m.key};
   return {nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,src:"none"};
 }
 const srcText = i => ({
   saved:"Saved from the last spool of this filament.",
+  catalogue:`From the filament catalogue.${i.base?` Drying is typical for ${i.base}.`:""} Check them against the spool, and any changes are kept for this filament.`,
   typical:`Typical for ${i.base}. Change them if the spool says different and they will be kept for this filament.`,
   edited:"Your own values, kept for this filament.",
   none:"I don't know this material, so fill these in and they will be kept for this filament.",
@@ -527,6 +558,7 @@ function buildPDF(items,start,opts){
 
 /* ---------- data ---------- */
 function watch(){
+  loadCatalogue();
   const timer=setTimeout(()=>{ if(!S.ready){ S.stale=true; render(); } },10000);
   const seen=new Set();
   const sub=(name,key)=>col(name).onSnapshot(snap=>{
@@ -888,24 +920,22 @@ function colourRow(){
 }
 function vForm(){
   const e=!!F.editId;
-  const names=[...new Set([...Object.values(S.brands).map(b=>b.name),...BRANDS])];
-  const mats=[...new Set([...Object.values(S.profiles).map(p=>p.material),...MATERIALS.map(m=>m.key)])];
   const opts=locOptions(F.loc,true);
   return `<div><h1>${e?"Edit "+esc(F.editId.toUpperCase()):"Add a spool"}</h1></div>
   ${e?"":`<div class="btns"><button class="btn" data-go="import">Import from Spool Reader</button></div>`}
   ${crop?cropHTML():""}
   <div class="split">
     <form class="card" id="spoolForm">
+      <label class="field"><span>Manufacturer</span><input type="text" id="f_brand" autocomplete="off" placeholder="Search manufacturers" value="${esc(F.brand)}" required></label>
+      <div class="picks" id="brandPick" aria-label="Manufacturers" hidden></div>
+      <label class="field"><span>Filament</span><input type="text" id="f_material" autocomplete="off" placeholder="Search their filaments, or type your own" value="${esc(F.material)}" required></label>
+      <div class="picks" id="linePick" aria-label="Filaments" hidden></div>
       <div class="g2">
-        <label class="field"><span>Manufacturer</span><input type="text" id="f_brand" list="brandList" value="${esc(F.brand)}" required></label>
-        <label class="field"><span>Material name</span><input type="text" id="f_material" list="matList" placeholder="PETG HF" value="${esc(F.material)}" required></label>
-      </div>
-      <datalist id="brandList">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>
-      <datalist id="matList">${mats.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>
-      <div class="g2">
-        <label class="field"><span>Colour name</span><input type="text" id="f_colour" value="${esc(F.colour)}"></label>
+        <label class="field"><span>Colour name</span><input type="text" id="f_colour" list="colourList" autocomplete="off" value="${esc(F.colour)}"></label>
         <label class="field"><span>Finish</span><select id="f_finish">${FINISH.map(x=>`<option ${F.finish===x?"selected":""}>${x}</option>`).join("")}</select></label>
       </div>
+      <datalist id="colourList"></datalist>
+      <div class="catcols" id="catColours" hidden></div>
       <label class="field"><span>Colour type</span><select id="f_pattern">${PATTERNS.map(([k,t])=>`<option value="${k}" ${F.pattern===k?"selected":""}>${t}</option>`).join("")}</select></label>
       <div class="swatches" id="colourRow">${colourRow()}</div>
       <div class="swatches">${COLOURS.map(c=>`<button type="button" class="sw" style="background:${c}" data-act="hex" data-v="${c}" aria-label="Use colour ${c}"></button>`).join("")}</div>
@@ -944,7 +974,55 @@ function formPreview(){
   const n=$("#srcNote"); if(n) n.textContent=srcText(F);
   const hint=$("#logoHint"); if(hint) hint.innerHTML="";
 }
+/* searching manufacturers and their filaments */
+const Picks={brands:[],lines:[]};
+const plural = (n,w) => `${n} ${w}${n===1?"":"s"}`;
+function brandOptions(q){
+  const seen=new Map(), add=(name,n)=>{ const k=slug(name); if(!seen.has(k)) seen.set(k,{name,n:0}); if(n) seen.get(k).n=n; };
+  Object.values(S.brands).forEach(b=>add(b.name)); BRANDS.forEach(b=>add(b)); Object.values(CAT||{}).forEach(c=>add(c.name,c.lines.length));
+  const t=norm(q), rank=b=>norm(b.name).startsWith(t)?0:1;
+  return [...seen.values()].filter(b=>norm(b.name).includes(t)).sort((a,b)=>rank(a)-rank(b)||a.name.localeCompare(b.name));
+}
+function lineOptions(brand,q){
+  const saved=Object.values(S.profiles).filter(p=>slug(p.brand)===slug(brand)).map(p=>({n:p.material,saved:true,hay:searchText(p.material)}));
+  const lines=(catBrand(brand)?.lines||[]).filter(l=>!saved.some(p=>norm(p.n)===norm(l.n)));
+  const all=[...saved,...lines];
+  return {list:(all.length?all:MATERIALS.map(m=>({n:m.key,hay:searchText(m.key),generic:true}))).filter(l=>matches(l.hay,q)),own:all.length>0};
+}
+function showPicks(id){
+  const box=$(id==="f_brand"?"#brandPick":"#linePick"); if(!box||!F) return;
+  const rows=[], val=$("#"+id).value;
+  if(id==="f_brand"){
+    Picks.brands=brandOptions(val);
+    Picks.brands.forEach((b,i)=>rows.push(`<button type="button" class="pick" data-act="pickBrand" data-v="${i}"><b>${esc(b.name)}</b>${b.n?`<small>${plural(b.n,"filament")}</small>`:""}</button>`));
+    if(!rows.length) rows.push(`<div class="picknone">Not listed, but you can still use this name.</div>`);
+  } else {
+    const {list}=lineOptions(F.brand,val); Picks.lines=list;
+    list.forEach((l,i)=>{
+      const sub=l.saved?"Saved by you":l.generic?"Typical settings":[l.m,l.t&&`nozzle ${range(l.t[0],l.t[1])} °C`,l.c&&plural(l.c.length,"colour")].filter(Boolean).join(", ");
+      rows.push(`<button type="button" class="pick" data-act="pickLine" data-v="${i}"><b>${esc(l.n)}</b><small>${esc(sub)}</small></button>`);
+    });
+    if(!rows.length) rows.push(`<div class="picknone">Not listed for ${esc(F.brand||"this manufacturer")}. Keep typing, and it'll be saved here for next time.</div>`);
+  }
+  box.innerHTML=rows.join(""); box.hidden=false; box.scrollTop=0;
+}
+const hidePicks = () => { for(const id of ["#brandPick","#linePick"]){ const b=$(id); if(b) b.hidden=true; } };
+function showColours(){
+  const box=$("#catColours"), list=$("#colourList"); if(!box||!F) return;
+  const l=catLine(F.brand,F.material), cols=l?.c||[];
+  if(list) list.innerHTML=cols.map(c=>`<option value="${esc(c[0])}">`).join("");
+  box.hidden=!cols.length;
+  box.innerHTML=cols.length?`<div class="lab">${esc(l.n)} colours</div><div class="swatches">${cols.map((c,i)=>{const h=[].concat(c[1]).map(x=>"#"+x), bg=h.length>1?`linear-gradient(90deg,${h.join(",")})`:h[0];return `<button type="button" class="sw" style="background:${bg}" data-act="catColour" data-v="${i}" title="${esc(c[0])}" aria-label="${esc(c[0])}"></button>`;}).join("")}</div>`:"";
+}
+function useColour(c){
+  F.colour=c[0]; const h=[].concat(c[1]).slice(0,6).map(x=>"#"+x);
+  F.colours=h; F.hex=h[0]; F.pattern=h.length>1?(c[2]||"split"):"solid"; F.hexTouched=true;
+  const n=$("#f_colour"); if(n&&n.value!==c[0]) n.value=c[0];
+  const p=$("#f_pattern"); if(p) p.value=F.pattern;
+  $("#colourRow").innerHTML=colourRow(); formPreview();
+}
 function refreshLookup(){
+  showColours();
   if(F.touched) { formPreview(); return; }
   const i=lookup(F.brand,F.material);
   Object.assign(F,{nMin:i.nMin,nMax:i.nMax,bMin:i.bMin,bMax:i.bMax,dT:i.dT,dH:i.dH,src:i.src,base:i.base});
@@ -1402,6 +1480,21 @@ const actions={
   pick(el){ if(el.checked) Q.skip.delete(el.dataset.v); else Q.skip.add(el.dataset.v); render(); },
   cell(el){ saveConfig({sheet:{...(S.settings.sheet||{}),start:parseInt(el.dataset.v)}}); render(); },
   pdf(){ makePDF(); },
+  pickBrand(el){
+    const b=Picks.brands[+el.dataset.v]; if(!b) return;
+    F.brand=b.name; $("#f_brand").value=b.name; hidePicks();
+    if(F.src==="edited"||F.src==="label") F.touched=false;
+    refreshLookup(); const m=$("#f_material"); m.focus(); showPicks("f_material");
+  },
+  pickLine(el){
+    const l=Picks.lines[+el.dataset.v]; if(!l) return;
+    F.material=l.n; $("#f_material").value=l.n; F.touched=false; hidePicks(); document.activeElement?.blur();
+    if(l.w){ F.netG=l.w; $("#f_netG").value=l.w; }
+    if(l.s!=null){ F.tareG=l.s; $("#f_tareG").value=l.s; }
+    if(l.f){ F.finish=l.f; $("#f_finish").value=l.f; }
+    refreshLookup();
+  },
+  catColour(el){ const c=catLine(F.brand,F.material)?.c[+el.dataset.v]; if(c) useColour(c); },
   storeCancel(){ LF=null; go("setup"); },
   storeDel(){
     const l=S.locs[LF.id], here=inLoc(l.id);
@@ -1470,6 +1563,9 @@ document.addEventListener("change",async e=>{
     P=null; openCrop(URL.createObjectURL(blob),c.width,c.height,pendingLogo||"Logo",[0,0,1,1],S.view); render(); return;
   }
 });
+document.addEventListener("focusin",e=>{ if(F&&(e.target.id==="f_brand"||e.target.id==="f_material")){ hidePicks(); showPicks(e.target.id); } });
+document.addEventListener("focusout",e=>{ if(e.target.id==="f_brand"||e.target.id==="f_material") setTimeout(()=>{ const a=document.activeElement; if(!(a&&(a.id==="f_brand"||a.id==="f_material"))) hidePicks(); },150); });
+document.addEventListener("mousedown",e=>{ if(e.target.closest&&e.target.closest(".picks")) e.preventDefault(); });
 document.addEventListener("input",e=>{
   const t=e.target;
   if(t.id&&t.id.startsWith("s_")&&LF){ readStore(); storePreview(); return; }
@@ -1481,11 +1577,13 @@ document.addEventListener("input",e=>{
     else if(t.id==="f_hex"){ F.hexTouched=true; formPreview(); }
     else if(t.id==="f_pattern"){ if(F.pattern!=="solid"&&F.colours.length<2) F.colours.push("#FFFFFF"); $("#colourRow").innerHTML=colourRow(); formPreview(); }
     else if(t.id==="f_colour"){
+      const known=catLine(F.brand,F.material)?.c.find(c=>norm(c[0])===norm(F.colour));
+      if(known){ useColour(known); return; }
       const n=F.hexTouched?null:NAMED.find(([re])=>re.test(F.colour));
       if(n){ F.hex=n[1]; F.colours[0]=n[1]; const h=$("#f_hex"); if(h) h.value=n[1]; }
       formPreview();
     }
-    else if(t.id==="f_brand"||t.id==="f_material"){ if(F.src==="edited"||F.src==="label"){ F.touched=false; } refreshLookup(); }
+    else if(t.id==="f_brand"||t.id==="f_material"){ if(F.src==="edited"||F.src==="label"){ F.touched=false; } showPicks(t.id); refreshLookup(); }
     else formPreview();
   }
 });

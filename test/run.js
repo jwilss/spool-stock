@@ -154,6 +154,18 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
 
  }
 
+ // filament catalogue: find a manufacturer, then their own names
+ await p.evaluate(()=>{location.hash='add'});await p.waitForSelector('#f_brand');await p.waitForFunction(()=>!!CAT);
+ await p.fill('#f_brand','esu');await p.waitForSelector('#brandPick .pick');ok((await p.textContent('#brandPick')).includes('filaments'),'manufacturer search shows how many filaments');
+ await p.click('#brandPick .pick');await p.waitForSelector('#linePick .pick');await p.waitForTimeout(50);ok(await p.inputValue('#f_brand')==='eSUN'&&(await p.$$('#linePick .pick')).length>=10,'picking a manufacturer lists its filaments');await p.screenshot({path:out+'/catalogue-phone.png',fullPage:true});
+ await p.fill('#f_material','pla high speed');await p.waitForTimeout(50);ok((await p.textContent('#linePick')).includes('ePLA+HS'),'high speed finds their HS naming');
+ await p.fill('#f_material','hs');await p.waitForTimeout(50);await p.click('#linePick .pick');await p.waitForTimeout(80);
+ ok(await p.inputValue('#f_material')==='ePLA+HS'&&await p.inputValue('#f_nMin')==='220'&&await p.inputValue('#f_bMin')==='60'&&await p.inputValue('#f_tareG')==='170','catalogue fills settings and spool weight');ok(await p.inputValue('#f_dT')==='55'&&(await p.textContent('#srcNote')).includes('catalogue'),'drying comes from the typical table and the source is shown');ok(await p.$eval('#linePick',e=>e.hidden),'list closes after picking');
+ await p.click('#catColours .sw');await p.waitForTimeout(50);const pickedColour=await p.inputValue('#f_colour');ok(pickedColour.length>0&&(await p.inputValue('#f_hex'))!=='#111111','their colour list fills name and colour: '+pickedColour);
+ await p.click('#saveSpool');await p.waitForSelector('.spoolhead');
+ await p.evaluate(()=>{location.hash='add'});await p.waitForSelector('#f_brand');await p.fill('#f_brand','eSUN');await p.fill('#f_material','PETG High Speed');ok((await p.textContent('#linePick')).includes('Not listed'),'an unlisted name says it can still be used');await p.fill('#f_colour','Black');await p.fill('#f_nMin','220');await p.fill('#f_nMax','260');await p.click('#saveSpool');await p.waitForSelector('.spoolhead');
+ await p.evaluate(()=>{location.hash='add'});await p.waitForSelector('#f_brand');await p.fill('#f_brand','eSUN');await p.click('#f_material');await p.waitForSelector('#linePick .pick');ok((await p.textContent('#linePick')).includes('PETG High Speed')&&(await p.textContent('#linePick')).includes('Saved by you'),'your own names join the list');await p.fill('#f_material','petg hs');await p.waitForTimeout(50);await p.click('#linePick .pick');await p.waitForTimeout(60);ok(await p.inputValue('#f_nMax')==='260','your own settings come back');await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('.racks');
+
  // stock list for Spool Reader
  await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=listSave]');
  await p.screenshot({path:out+'/setup-phone.png',fullPage:true});

@@ -1,7 +1,7 @@
 // Keeps the app opening with no signal. Tries the network first so updates arrive,
 // and falls back to the saved copy when the network is missing or too slow.
-const CACHE = "spool-stock-v1";
-const FILES = ["./", "index.html", "config.js", "manifest.webmanifest", "icon-192.png", "icon-512.png",
+const CACHE = "spool-stock-v2";
+const FILES = ["./", "index.html", "config.js", "catalogue.json", "manifest.webmanifest", "icon-192.png", "icon-512.png",
   "vendor/qrcode.js", "vendor/jsQR.js", "vendor/jspdf.umd.min.js",
   "vendor/firebase-app-compat.js", "vendor/firebase-auth-compat.js", "vendor/firebase-firestore-compat.js"];
 self.addEventListener("install", e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())));
