@@ -1,6 +1,6 @@
 // Keeps the app opening with no signal. Tries the network first so updates arrive,
 // and falls back to the saved copy when the network is missing or too slow.
-const CACHE = "spool-stock-v2";
+const CACHE = "spool-stock-v3";
 const FILES = ["./", "index.html", "config.js", "catalogue.json", "manifest.webmanifest", "icon-192.png", "icon-512.png",
   "vendor/qrcode.js", "vendor/jsQR.js", "vendor/jspdf.umd.min.js",
   "vendor/firebase-app-compat.js", "vendor/firebase-auth-compat.js", "vendor/firebase-firestore-compat.js"];
