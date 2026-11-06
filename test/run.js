@@ -28,12 +28,30 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  await p.fill('#authEmail','a@b.co');await p.fill('#authPass','nope12');await p.click('#authForm [type=submit]');await p.waitForSelector('#authErr:not([hidden])');ok(true,'bad sign in shows message');
  await p.click('[data-act=authCreate]');await p.waitForSelector('.racks');
  await p.waitForTimeout(300);let db=await dbOf(p);
- ok(Object.keys(db).filter(k=>k.startsWith(uid+'locations/')).length===12,'storages set up on first sign in');
- await p.waitForFunction(()=>document.querySelectorAll('.rack').length>=4);
+ const stores=d=>Object.keys(d).filter(k=>k.startsWith(uid+'locations/'));
+ ok(stores(db).length===0,'a new account starts with no storages');
+ ok((await p.textContent('.racks')).includes('Set up your storage'),'stock page asks you to set up storage');
+
+ // building storages from scratch
+ const addStore=async(kind,o={})=>{await p.evaluate(()=>{location.hash='store-new'});await p.waitForSelector('.typepick');await p.check(`input[name=s_kind][value=${kind}]`);await p.waitForSelector('#s_name');if(o.check)await o.check();for(const k of['name','group','capacity','maxC','warn','qty'])if(o[k]!=null)await p.fill('#s_'+k,String(o[k]));await p.click('#saveStore');await p.waitForSelector('.storerow')};
+ await addStore('ams',{name:'AMS1 1',check:async()=>{
+  ok(await p.inputValue('#s_capacity')==='4'&&await p.inputValue('#s_spaces')==='1','multi-material unit defaults to 4 numbered spaces');
+  ok((await p.inputValue('#s_warn')).includes('TPU'),'multi-material unit warns about TPU by default');
+  ok((await p.$$('#storePreview .slot')).length===4,'preview shows 4 spaces');await p.screenshot({path:out+'/store-phone.png',fullPage:true});}});
+ await addStore('ams',{name:'Unit 1',qty:2,group:'Printer A'});
+ await addStore('dryer',{name:'Dryer',capacity:2,maxC:70});
+ await addStore('shelf',{name:'Rack top',group:'Rack',capacity:10,check:async()=>{ok(await p.inputValue('#s_spaces')==='0'&&await p.inputValue('#s_capacity')==='','shelf defaults to loose with no limit');ok(await p.$('#s_maxC')===null,'only a dryer asks for a temperature');}});
+ await addStore('shelf',{name:'Rack bottom',group:'Rack',capacity:10});
+ db=await dbOf(p);ok(stores(db).length===6,'storages added, two at once: '+stores(db).map(k=>k.split('/').pop()));
+ ok(db[uid+'locations/ams1-1'].capacity===4&&db[uid+'locations/ams1-1'].spaces===true&&db[uid+'locations/unit-2'].name==='Unit 2','a multi-material unit is one storage with 4 spaces');
+ await p.evaluate(()=>{location.hash='stock'});await p.waitForFunction(()=>document.querySelectorAll('.rack').length===6);
  await p.screenshot({path:out+'/stock-phone.png',fullPage:true});
- ok((await p.textContent('.racks')).includes('Space Pi Plus (Alduin)')&&(await p.textContent('.racks')).includes('AMS 2 (Betsy)'),'printers shown on racks');
+ ok((await p.$$('.slot')).length===4*3+2,'spaces drawn inside each storage');
+ ok((await p.textContent('#main')).includes('Printer A'),'groups shown on the stock page');
  await p.reload();await p.waitForSelector('.racks');ok(true,'stays signed in after reload');
- await p.waitForTimeout(200);db=await dbOf(p);ok(Object.keys(db).filter(k=>k.includes('/locations/')).length===12,'storages not seeded twice');
+ await p.waitForTimeout(200);db=await dbOf(p);ok(stores(db).length===6,'storages not added twice');
+ await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('.storerow');const firstName=()=>p.textContent('.storerow b');
+ ok(await firstName()==='AMS1 1','setup lists storages in order');await p.click('[data-act=storeShift][data-v="ams1-1"][data-d="1"]');await p.waitForFunction(()=>document.querySelector('.storerow b').textContent==='Unit 1');await p.click('[data-act=storeShift][data-v="unit-1"][data-d="1"]');await p.waitForFunction(()=>document.querySelector('.storerow b').textContent==='AMS1 1');ok(true,'storages can be reordered');
 
  const add=async(b,m,c,q)=>{await p.evaluate(()=>{location.hash='add'});await p.waitForSelector('#f_brand');await p.fill('#f_brand',b);await p.fill('#f_material',m);await p.fill('#f_colour',c);if(q)await p.fill('#f_qty',String(q));await p.click('#saveSpool');await p.waitForSelector('.spoolhead')};
  await add('eSUN','PETG HF','Galaxy Black');await add('Polymaker','TPU 95A','White',2);await add('Bambu Lab','ASA','Grey');
@@ -48,7 +66,7 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
 
  // dryer warning
  await p.evaluate(()=>{location.hash='s0004'});await p.waitForSelector('.spoolhead');
- await p.click('[data-loc="pi-1"]');await p.waitForFunction(()=>document.querySelector('#toast').textContent.includes('stops at 70'));ok(true,'warns ASA is too hot for the Space Pi Plus');
+ await p.click('[data-loc="dryer"]');await p.waitForFunction(()=>document.querySelector('#toast').textContent.includes('stops at 70'));ok(true,'warns ASA is too hot for the dryer');
  await p.click('[data-loc="rack-top"]');await p.waitForTimeout(100);
 
  // stickers: real PDF download
@@ -63,10 +81,27 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  await p.waitForFunction(()=>/S0002.*Now scan a storage/.test(document.querySelector('#scanState').textContent),{timeout:20000});ok(true,'camera picks up a spool sticker');
  await p.screenshot({path:out+'/scan-phone.png',fullPage:true});
  await p.waitForSelector('#modal:not([hidden])',{timeout:20000});ok((await p.textContent('#modal')).includes('TPU'),'TPU warning appears on a scan too');await p.click('#askBtns .go');
- await p.waitForFunction(()=>/S0002 is in AMS 1 \(Betsy\) Slot 1/.test(document.querySelector('#scanState').textContent),{timeout:20000});ok(true,'camera moves it on the storage sticker');
- db=await dbOf(p);ok(db[uid+'spools/s0002'].loc==='ams1-1','move saved: '+db[uid+'spools/s0002'].loc);
+ await p.waitForFunction(()=>/S0002 is in AMS1 1, space 1/.test(document.querySelector('#scanState').textContent),{timeout:20000});ok(true,'camera moves it on the storage sticker');
+ db=await dbOf(p);ok(db[uid+'spools/s0002'].loc==='ams1-1'&&db[uid+'spools/s0002'].slot===1,'move saved into the first free space: '+db[uid+'spools/s0002'].loc);
  ok(await p.evaluate(()=>!document.querySelector('#cam').paused),'camera keeps running after a move');
  await p.click('[data-nav=stock]');await p.waitForSelector('.racks');ok(await p.evaluate(()=>!document.querySelector('#cam')),'camera stops on leaving');
+
+ // spaces: fill a unit, swap when full, pick a space, room left on add
+ const open=async id=>{await p.evaluate(i=>{location.hash=i},id);await p.waitForSelector('[data-loc="unit-1"]')};
+ for(const id of['s0001','s0003','s0004','s0005']){await open(id);await p.click('[data-loc="unit-1"]');if(id==='s0003'){await p.waitForSelector('#modal:not([hidden])');await p.click('#askBtns .go')}await p.waitForTimeout(80)}
+ db=await dbOf(p);ok(['s0001','s0003','s0004','s0005'].map(s=>db[uid+'spools/'+s].slot).join()==='1,2,3,4','each spool takes the next free space');
+ await open('s0002');await p.click('[data-loc="unit-1"]');await p.waitForSelector('#modal:not([hidden])');await p.click('#askBtns .go');await p.waitForSelector('#askBtns');await p.waitForFunction(()=>/is full/.test(document.querySelector('#modal').textContent));
+ ok((await p.$$('#askBtns .btn')).length===5,'a full unit asks which spool comes out');await p.click('#askBtns .btn:nth-child(3)');await p.waitForTimeout(100);
+ db=await dbOf(p);ok(db[uid+'spools/s0002'].loc==='unit-1'&&db[uid+'spools/s0002'].slot===3&&db[uid+'spools/s0004'].loc==='ams1-1'&&db[uid+'spools/s0004'].slot===1,'swap puts each spool in the other space');
+ await open('s0002');await p.click('[data-act=spacePick][data-v="1"]');await p.waitForTimeout(100);db=await dbOf(p);ok(db[uid+'spools/s0002'].slot===1&&db[uid+'spools/s0001'].slot===3,'picking a taken space swaps the two');
+ await p.evaluate(()=>{location.hash='loc-unit-1'});await p.waitForSelector('[data-go="store-unit-1"]');ok((await p.$$('#main .slot')).length===4,'storage page shows its spaces');
+ await p.click('[data-go="store-unit-1"]');await p.waitForSelector('#s_capacity');await p.fill('#s_capacity','2');await p.click('#saveStore');await p.waitForFunction(()=>/needs room/.test(document.querySelector('#toast').textContent));ok(true,'cannot shrink below what it holds');await p.click('[data-act=storeCancel]');await p.waitForSelector('.storerow');
+ await p.evaluate(()=>{location.hash='add'});await p.waitForSelector('#f_brand');
+ ok(await p.$eval('#f_loc option[value="unit-1"]',o=>o.disabled),'a full storage cannot be picked when adding');
+ await p.fill('#f_brand','SUNLU');await p.fill('#f_material','PLA');await p.fill('#f_colour','Blue');await p.selectOption('#f_loc','unit-2');await p.fill('#f_qty','5');await p.click('#saveSpool');await p.waitForSelector('.spoolhead');await p.waitForTimeout(100);
+ db=await dbOf(p);ok(Object.values(db).filter(v=>v.loc==='unit-2').length===4&&Object.entries(db).filter(([k,v])=>k.includes('/spools/')&&v.colour==='Blue'&&v.brand==='SUNLU'&&!v.loc).length===1,'only as many as fit go in');
+ await p.evaluate(()=>{location.hash='store-unit-2'});await p.waitForSelector('[data-act=storeDel]');await p.click('[data-act=storeDel]');await p.waitForSelector('#modal:not([hidden])');ok((await p.textContent('#modal')).includes('4 spools'),'deleting says what is in it');await p.click('#askBtns .bad');await p.waitForSelector('.storerow');await p.waitForTimeout(100);
+ db=await dbOf(p);ok(!db[uid+'locations/unit-2']&&!Object.values(db).some(v=>v.loc==='unit-2'),'deleted storage leaves its spools with no storage');
 
  // import from Spool Reader
  const logo='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -125,6 +160,10 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  const [dl2]=await Promise.all([p.waitForEvent('download'),p.click('[data-act=listSave]')]);await dl2.saveAs(out+'/spool-stock-list.json');
  const list=JSON.parse(fs.readFileSync(out+'/spool-stock-list.json'));ok(list.format==='spool-stock-list'&&list.spools.length>=8&&list.spools[0].storage!==undefined,'stock list downloads');
 
+ // removing everything to start again
+ await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=storesClear]');await p.click('[data-act=storesClear]');await p.waitForSelector('#modal:not([hidden])');await p.click('#askBtns .bad');await p.waitForFunction(()=>!document.querySelector('.storerow'));await p.waitForTimeout(150);
+ db=await dbOf(p);ok(stores(db).length===0&&!Object.values(db).some(v=>v.loc),'remove all clears storages and keeps the spools');
+
  // sign out and the Android app's limits
  await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=signOut]');await p.click('[data-act=signOut]');await p.waitForSelector('#authForm');ok(true,'sign out');
  ok((await p.evaluate(()=>window.__fbErrors)).length===0,'nothing Firestore would refuse: '+JSON.stringify(await p.evaluate(()=>window.__fbErrors)));
@@ -133,6 +172,18 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  const a=await b.newContext({viewport:{width:400,height:820},serviceWorkers:'block',userAgent:'Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile SpoolStockApp'});await stubs(a);
  const ap=await a.newPage();await ap.goto(U);await ap.evaluate(()=>{localStorage.setItem('__fbUsers','{"a@b.co":"secret1"}');localStorage.setItem('__fbSession','a@b.co')});await ap.goto(U+'#stickers');await ap.reload();await ap.waitForSelector('.sheetmap');
  ok((await ap.textContent('#main')).includes("can't save PDFs"),'Android app sends printing to the PC');await a.close();
+
+ // an older account: one record per slot folds into one storage
+ const m=await b.newContext({viewport:{width:400,height:820},serviceWorkers:'block'});await stubs(m);const mp=await m.newPage();await mp.goto(U);
+ const old={};const sl=(id,name,group,kind,capacity,order,x={})=>old[uid+'locations/'+id]={name,group,kind,capacity,order,wantLabel:false,...x};
+ sl('u-1','Slot 1','Unit A','ams',1,1);sl('u-2','Slot 2','Unit A','ams',1,2);sl('u-3','Slot 3','Unit A','ams',1,3);sl('u-4','Slot 4','Unit A','ams',1,4);sl('d-1','Slot 1','Dryer B','dryer',1,5,{maxC:70});sl('d-2','Slot 2','Dryer B','dryer',1,6,{maxC:70});sl('top','Top shelf','Rack','shelf',10,7);sl('bot','Bottom shelf','Rack','shelf',10,8);
+ old[uid+'spools/s0001']={status:'active',brand:'X',material:'PLA',colour:'Red',hex:'#ff0000',netG:1000,remainG:1000,loc:'u-3',history:[{at:1,from:'d-1',to:'u-3'}]};old[uid+'config/main']={seeded:true};
+ await mp.evaluate(d=>{localStorage.setItem('__fb',JSON.stringify(d));localStorage.setItem('__fbUsers','{"a@b.co":"secret1"}');localStorage.setItem('__fbSession','a@b.co')},old);await mp.reload();await mp.waitForSelector('.racks');await mp.waitForTimeout(300);
+ const md=await dbOf(mp),ml=Object.keys(md).filter(k=>k.includes('/locations/')).map(k=>k.split('/').pop()).sort();
+ ok(ml.join()==='bot,dryer-b,top,unit-a','slots fold into one storage: '+ml);
+ ok(md[uid+'locations/unit-a'].capacity===4&&md[uid+'locations/unit-a'].spaces===true&&md[uid+'locations/dryer-b'].maxC===70,'spaces and dryer limit carried over');
+ ok(md[uid+'spools/s0001'].loc==='unit-a'&&md[uid+'spools/s0001'].slot===3&&md[uid+'spools/s0001'].history[0].from==='dryer-b','spool keeps its space and history');
+ ok(md[uid+'config/main'].layout===2,'folding only runs once');ok(await mp.$$eval('.slot',e=>e.length)===6,'folded storages drawn with spaces');await m.close();
 
  // offline start with the real service worker
  const c=await b.newContext({viewport:{width:400,height:820}});await c.route(/config\.js/,r=>r.fulfill({contentType:'text/javascript',body:'window.SPOOL_CONFIG={};'}));

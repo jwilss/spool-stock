@@ -4,21 +4,55 @@
 
 **Scan a sticker, move a spool, always know what filament you own.**
 
-A filament inventory for a home 3D printing setup, with printed QR stickers, phone scanning between storages and offline saving.
+A filament inventory for home 3D printing, with printed QR stickers, phone scanning and offline saving.
 
 [**Open the app**](https://jwilss.github.io/spool-stock/) &nbsp;·&nbsp; [**Download Android and Windows**](https://github.com/jwilss/spool-stock/releases/latest) &nbsp;·&nbsp; [**Setup guide**](SETUP.md) &nbsp;·&nbsp; [**Roadmap**](ROADMAP.md)
 
 <br>
 
-<img src="docs/stock.png" width="260" alt="Stock page showing storages as racks of spools">&nbsp;&nbsp;
+<img src="docs/stock.png" width="260" alt="Stock page showing storages with their spools">&nbsp;&nbsp;
 <img src="docs/scan.png" width="260" alt="Live camera scanning a spool sticker">&nbsp;&nbsp;
 <img src="docs/spool.png" width="260" alt="Spool page with move buttons">
 
 </div>
 
-## Stickers that do the work
+## What it does
 
-Add a spool once and the sticker writes itself: logo, material, colour, nozzle, bed and drying settings, plus a QR code that belongs to that spool. Everything prints in black except the colour box, so the only colour on the sticker is the filament's own.
+- **Scan to move:** point the camera at a spool, then at a storage. The camera stays on for the next one.
+- **Storage that matches yours:** add what you actually own, and see it all at a glance with each ring showing the filament's colour and how much is left.
+- **Stickers that write themselves:** logo, material, colour, print settings and a QR code, ready to print on A4 sheets.
+- **Print settings filled in:** type the manufacturer and material, and the settings appear and get remembered for that filament.
+- **Works offline:** changes save on the device and sync when you're back online.
+- **Low stock at a glance:** weigh a spool and it works out what's left.
+
+## Storage
+
+You start with a blank slate and add each place you keep filament. Choosing a type sets sensible defaults, and everything can be changed afterwards.
+
+<img src="docs/storage.png" width="300" alt="Storage editor with a type picker, name, group and spaces">
+
+| Type | Starts with |
+|---|---|
+| Multi-material unit | 4 numbered spaces, with a warning for materials that don't suit one |
+| Filament dryer | 2 numbered spaces, a top temperature, and a log of when each spool was dried |
+| Spool holder | 1 space |
+| Shelf or rack | Loose spools with no limit |
+| Box or bag | Loose spools with no limit |
+| Something else | Whatever you set |
+
+Each storage is one thing with one sticker. A multi-material unit is a single storage with 4 spaces, so a scanned spool takes the next free space. If it's full, the app asks which spool comes out and swaps them.
+
+For each storage you can set:
+
+- The name and type
+- Numbered spaces or loose spools, and how many it holds
+- A group, to keep a printer and everything feeding it together
+- Which materials to warn about before they go in
+- Where it sits in the list
+
+## Stickers
+
+Everything prints in black except the colour box, so the only colour on the sticker is the filament's own.
 
 <img src="docs/stickers.png" alt="Six printed spool stickers showing solid, gradient and split colour boxes">
 
@@ -28,17 +62,7 @@ Add a spool once and the sticker writes itself: logo, material, colour, nozzle, 
 | Multicolour | Split into triangles, one per colour |
 | Gradient | Smooth blend of its colours |
 
-Stickers download as an A4 PDF. The app remembers where you got to on a part-used sheet, so no sticker goes to waste.
-
-## What it does
-
-- **Scan to move:** point the camera at a spool, then at a storage. Done. The camera stays on for the next one.
-- **See every storage:** AMS slots, dryers and shelves are drawn as racks, with each ring showing the filament's colour and how much is left.
-- **Automatic print settings:** type the manufacturer and material and the settings fill in, then get remembered for that filament.
-- **Logos saved once:** logos are found or uploaded once, turned solid black on transparent, and stored in your account for every sticker.
-- **Works in the shed:** changes save on the device with no signal and sync when you're back.
-- **Sensible warnings:** it flags TPU heading for an AMS, a full slot, or a spool that needs more heat than the dryer can give.
-- **Low stock at a glance:** weigh a spool and it works out what's left.
+Stickers download as an A4 PDF, and the app remembers where you got to on a part-used sheet. Logos are found or uploaded once, turned black on transparent, and stored in your account.
 
 ## Spool Reader
 
@@ -95,9 +119,3 @@ Run the tests with `node test/run.js` and `node test/reader.js`.
 - Your stock is private to your account. Firebase's web settings in `site/config.js` are meant to be public, and `firestore.rules` is what protects the data.
 - No manufacturer logos are stored in this repo. They live in your private data and belong to their owners. The stickers shown above use made-up brands.
 - Print stickers at 100% or Actual size, and test on plain paper first.
-
-<div align="center">
-<br>
-
-
-</div>

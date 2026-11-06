@@ -78,9 +78,12 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .summary{font:600 19px/1.2 var(--disp);letter-spacing:.02em}
 .racks{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))}
 .rack{background:var(--panel);border:1px solid var(--line);padding:10px;display:grid;gap:8px;align-content:start;min-width:0}
-.rack h3{display:flex;justify-content:space-between;gap:8px}
-.slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.rack h3{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.rackname{background:none;border:0;padding:0;font:inherit;letter-spacing:inherit;text-align:left;cursor:pointer;overflow-wrap:anywhere;min-width:0}
+.grouphead{margin-bottom:-8px}
+.slots{display:grid;grid-template-columns:repeat(var(--n,4),minmax(0,1fr));gap:6px}
 .slot{background:var(--bg);border:1px solid var(--line);padding:6px 2px 5px;display:grid;justify-items:center;gap:2px;cursor:pointer;min-width:0}
+.slot .disc{max-width:100%;height:auto}
 .slot small{font:500 12px/1 var(--mono)}
 .slot.empty{border-style:dashed}
 .shelf{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:44px;cursor:pointer;background:var(--bg);border:1px solid var(--line);padding:6px;width:100%;text-align:left}
@@ -113,9 +116,7 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .spec dd{margin:0;font-family:var(--mono);font-size:15px}
 .movegroup{display:grid;gap:6px}
 .movegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px}
-.movegrid.four{grid-template-columns:repeat(4,minmax(0,1fr))}
-.movegrid.four .move{padding:6px 6px;font-size:15px}
-.movegrid.four small{font:500 12px/1.1 var(--mono)}
+.spacegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:6px}
 .move{min-height:52px;display:grid;gap:1px;align-content:center;justify-items:start;text-align:left;background:var(--bg);border:1px solid var(--line);padding:6px 9px;cursor:pointer;font-weight:600}
 .move small{font-weight:400;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
 .move[aria-current="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
@@ -160,7 +161,23 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .spin{width:18px;height:18px;border:3px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:s 1s linear infinite}
 @keyframes s{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
-.setrow{display:grid;grid-template-columns:minmax(0,1fr) 84px auto;gap:6px;align-items:end}
+.cardhead{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.storerow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border-top:1px solid var(--line);padding-top:8px}
+.storerow b{display:block;font-weight:600;overflow-wrap:anywhere}
+.storerow .sub{display:block;color:var(--muted);font-size:15px;overflow-wrap:anywhere}
+.shift{display:grid;grid-template-columns:36px 36px;gap:4px}
+.shift .btn{padding:0;min-width:36px}
+.shift svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.types{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.typepick{position:relative;display:block;cursor:pointer;min-width:0}
+.typepick input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.typepick span{display:grid;gap:2px;height:100%;padding:9px 10px;background:var(--bg);border:1px solid var(--line)}
+.typepick b{font-weight:600}
+.typepick small{color:var(--muted);font-size:14px;line-height:1.25}
+.typepick input:checked+span{background:var(--tag);color:var(--tag-ink);border-color:var(--tag)}
+.typepick input:checked+span small{color:inherit}
+.typepick input:focus-visible+span{outline:2px solid var(--ink);outline-offset:2px}
+.hint{color:var(--muted);font-size:14px}
 .logoPick{background:#fff;border:1px solid var(--line);padding:6px;display:grid;gap:4px;cursor:pointer;color:#000;font-size:13px;text-align:center}
 .logoPick img{height:56px;width:100%;object-fit:contain}
 .brandrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border-top:1px solid var(--line);padding-top:8px}
@@ -207,22 +224,22 @@ const CFG = window.SPOOL_CONFIG || {};
 const PAGE_URL = CFG.siteUrl || (location.origin + location.pathname);
 const IS_APP = /SpoolStockApp/.test(navigator.userAgent);
 
-/* Typical settings from Bambu Lab's filament guide material table (bed values for smooth PEI / high temp plate). */
+/* Typical starting settings per material (bed values for a smooth PEI or high temperature plate). */
 const MATERIALS = [
-  {key:"PETG-CF", re:/PETG[\s-]*(CF|GF)/i, n:[240,270], b:[60,80], d:[70,8], ams:true},
-  {key:"PETG",    re:/PETG|\bHF\b/i,       n:[240,270], b:[60,80], d:[70,8], ams:true},
-  {key:"PLA-CF",  re:/PLA[\s-]*(CF|GF)/i,  n:[210,240], b:[45,65], d:[55,8], ams:true},
-  {key:"PLA",     re:/PLA/i,               n:[190,240], b:[45,65], d:[55,8], ams:true},
-  {key:"ABS",     re:/ABS/i,               n:[240,280], b:[90,100],d:[80,8], ams:true},
-  {key:"ASA",     re:/ASA/i,               n:[240,280], b:[90,100],d:[80,8], ams:true},
-  {key:"TPU",     re:/TPU|TPE/i,           n:[200,250], b:[35,45], d:[70,8], ams:false},
-  {key:"PET-CF",  re:/PET[\s-]*(CF|GF)/i,  n:[260,300], b:[100,120],d:[80,12],ams:false},
-  {key:"PPA-CF",  re:/PPA/i,               n:[285,320], b:[100,120],d:null,  ams:false},
-  {key:"PPS",     re:/PPS/i,               n:[285,330], b:[100,120],d:null,  ams:true},
-  {key:"PA-CF",   re:/(PA|PAHT|PA6|PA12)[\s-]*(CF|GF)/i, n:[260,300], b:[100,120],d:[80,12],ams:true},
-  {key:"PA",      re:/\bPA\b|PAHT|PA6|PA12|nylon/i,      n:[260,290], b:[100,120],d:[80,12],ams:true},
-  {key:"PC",      re:/\bPC\b|polycarbonate/i,            n:[260,290], b:[100,120],d:[80,8], ams:true},
-  {key:"PVA",     re:/PVA|BVOH/i,          n:[190,240], b:[45,65], d:[55,8], ams:true},
+  {key:"PETG-CF", re:/PETG[\s-]*(CF|GF)/i, n:[240,270], b:[60,80], d:[70,8]},
+  {key:"PETG",    re:/PETG|\bHF\b/i,       n:[240,270], b:[60,80], d:[70,8]},
+  {key:"PLA-CF",  re:/PLA[\s-]*(CF|GF)/i,  n:[210,240], b:[45,65], d:[55,8]},
+  {key:"PLA",     re:/PLA/i,               n:[190,240], b:[45,65], d:[55,8]},
+  {key:"ABS",     re:/ABS/i,               n:[240,280], b:[90,100],d:[80,8]},
+  {key:"ASA",     re:/ASA/i,               n:[240,280], b:[90,100],d:[80,8]},
+  {key:"TPU",     re:/TPU|TPE/i,           n:[200,250], b:[35,45], d:[70,8]},
+  {key:"PET-CF",  re:/PET[\s-]*(CF|GF)/i,  n:[260,300], b:[100,120],d:[80,12]},
+  {key:"PPA-CF",  re:/PPA/i,               n:[285,320], b:[100,120],d:null},
+  {key:"PPS",     re:/PPS/i,               n:[285,330], b:[100,120],d:null},
+  {key:"PA-CF",   re:/(PA|PAHT|PA6|PA12)[\s-]*(CF|GF)/i, n:[260,300], b:[100,120],d:[80,12]},
+  {key:"PA",      re:/\bPA\b|PAHT|PA6|PA12|nylon/i,      n:[260,290], b:[100,120],d:[80,12]},
+  {key:"PC",      re:/\bPC\b|polycarbonate/i,            n:[260,290], b:[100,120],d:[80,8]},
+  {key:"PVA",     re:/PVA|BVOH/i,          n:[190,240], b:[45,65], d:[55,8]},
 ];
 const BRANDS = ["Bambu Lab","eSUN","Polymaker","SUNLU","Overture","Prusament","ELEGOO","JAYO","Creality","Anycubic","Kingroon","Fiberlogy","Extrudr","ColorFabb","Spectrum","Hatchbox","3DJake","Geeetech","Eryone","AMOLEN","Siraya Tech","Flashforge","Fillamentum","Recreus","NinjaTek","Das Filament","Azurefilm","Rosa3D","Devil Design"];
 const FINISH = ["","Matte","Glossy","Silk","Translucent","Sparkle","Marble","Dual colour"];
@@ -237,6 +254,15 @@ const SHEETS = [
   {id:"l7163",name:"99.1 x 38.1 mm, 14 per sheet (L7163 size)",w:99.1,h:38.1,cols:2,rows:7,left:4.65,top:15.15,px:101.6,py:38.1},
 ];
 const LOW_G = 150, MOVE_WINDOW = 5*60*1000;
+/* What each kind of storage is usually like. Picking one fills in these defaults, and all of them can be changed. */
+const STORE_TYPES = {
+  ams:{label:"Multi-material unit",hint:"AMS, MMU or similar",name:"AMS",spaces:true,cap:4,warn:"TPU, PET-CF, PPA-CF"},
+  dryer:{label:"Filament dryer",hint:"Heated, and logs when a spool was dried",name:"Dryer",spaces:true,cap:2},
+  holder:{label:"Spool holder",hint:"A single spool on a printer",name:"Spool holder",spaces:true,cap:1},
+  shelf:{label:"Shelf or rack",hint:"Open storage",name:"Shelf",spaces:false,cap:null},
+  box:{label:"Box or bag",hint:"Dry box, tub or vacuum bag",name:"Box",spaces:false,cap:null},
+  other:{label:"Something else",hint:"Set it up however you like",name:"Storage",spaces:false,cap:null},
+};
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -260,7 +286,7 @@ const when = t => new Date(t).toLocaleString("en-GB",{day:"numeric",month:"short
 
 /* ---------- state ---------- */
 const S = {spools:{},locs:{},brands:{},profiles:{},settings:{},ready:0,view:"stock",param:null,filter:{q:"",mat:"",loc:"",tab:"active"},stale:false};
-let db=null, fs=null, uid=null, F=null, crop=null, Imp=null;
+let db=null, fs=null, uid=null, F=null, LF=null, crop=null, Imp=null;
 let internal=false, booted=false, started=false;
 const SOURCE_NOTE=`<div class="card"><h2>Almost set up</h2><p>Add your Firebase details to config.js, as described in SETUP.md, then reload.</p></div>`;
 const col = n => db.collection(n);
@@ -281,11 +307,31 @@ const downloads={
   },
 };
 const liveSpools = () => Object.values(S.spools).filter(s=>s.status!=="used");
-const locName = id => { const l=S.locs[id]; return !l ? "No storage set" : (l.group && l.group!==l.name ? l.group+" "+l.name : l.name); };
+const locName = id => { const l=S.locs[id]; return !id ? "No storage set" : !l ? "Removed storage" : l.group ? l.group+" "+l.name : l.name; };
 const orderedLocs = () => Object.values(S.locs).sort((a,b)=>(a.order??99)-(b.order??99)||a.name.localeCompare(b.name));
-const groups = () => { const m=new Map(); for(const l of orderedLocs()){ const g=l.group||l.name; if(!m.has(g)) m.set(g,[]); m.get(g).push(l);} return [...m]; };
+const groups = () => { const m=new Map(); for(const l of orderedLocs()){ const g=l.group||""; if(!m.has(g)) m.set(g,[]); m.get(g).push(l);} return [...m]; };
 const inLoc = id => liveSpools().filter(s=>s.loc===id);
-const isExample = s => !!s.example;
+/* A storage with spaces is one storage holding a fixed number of spools, one per numbered space. */
+const spaced = l => !!(l&&l.spaces&&l.capacity>0);
+function seated(l){
+  const seats=Array(l.capacity).fill(null), rest=[];
+  for(const s of inLoc(l.id)){ if(s.slot>=1&&s.slot<=l.capacity&&!seats[s.slot-1]) seats[s.slot-1]=s; else rest.push(s); }
+  for(const s of rest){ const i=seats.indexOf(null); if(i>=0) seats[i]=s; }
+  return seats;
+}
+const freeSpaces = l => seated(l).flatMap((s,i)=>s?[]:[i+1]);
+const spaceOf = s => { const l=S.locs[s.loc]; return spaced(l)?seated(l).findIndex(x=>x&&x.id===s.id)+1||null:null; };
+const spotName = s => { const n=spaceOf(s); return locName(s.loc)+(n&&S.locs[s.loc].capacity>1?", space "+n:""); };
+const isFull = l => !!l.capacity&&inLoc(l.id).length>=l.capacity;
+const locOptions = (sel,roomOnly) => orderedLocs().map(l=>{ const off=roomOnly&&isFull(l)&&sel!==l.id; return `<option value="${l.id}" ${sel===l.id?"selected":""} ${off?"disabled":""}>${esc(locName(l.id))}${off?" (full)":""}</option>`; }).join("");
+const warnOf = l => l.warn ?? STORE_TYPES[l.kind]?.warn ?? "";
+function warnHit(sp,l){
+  const key=(baseMat(sp.material)?.key||"").toLowerCase(), words=` ${sp.material.toLowerCase().replace(/[^a-z0-9-]+/g," ")} `;
+  return warnOf(l).split(",").map(x=>x.trim()).filter(Boolean).find(t=>t.toLowerCase()===key||words.includes(` ${t.toLowerCase()} `));
+}
+function newLocId(name){ const base=slug(name).slice(0,24).replace(/-$/,"")||"storage"; let id=base, n=2; while(S.locs[id]||id==="new") id=base+"-"+n++; return id; }
+const placer = id => { const l=S.locs[id], open=spaced(l)?freeSpaces(l):null; return ()=>{ if(!id) return {loc:null,slot:null}; if(!open) return {loc:id,slot:null}; const slot=open.shift(); return slot?{loc:id,slot}:{loc:null,slot:null}; }; };
+const newSpool = (body,now,spot) => ({...body,...spot,remainG:body.netG,status:"active",labelled:false,addedAt:now,history:spot.loc?[{at:now,from:null,to:spot.loc}]:[]});
 const hexOK = h => /^#[0-9a-f]{6}$/i.test(h||"") ? h : "#9AA5AB";
 const colourList = s => { const c=Array.isArray(s.colours)?s.colours.filter(x=>/^#[0-9a-f]{6}$/i.test(x)):[]; return c.length?c:[hexOK(s.hex)]; };
 const patternOf = s => colourList(s).length>1&&(s.pattern==="split"||s.pattern==="gradient")?s.pattern:"solid";
@@ -414,10 +460,10 @@ function locOps(l,W,H){
   const m=2.2, ops=[], qs=Math.min(H-2*m,W*.42);
   ops.push({t:"qr",x:m,y:m,s:qs,text:qrUrl("loc-"+l.id)});
   const x=m+qs+2.5, cw=W-x-m;
-  const g=l.group&&l.group!==l.name;
-  const a=fit(safe(g?l.group:l.name),cw,20,10,"sans",1);
+  const g=!!l.group;
+  const a=fit(safe(l.name),cw,20,10,"sans",1);
   ops.push({t:"text",x,y:H/2-(g?.8:-2.2),text:a.text,pt:a.pt,font:"sans",bold:1});
-  if(g){ const b=fit(safe(l.name),cw,15,9,"sans",0); ops.push({t:"text",x,y:H/2+6,text:b.text,pt:b.pt,font:"sans"}); }
+  if(g){ const b=fit(safe(l.group),cw,15,9,"sans",0); ops.push({t:"text",x,y:H/2+6,text:b.text,pt:b.pt,font:"sans"}); }
   return ops;
 }
 const itemOps = (it,W,H) => it.kind==="loc" ? locOps(it.data,W,H) : spoolOps(it.data,W,H);
@@ -487,25 +533,33 @@ function watch(){
     const o={}; snap.docs.forEach(d=>o[d.id]={...d.data(),id:d.id}); S[key]=o;
     if(!snap.metadata.fromCache) seen.add(key);
     if(seen.size>=4){ clearTimeout(timer); S.stale=false; }
-    if(key==="locs"&&snap.empty&&!snap.metadata.fromCache) seedStorages();
+    upgradeStorages(seen);
     S.ready=1; dataChanged();
   },e=>{ clearTimeout(timer); S.loadErr=(e&&e.code)||"unknown"; if(S.ready) toast("Lost the link to your stock. Reload the page."); else render(); });
   sub("spools","spools"); sub("locations","locs"); sub("brands","brands"); sub("profiles","profiles");
-  db.doc("config/main").onSnapshot(d=>{ S.settings=d.exists?{...d.data()}:{}; dataChanged(); },()=>{});
+  db.doc("config/main").onSnapshot(d=>{ S.settings=d.exists?{...d.data()}:{}; if(!d.metadata.fromCache) configSeen=true; upgradeStorages(seen); dataChanged(); },()=>{});
 }
-let seeded=false;
-async function seedStorages(){
-  if(seeded) return; seeded=true;
-  const d=await db.doc("config/main").get().catch(()=>null);
-  if(d&&d.exists&&d.data().seeded) return;
-  const add=(id,name,group,kind,capacity,order,extra={})=>col("locations").doc(id).set({name,group,kind,capacity,order,wantLabel:true,...extra});
-  add("pi-1","Slot 1","Space Pi Plus (Alduin)","dryer",1,1,{maxC:70});
-  add("pi-2","Slot 2","Space Pi Plus (Alduin)","dryer",1,2,{maxC:70});
-  let o=10;
-  for(const a of [1,2]) for(const n of [1,2,3,4]) add(`ams${a}-${n}`,`Slot ${n}`,`AMS ${a} (Betsy)`,"ams",1,++o);
-  add("rack-top","Top shelf","Rack","shelf",10,21);
-  add("rack-bottom","Bottom shelf","Rack","shelf",10,22);
-  saveConfig({seeded:true});
+/* Older accounts kept one storage per slot. Runs once and folds those into one storage with numbered spaces. */
+let configSeen=false, upgraded=false;
+function upgradeStorages(seen){
+  if(upgraded||seen.size<4||!configSeen) return;
+  upgraded=true;
+  if(S.settings.layout>=2) return;
+  for(const [g,ls] of groups()){
+    if(!g||ls.length<2||!ls.every(l=>l.capacity===1)) continue;
+    const id=newLocId(g), first=ls[0], moved={}; ls.forEach((l,i)=>moved[l.id]=i+1);
+    const doc={name:g,group:"",kind:first.kind,spaces:true,capacity:ls.length,order:first.order,wantLabel:true,...(first.maxC?{maxC:first.maxC}:{})};
+    S.locs[id]={...doc,id};
+    col("locations").doc(id).set(doc);
+    for(const s of Object.values(S.spools)){
+      const patch={};
+      if(moved[s.loc]){ patch.loc=id; patch.slot=moved[s.loc]; }
+      if((s.history||[]).some(h=>moved[h.from]||moved[h.to])) patch.history=s.history.map(h=>({...h,from:moved[h.from]?id:h.from,to:moved[h.to]?id:h.to}));
+      if(Object.keys(patch).length) col("spools").doc(s.id).update(patch);
+    }
+    for(const l of ls) col("locations").doc(l.id).delete();
+  }
+  saveConfig({layout:2});
 }
 let dataTimer=null;
 function dataChanged(){
@@ -514,7 +568,7 @@ function dataChanged(){
     if(!booted){ booted=true; route(true); return; }
     const el=document.activeElement;
     if(S.view==="scan") return;
-    if(["add","edit","setup","import"].includes(S.view)) { if(S.view==="setup"&&!(el&&el.closest&&el.closest("#main")&&el.matches("input,select,textarea"))) render(); return; }
+    if(["add","edit","setup","import","store"].includes(S.view)) { if(S.view==="setup"&&!(el&&el.closest&&el.closest("#main")&&el.matches("input,select,textarea"))) render(); return; }
     if(el&&el.closest&&el.closest("#main")&&el.matches("input[type=text],input[type=number],input[type=search],textarea")) return;
     render();
   },60);
@@ -526,7 +580,7 @@ async function saveConfig(patch){
 }
 function nextIds(n){
   let hi=S.settings.lastId||0;
-  for(const id of Object.keys(S.spools)){ const v=parseInt(id.slice(1),10); if(v<9000&&v>hi) hi=v; }
+  for(const id of Object.keys(S.spools)){ const v=parseInt(id.slice(1),10); if(v>hi) hi=v; }
   const out=[]; for(let i=1;i<=n;i++) out.push("s"+String(hi+i).padStart(4,"0"));
   return {ids:out,last:hi+n};
 }
@@ -534,39 +588,38 @@ function nextIds(n){
 /* ---------- moving ---------- */
 async function doMove(id,to,opts={}){
   const sp=S.spools[id]; if(!sp) return;
-  const from=sp.loc||null;
+  const from=sp.loc||null, l=S.locs[to], other=opts.swap?S.spools[opts.swap]:null;
   if(from===to){ toast("Already in "+locName(to)); return; }
-  const l=S.locs[to];
-  const patch={loc:to,status:"active",history:[{at:Date.now(),from,to},...(sp.history||[])].slice(0,30)};
+  const seat=!spaced(l)?null:other?spaceOf(other):freeSpaces(l)[0]??null, oldSeat=spaceOf(sp);
+  const patch={loc:to,slot:seat,status:"active",history:[{at:Date.now(),from,to},...(sp.history||[])].slice(0,30)};
   if(l&&l.kind==="dryer") patch.lastDried=Date.now();
   try{
     await col("spools").doc(id).update(patch);
-    if(opts.swap) await col("spools").doc(opts.swap).update({loc:from,history:[{at:Date.now(),from:to,to:from},...(S.spools[opts.swap].history||[])].slice(0,30)});
-    S.spools[id]={...sp,...patch}; if(S.view==="scan") Scanner.moved(id,to,hotNote(sp,l)); else render();
-    const hot=hotNote(sp,l);
-    toast(`${id.toUpperCase()} moved to ${locName(to)}.${hot}`,"Undo",async()=>{
-      await col("spools").doc(id).update({loc:from,status:sp.status||"active",history:sp.history||[],lastDried:sp.lastDried||null});
-      if(opts.swap) await col("spools").doc(opts.swap).update({loc:to,history:S.spools[opts.swap].history?.slice(1)||[]});
+    if(other) await col("spools").doc(other.id).update({loc:from,slot:oldSeat,history:[{at:Date.now(),from:to,to:from},...(other.history||[])].slice(0,30)});
+    S.spools[id]={...sp,...patch};
+    if(other) S.spools[other.id]={...other,loc:from,slot:oldSeat};
+    const hot=hotNote(sp,l), place=spotName(S.spools[id]);
+    if(S.view==="scan") Scanner.moved(id,place,hot); else render();
+    toast(`${id.toUpperCase()} moved to ${place}.${hot}`,"Undo",async()=>{
+      await col("spools").doc(id).update({loc:from,slot:sp.slot??null,status:sp.status||"active",history:sp.history||[],lastDried:sp.lastDried||null});
+      if(other) await col("spools").doc(other.id).update({loc:to,slot:other.slot??null,history:other.history||[]});
     });
   }catch(e){ fail(e,"That move didn't save"); }
 }
 const hotNote = (sp,l) => l&&l.maxC&&sp.dT>l.maxC ? ` It wants ${sp.dT} °C and this dryer stops at ${l.maxC} °C.` : "";
 function tryMove(id,to){
   const sp=S.spools[id], l=S.locs[to]; if(!sp||!l) return;
-  const m=baseMat(sp.material);
-  const check2=()=>{
+  if(sp.loc===to){ toast("Already in "+locName(to)); return; }
+  const place=()=>{
     const here=inLoc(to).filter(s=>s.id!==id);
-    if(l.capacity && here.length>=l.capacity){
-      if(l.capacity===1){
-        const o=here[0];
-        ask(`${locName(to)} is taken`,`${o.material} ${o.colour||""} (${o.id.toUpperCase()}) is in there. Swap them, so it goes to ${locName(sp.loc)}?`,[["Swap",()=>doMove(id,to,{swap:o.id}),"go"],["Cancel",null]]);
-      } else ask(`${locName(to)} is full`,`It holds ${l.capacity}. Move something out first, or raise the limit in Setup.`,[["OK",null]]);
-      return;
-    }
-    doMove(id,to);
+    if(!l.capacity||here.length<l.capacity){ doMove(id,to); return; }
+    if(!spaced(l)&&l.capacity!==1){ ask(`${l.name} is full`,`It holds ${l.capacity}. Move something out first, or raise the limit in Setup.`,[["OK",null]]); return; }
+    const out=sp.loc?`It goes to ${locName(sp.loc)}.`:"It will have no storage set.";
+    ask(`${l.name} is full`,`Which spool comes out? ${out}`,[...here.map(o=>[`${o.id.toUpperCase()} ${o.material} ${o.colour||""}`.trim(),()=>doMove(id,to,{swap:o.id})]),["Cancel",null]]);
   };
-  if(l.kind==="ams" && m && !m.ams) ask(`${m.key} in the AMS`,`Bambu Lab lists ${m.key} as not suitable for the AMS. Move it anyway?`,[["Move anyway",check2,"go"],["Cancel",null]]);
-  else check2();
+  const hit=warnHit(sp,l);
+  if(hit) ask(`${hit} in ${l.name}`,`${sp.material} is on the warning list for ${l.name}. Move it anyway?`,[["Move anyway",place,"go"],["Cancel",null]]);
+  else place();
 }
 function handleScan(code,source){
   if(!code){ toast("That isn't one of your stickers."); return; }
@@ -598,6 +651,7 @@ function route(external){
   if(/^s\d+/.test(h)){ S.view="spool"; S.param=h; }
   else if(h.startsWith("edit-")){ S.view="edit"; S.param=h.slice(5); }
   else if(h.startsWith("loc-")){ S.view="loc"; S.param=h.slice(4); }
+  else if(h.startsWith("store-")){ S.view="store"; S.param=h.slice(6); storeDraft(S.param); }
   else if(VIEWS.includes(h)){ S.view=h; S.param=null; }
   else { S.view="stock"; S.param=null; }
   if(S.view==="add"&&!F) newDraft();
@@ -624,12 +678,13 @@ function render(){
   const m=$("#main");
   if(S.view!=="scan") Scanner.stop();
   if(!db){ m.innerHTML=!CFG.firebase?SOURCE_NOTE:!started?`<div class="busy"><span class="spin"></span>Starting up</div>`:vLogin(); return; }
-  if(!S.ready&&S.loadErr){ m.innerHTML=`<div class="card"><h2>Can't open your stock</h2><p>${S.loadErr==="permission-denied"?"Firebase refused access. Open Firestore in the Firebase console, go to the Rules tab, paste in firestore.rules and press Publish, then reload this page.":"Firebase gave an error, so reload the page. If it keeps happening, tell Claude this code."}</p><p class="mono">${esc(S.loadErr)}</p></div>`; return; }
+  if(!S.ready&&S.loadErr){ m.innerHTML=`<div class="card"><h2>Can't open your stock</h2><p>${S.loadErr==="permission-denied"?"Firebase refused access. Open Firestore in the Firebase console, go to the Rules tab, paste in firestore.rules and press Publish, then reload this page.":"Firebase gave an error, so reload the page. If it keeps happening, note this code."}</p><p class="mono">${esc(S.loadErr)}</p></div>`; return; }
   if(!S.ready){ m.innerHTML=S.stale?`<div class="note warn">Can't reach your stock yet. Check your signal, it will load when it connects.</div>`:`<div class="busy"><span class="spin"></span>Opening your stock</div>`; return; }
-  const v={stock:vStock,add:vForm,edit:vForm,scan:vScan,stickers:vStickers,setup:vSetup,spool:vSpool,loc:vLoc,import:vImport}[S.view]||vStock;
+  const v={stock:vStock,add:vForm,edit:vForm,scan:vScan,stickers:vStickers,setup:vSetup,spool:vSpool,loc:vLoc,store:vStore,import:vImport}[S.view]||vStock;
   m.innerHTML=(!navigator.onLine?`<div class="note warn">No signal. Changes are kept on this device and sync when you're back.</div>`:S.stale?`<div class="note warn">Showing your last saved copy. It may be out of date.</div>`:"")+v();
   if(S.view==="scan") Scanner.attach();
   if(S.view==="add"||S.view==="edit") formPreview();
+  if(S.view==="store"&&LF) storePreview();
   if(crop) drawCrop();
 }
 
@@ -646,32 +701,21 @@ function authMsg(e){
   return ({"auth/invalid-credential":"That email or password isn't right.","auth/wrong-password":"That email or password isn't right.","auth/user-not-found":"That email or password isn't right.","auth/email-already-in-use":"There's already an account with that email.","auth/weak-password":"Use at least 6 characters.","auth/invalid-email":"That doesn't look like an email address.","auth/network-request-failed":"No connection. Try again with signal.","auth/admin-restricted-operation":"New accounts are switched off for this app."}[e&&e.code])||"Couldn't sign in. Try again.";
 }
 const authErr = e => { const n=$("#authErr"); if(n){ n.hidden=false; n.textContent=authMsg(e); } };
+function rackHTML(l){
+  const here=inLoc(l.id), head=`<h3><button class="rackname" data-go="loc-${l.id}">${esc(l.name)}</button><span class="mono">${here.length}${l.capacity?"/"+l.capacity:""}</span></h3>`;
+  if(spaced(l)){
+    const n=l.capacity, cols=Math.min(n,n%4===0?4:5);
+    return `<section class="rack">${head}<div class="slots" style="--n:${cols}">${seated(l).map((s,i)=>`<button class="slot ${s?"":"empty"}" data-go="${s?s.id:"loc-"+l.id}" aria-label="${esc(l.name)} space ${i+1}${s?", "+esc(s.material+" "+(s.colour||"")):", empty"}">${disc(s,40)}<small>${s?esc(s.id.toUpperCase()):i+1}</small></button>`).join("")}</div></section>`;
+  }
+  return `<section class="rack">${head}<button class="shelf" data-go="loc-${l.id}" aria-label="Open ${esc(l.name)}">${here.length?here.slice(0,12).map(s=>disc(s,32)).join("")+(here.length>12?`<span class="mono">+${here.length-12}</span>`:""):`<span class="muted">Empty</span>`}</button></section>`;
+}
 function vStock(){
   const live=liveSpools(), kg=live.reduce((a,s)=>a+(s.remainG??s.netG??0),0)/1000, low=live.filter(isLow).length;
-  const hasEx=Object.values(S.spools).some(isExample);
-  let racks="";
-  for(const [g,ls] of groups()){
-    const isSlots=ls.length>1&&ls.every(l=>l.capacity===1);
-    if(isSlots){
-      racks+=`<section class="rack"><h3>${esc(g)}</h3><div class="slots" style="grid-template-columns:repeat(${ls.length},minmax(0,1fr))">${ls.map(l=>{const s=inLoc(l.id)[0];return `<button class="slot ${s?"":"empty"}" data-go="loc-${l.id}" aria-label="${esc(locName(l.id))}">${disc(s,40)}<small>${s?esc(s.id.toUpperCase()):esc(l.name.replace(/\D/g,"")||l.name)}</small></button>`;}).join("")}</div></section>`;
-    } else for(const l of ls){
-      const here=inLoc(l.id);
-      racks+=`<section class="rack"><h3>${esc(locName(l.id))}<span class="mono">${here.length}${l.capacity?"/"+l.capacity:""}</span></h3><button class="shelf" data-go="loc-${l.id}" aria-label="Open ${esc(locName(l.id))}">${here.length?here.slice(0,12).map(s=>disc(s,32)).join("")+(here.length>12?`<span class="mono">+${here.length-12}</span>`:""):`<span class="muted">Empty</span>`}</button></section>`;
-    }
-  }
+  const racks=groups().map(([g,ls])=>`${g?`<h2 class="grouphead">${esc(g)}</h2>`:""}<div class="racks">${ls.map(rackHTML).join("")}</div>`).join("");
   const mats=[...new Set(live.map(s=>baseMat(s.material)?.key||s.material))].sort();
   const f=S.filter;
-  const q=f.q.toLowerCase();
-  let rows=(f.tab==="used"?Object.values(S.spools).filter(s=>s.status==="used"):live).filter(s=>{
-    if(f.tab==="low"&&!isLow(s)) return false;
-    if(f.mat&&(baseMat(s.material)?.key||s.material)!==f.mat) return false;
-    if(q&&![s.id,s.brand,s.material,s.colour,s.finish,locName(s.loc)].join(" ").toLowerCase().includes(q)) return false;
-    return true;
-  }).sort((a,b)=>a.id.localeCompare(b.id));
-  const list=rows.map(rowHTML).join("");
   return `<div class="summary">${live.length} spool${live.length===1?"":"s"}, ${kg.toFixed(1)} kg${low?`, ${low} low`:""}</div>
-  ${hasEx?`<div class="note">The spools marked Example are only there to show how this works. <button class="btn sm" data-act="delExamples">Delete examples</button></div>`:""}
-  <div class="racks">${racks||`<div class="card">Add your storages in Setup.</div>`}</div>
+  ${racks||`<div class="racks"><div class="card"><h2>Set up your storage</h2><p>Add each place you keep filament, such as a multi-material unit, a dryer or a shelf.</p><div class="btns"><button class="btn go" data-go="store-new">Add a storage</button></div></div></div>`}
   <div class="tools">
     <input type="search" id="q" aria-label="Search spools" placeholder="Search brand, material, colour or code" value="${esc(f.q)}">
     <div class="chips">
@@ -679,12 +723,12 @@ function vStock(){
       ${mats.map(m=>`<button class="chip" data-act="mat" data-v="${esc(m)}" aria-pressed="${f.mat===m}">${esc(m)}</button>`).join("")}
     </div>
   </div>
-  <div class="list" id="spoolList">${list||emptyList(live.length)}</div>`;
+  <div class="list" id="spoolList">${stockRows()}</div>`;
 }
 const emptyList = n => n ? `<div class="card">Nothing matches that search.</div>` : `<div class="card"><h3>No spools yet</h3><p>Add your first one and it joins the sticker queue.</p><div class="btns"><button class="btn go" data-go="add">Add a spool</button></div></div>`;
 function rowHTML(s){
   const p=Math.round(pct(s)*100);
-  return `<button class="row" data-go="${s.id}">${disc(s)}<span style="min-width:0"><b>${esc(s.material)} ${esc(s.colour||"")}</b><span class="sub">${esc(s.brand)}, ${esc(s.status==="used"?"used up":locName(s.loc))}</span></span><span class="end"><span class="mono">${esc(s.id.toUpperCase())}</span><br>${s.example?`<span class="pill ex">Example</span>`:isLow(s)&&s.status!=="used"?`<span class="pill low">Low</span>`:`<span class="mono">${s.remainG??s.netG??"?"} g</span>`}</span></button>`;
+  return `<button class="row" data-go="${s.id}">${disc(s)}<span style="min-width:0"><b>${esc(s.material)} ${esc(s.colour||"")}</b><span class="sub">${esc(s.brand)}, ${esc(s.status==="used"?"used up":spotName(s))}</span></span><span class="end"><span class="mono">${esc(s.id.toUpperCase())}</span><br>${isLow(s)&&s.status!=="used"?`<span class="pill low">Low</span>`:`<span class="mono">${s.remainG??s.netG??"?"} g</span>`}</span></button>`;
 }
 
 function vSpool(){
@@ -693,18 +737,18 @@ function vSpool(){
   const p=local.get("pending");
   const scanned=S.scanned===s.id&&p&&p.id===s.id&&Date.now()-p.at<MOVE_WINDOW;
   const rem=s.remainG??s.netG??0, lowC=isLow(s)?"low":"";
-  const moveBtn=(l,four)=>{
-    const here=inLoc(l.id).filter(x=>x.id!==s.id), cur=s.loc===l.id;
-    const sub=cur?"Here":l.capacity===1?(here[0]?(four?esc(here[0].id.toUpperCase()):esc(here[0].material+" "+(here[0].colour||""))):"Free"):here.length+(l.capacity?" of "+l.capacity:(here.length===1?" spool":" spools"));
+  const moveBtn=l=>{
+    const here=inLoc(l.id).filter(x=>x.id!==s.id), cur=s.loc===l.id, n=here.length+(cur?1:0);
+    const sub=cur?"Here":l.capacity===1?(here[0]?esc(here[0].material+" "+(here[0].colour||"")):"Free"):n+(l.capacity?" of "+l.capacity:(n===1?" spool":" spools"));
     return `<button class="move" data-act="move" data-loc="${l.id}" aria-label="${esc(locName(l.id))}" ${cur?'aria-current="true"':""}><span>${esc(l.name)}</span><small>${sub}</small></button>`;
   };
-  const multi=groups().filter(([,ls])=>ls.length>1), single=groups().filter(([,ls])=>ls.length===1).map(([,ls])=>ls[0]);
-  const moves=multi.map(([g,ls])=>`<div class="movegroup"><div class="lab">${esc(g)}</div><div class="movegrid ${ls.length===4?"four":""}">${ls.map(l=>moveBtn(l,ls.length===4)).join("")}</div></div>`).join("")
-    +(single.length?`<div class="movegroup">${multi.length?`<div class="lab">Other storage</div>`:""}<div class="movegrid">${single.map(l=>moveBtn(l,false)).join("")}</div></div>`:"");
+  const moves=groups().map(([g,ls])=>`<div class="movegroup">${g?`<div class="lab">${esc(g)}</div>`:""}<div class="movegrid">${ls.map(moveBtn).join("")}</div></div>`).join("");
+  const inside=S.locs[s.loc];
+  const spaces=spaced(inside)&&inside.capacity>1?`<div class="movegroup"><div class="lab">Space in ${esc(inside.name)}</div><div class="spacegrid">${seated(inside).map((o,i)=>{const me=o&&o.id===s.id;return `<button class="move" data-act="spacePick" data-v="${i+1}" aria-label="Space ${i+1}" ${me?'aria-current="true"':""}><span>${i+1}</span><small>${me?"Here":o?esc(o.id.toUpperCase()):"Free"}</small></button>`;}).join("")}</div></div>`:"";
   const hist=(s.history||[]).slice(0,6).map(h=>`<div>${when(h.at)}: ${esc(locName(h.from))} to ${esc(locName(h.to))}</div>`).join("");
-  return `<div class="spoolhead">${disc(s,84)}<div style="min-width:0"><div class="code">${esc(s.id.toUpperCase())}${s.example?' <span class="pill ex">Example</span>':""}${s.status==="used"?' <span class="pill ex">Used up</span>':""}</div><h1>${esc(s.material)}</h1><div>${esc(s.brand)}${s.colour?", "+esc(s.colour):""}${s.finish?", "+esc(s.finish):""}</div></div></div>
+  return `<div class="spoolhead">${disc(s,84)}<div style="min-width:0"><div class="code">${esc(s.id.toUpperCase())}${s.status==="used"?' <span class="pill ex">Used up</span>':""}</div><h1>${esc(s.material)}</h1><div>${esc(s.brand)}${s.colour?", "+esc(s.colour):""}${s.finish?", "+esc(s.finish):""}</div></div></div>
   ${scanned?`<div class="note"><b>Scanned.</b> Tap a storage below, or scan a storage sticker in the next 5 minutes to file it there.</div>`:""}
-  <div class="card"><h2>Move to</h2>${moves||"Add storages in Setup first."}</div>
+  <div class="card"><h2>Move to</h2>${spaces}${moves||`<div class="btns"><button class="btn" data-go="store-new">Add a storage first</button></div>`}</div>
   <div class="split">
     <div class="card">
       <h2>Remaining</h2>
@@ -735,15 +779,16 @@ function vSpool(){
 function vLoc(){
   const l=S.locs[S.param];
   if(!l) return `<div class="card"><h2>That storage is gone</h2><div class="btns"><button class="btn" data-go="stock">Back to stock</button></div></div>`;
-  const here=inLoc(l.id);
-  return `<div><div class="code">Storage</div><h1>${esc(locName(l.id))}</h1></div>
+  const here=inLoc(l.id), type=STORE_TYPES[l.kind]?.label||"Storage";
+  return `<div><div class="code">${esc(type)}</div><h1>${esc(locName(l.id))}</h1></div>
+  ${spaced(l)&&l.capacity>1?rackHTML(l):""}
   <div class="list">${here.map(rowHTML).join("")||`<div class="card">Nothing in here. Scan a spool, then scan this storage's sticker to file it.</div>`}</div>
-  <div class="btns"><button class="btn" data-act="printLoc">Add sticker to queue</button></div>`;
+  <div class="btns"><button class="btn" data-go="store-${l.id}">Edit storage</button><button class="btn" data-act="printLoc">Add sticker to queue</button></div>`;
 }
 
 function vScan(){
   const t=local.get("scanTarget")||"";
-  const opts=orderedLocs().map(l=>`<option value="${l.id}" ${t===l.id?"selected":""}>${esc(locName(l.id))}</option>`).join("");
+  const opts=locOptions(t);
   return `<div class="card">
     <div class="camwrap" id="camWrap" hidden><video id="cam" playsinline muted></video><i></i></div>
     <div class="scanstate" id="scanState"></div>
@@ -823,7 +868,7 @@ const Scanner={
       const h=this.held; this.held=null; tryMove(h,id);
     }
   },
-  moved(id,to,note){ this.msg=`${id.toUpperCase()} is in ${locName(to)}.${note||""} Scan the next spool`; this.say(this.msg); },
+  moved(id,place,note){ this.msg=`${id.toUpperCase()} is in ${place}.${note||""} Scan the next spool`; this.say(this.msg); },
 };
 
 /* form */
@@ -845,7 +890,7 @@ function vForm(){
   const e=!!F.editId;
   const names=[...new Set([...Object.values(S.brands).map(b=>b.name),...BRANDS])];
   const mats=[...new Set([...Object.values(S.profiles).map(p=>p.material),...MATERIALS.map(m=>m.key)])];
-  const opts=orderedLocs().map(l=>`<option value="${l.id}" ${F.loc===l.id?"selected":""}>${esc(locName(l.id))}</option>`).join("");
+  const opts=locOptions(F.loc,true);
   return `<div><h1>${e?"Edit "+esc(F.editId.toUpperCase()):"Add a spool"}</h1></div>
   ${e?"":`<div class="btns"><button class="btn" data-go="import">Import from Spool Reader</button></div>`}
   ${crop?cropHTML():""}
@@ -912,29 +957,31 @@ async function submitForm(){
   const btn=$("#saveSpool"); if(btn) btn.disabled=true;
   const now=Date.now(), brand=F.brand.trim(), material=F.material.trim();
   const list=F.pattern==="solid"?[F.colours[0]]:F.colours;
-  const body={brand,material,colour:F.colour.trim(),hex:list[0],colours:list,pattern:list.length>1?F.pattern:"solid",finish:F.finish,netG:num(F.netG)||1000,tareG:num(F.tareG),dia:num(F.dia)||1.75,loc:F.loc||null,
+  const body={brand,material,colour:F.colour.trim(),hex:list[0],colours:list,pattern:list.length>1?F.pattern:"solid",finish:F.finish,netG:num(F.netG)||1000,tareG:num(F.tareG),dia:num(F.dia)||1.75,
     nMin:num(F.nMin),nMax:num(F.nMax),bMin:num(F.bMin),bMax:num(F.bMax),dT:num(F.dT),dH:num(F.dH)};
   try{
     const bId=slug(brand), oldB=S.brands[bId];
     await col("brands").doc(bId).set({...(oldB||{}),name:oldB?.name||brand,tareG:body.tareG||oldB?.tareG||null});
     await col("profiles").doc(profileId(brand,material)).set({brand,material,nMin:body.nMin,nMax:body.nMax,bMin:body.bMin,bMax:body.bMax,dT:body.dT,dH:body.dH});
-    let first;
+    let first, noRoom=0;
     if(F.editId){
       first=F.editId;
       const old=S.spools[F.editId];
       const rem=(old.remainG!=null&&old.remainG>body.netG)?body.netG:old.remainG;
-      await col("spools").doc(F.editId).update({...body,remainG:rem,labelled:false});
+      const spot=(F.loc||null)===(old.loc||null)?{loc:old.loc||null,slot:old.slot??null}:placer(F.loc||null)();
+      await col("spools").doc(F.editId).update({...body,...spot,remainG:rem,labelled:false});
     } else {
       const n=clamp(parseInt(F.qty)||1,1,20), {ids,last}=nextIds(n); first=ids[0];
+      const spot=placer(F.loc||null);
       for(const id of ids){
-        const doc={...body,remainG:body.netG,status:"active",labelled:false,addedAt:now,history:body.loc?[{at:now,from:null,to:body.loc}]:[]};
+        const doc=newSpool(body,now,spot()); if(!doc.loc&&F.loc) noRoom++;
         await col("spools").doc(id).set(doc); S.spools[id]={...doc,id};
       }
       await saveConfig({lastId:last});
     }
     const added=F.editId?null:parseInt(F.qty)||1;
     F=null; crop=null; autoLogo(brand).then(ok=>{ if(ok) toast(brand+" logo added."); });
-    toast(added?`Added ${first.toUpperCase()}${added>1?` and ${added-1} more`:""}. Sticker is in the queue.`:"Saved. Sticker is back in the queue.");
+    toast(added?`Added ${first.toUpperCase()}${added>1?` and ${added-1} more`:""}. Sticker is in the queue.${noRoom?` ${noRoom} didn't fit, so have no storage set.`:""}`:"Saved. Sticker is back in the queue.");
     go(first);
   }catch(e){ if(btn) btn.disabled=false; fail(e,"That spool didn't save"); }
 }
@@ -942,7 +989,7 @@ async function submitForm(){
 /* stickers */
 function queue(){
   const a=[];
-  for(const s of Object.values(S.spools)) if(s.status!=="used"&&!s.labelled&&!s.example) a.push({kind:"spool",data:s,key:"s:"+s.id});
+  for(const s of Object.values(S.spools)) if(s.status!=="used"&&!s.labelled) a.push({kind:"spool",data:s,key:"s:"+s.id});
   for(const l of orderedLocs()) if(l.wantLabel) a.push({kind:"loc",data:l,key:"l:"+l.id});
   return a;
 }
@@ -1127,7 +1174,7 @@ function parseImport(text){
   return {batch:String(j.batch||""),items,logos,loc:""};
 }
 function vImport(){
-  const opts=orderedLocs().map(l=>`<option value="${l.id}" ${Imp&&Imp.loc===l.id?"selected":""}>${esc(locName(l.id))}</option>`).join("");
+  const opts=locOptions(Imp&&Imp.loc,true);
   if(!Imp) return `<div><h1>Import from Spool Reader</h1></div>
   <div class="card">
     <div class="btns"><label class="btn go" for="pickImport">Choose the file</label></div>
@@ -1150,7 +1197,7 @@ function vImport(){
 }
 async function runImport(){
   const now=Date.now(), rows=Imp.items.filter(i=>i.on), total=rows.reduce((a,i)=>a+i.qty,0);
-  const {ids,last}=nextIds(total); let n=0;
+  const {ids,last}=nextIds(total), spot=placer(Imp.loc||null); let n=0;
   const logosOnly=!Imp.items.length;
   for(const [name,l] of Object.entries(Imp.logos)){
     if(!(logosOnly||rows.some(r=>r.brand===name))||!l||!/^data:image\/png/.test(l.src||"")) continue;
@@ -1162,12 +1209,12 @@ async function runImport(){
   for(const r of rows){
     const base=lookup(r.brand,r.material), v=k=>num(r[k])??base[k];
     const cols=colourList(r), pat=patternOf(r);
-    const body={brand:r.brand,material:r.material,colour:r.colour||"",hex:cols[0],colours:cols,pattern:pat,finish:FINISH.includes(r.finish)?r.finish:"",netG:num(r.netG)||1000,tareG:num(r.tareG),dia:num(r.dia)||1.75,loc:Imp.loc||null,nMin:v("nMin"),nMax:v("nMax"),bMin:v("bMin"),bMax:v("bMax"),dT:v("dT"),dH:v("dH")};
+    const body={brand:r.brand,material:r.material,colour:r.colour||"",hex:cols[0],colours:cols,pattern:pat,finish:FINISH.includes(r.finish)?r.finish:"",netG:num(r.netG)||1000,tareG:num(r.tareG),dia:num(r.dia)||1.75,nMin:v("nMin"),nMax:v("nMax"),bMin:v("bMin"),bMax:v("bMax"),dT:v("dT"),dH:v("dH")};
     const bId=slug(r.brand);
     if(!S.brands[bId]&&!Imp.logos[r.brand]) col("brands").doc(bId).set({name:r.brand,tareG:body.tareG||null});
     col("profiles").doc(profileId(r.brand,r.material)).set({brand:r.brand,material:r.material,nMin:body.nMin,nMax:body.nMax,bMin:body.bMin,bMax:body.bMax,dT:body.dT,dH:body.dH});
     for(let i=0;i<r.qty;i++){
-      const id=ids[n++], doc={...body,remainG:body.netG,status:"active",labelled:false,addedAt:now,history:body.loc?[{at:now,from:null,to:body.loc}]:[]};
+      const id=ids[n++], doc=newSpool(body,now,spot());
       col("spools").doc(id).set(doc); S.spools[id]={...doc,id};
     }
   }
@@ -1177,7 +1224,7 @@ async function runImport(){
   Imp=null; toast(`Added ${total} spool${total===1?"":"s"}. Stickers are in the queue.`); go("stickers");
 }
 function stockExport(){
-  const spools=liveSpools().map(s=>({id:s.id,brand:s.brand,material:s.material,colour:s.colour||"",hex:colourList(s)[0],finish:s.finish||"",storage:locName(s.loc)}));
+  const spools=liveSpools().map(s=>({id:s.id,brand:s.brand,material:s.material,colour:s.colour||"",hex:colourList(s)[0],finish:s.finish||"",storage:spotName(s)}));
   return JSON.stringify({format:"spool-stock-list",version:1,exported:new Date().toISOString(),spools});
 }
 
@@ -1195,14 +1242,19 @@ async function openPicker(name){
   for(const c of items) if(c.kind==="svg") c.preview="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(c.text);
   if(P&&P.name===name){ P.items=items; P.busy=false; render(); }
 }
+const UP=`<svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>`, DOWN=`<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>`;
+function storeSummary(l){
+  const n=inLoc(l.id).length, size=spaced(l)?`${l.capacity} space${l.capacity===1?"":"s"}`:l.capacity?`holds ${l.capacity}`:"no limit";
+  return [l.group,STORE_TYPES[l.kind]?.label||"Storage",size,n?`${n} in use`:"empty"].filter(Boolean).join(", ");
+}
 function vSetup(){
-  const rows=orderedLocs().map(l=>{const n=inLoc(l.id).length;return `<div class="setrow"><label class="field"><span>${esc(l.group&&l.group!==l.name?l.group:"Storage")}</span><input type="text" data-loc-name="${l.id}" value="${esc(l.name)}"></label><label class="field"><span>Holds</span><input type="number" inputmode="numeric" data-loc-cap="${l.id}" value="${esc(l.capacity??"")}"></label><button class="btn sm" data-act="locDel" data-v="${l.id}" ${n?"disabled":""} aria-label="Delete ${esc(l.name)}">Delete</button></div>`;}).join("");
+  const ls=orderedLocs();
+  const rows=ls.map((l,i)=>`<div class="storerow"><div class="shift"><button class="btn sm" data-act="storeShift" data-v="${l.id}" data-d="-1" aria-label="Move ${esc(l.name)} up" ${i?"":"disabled"}>${UP}</button><button class="btn sm" data-act="storeShift" data-v="${l.id}" data-d="1" aria-label="Move ${esc(l.name)} down" ${i<ls.length-1?"":"disabled"}>${DOWN}</button></div><span style="min-width:0"><b>${esc(l.name)}</b><span class="sub">${esc(storeSummary(l))}</span></span><button class="btn sm" data-go="store-${l.id}" aria-label="Edit ${esc(l.name)}">Edit</button></div>`).join("");
   const bs=Object.values(S.brands).sort((a,b)=>a.name.localeCompare(b.name));
   return `<div><h1>Setup</h1></div>
-  <div class="card"><h2>Storages</h2>
-    ${rows||"<p>No storages yet.</p>"}
-    <div class="setrow"><label class="field"><span>New storage</span><input type="text" id="newLoc"></label><label class="field"><span>Holds</span><input type="number" inputmode="numeric" id="newCap"></label><button class="btn sm go" data-act="locAdd">Add</button></div>
-    <div class="btns"><button class="btn" data-act="printAllLocs">Queue all storage stickers</button></div>
+  <div class="card"><div class="cardhead"><h2>Storages</h2><button class="btn sm go" data-go="store-new">Add storage</button></div>
+    ${rows||"<p>Nothing set up yet. Add each place you keep filament.</p>"}
+    ${rows?`<div class="btns"><button class="btn" data-act="printAllLocs">Queue all storage stickers</button><button class="btn bad" data-act="storesClear">Remove all storages</button></div>`:""}
   </div>
   <div class="card"><h2>Manufacturers and logos</h2>
     ${bs.length?`<div class="btns"><button class="btn go" data-act="logosAll">Find missing logos</button></div>`:""}
@@ -1217,6 +1269,71 @@ function vSetup(){
   ${CFG.repo&&!IS_APP?`<div class="card"><h2>Apps</h2><p>The Android app and Windows exe are on the releases page.</p><div class="btns"><a class="btn" href="https://github.com/${esc(CFG.repo)}/releases/latest" target="_blank" rel="noopener">Open releases</a></div></div>`:""}
   <div class="card"><h2>Account</h2><p>${esc(firebase.auth().currentUser?.email||"")}</p><div class="btns"><button class="btn" data-act="signOut">Sign out</button></div></div>
   <div class="card"><h2>Backup</h2><div class="btns"><button class="btn" data-act="csv">Download spool list (CSV)</button><button class="btn" data-act="json">Download full backup (JSON)</button></div></div>`;
+}
+
+/* storage editor */
+function storeDefaults(kind){ const t=STORE_TYPES[kind]; return {kind,spaces:t.spaces,capacity:t.cap??"",warn:t.warn||""}; }
+function storeDraft(id){
+  if(LF&&LF.id===id) return;
+  if(id==="new"){ LF={id,kind:"",name:"",group:"",spaces:false,capacity:"",maxC:"",warn:"",qty:1}; return; }
+  const l=S.locs[id];
+  LF=l?{id,kind:STORE_TYPES[l.kind]?l.kind:"other",name:l.name,group:l.group||"",spaces:spaced(l),capacity:l.capacity??"",maxC:l.maxC??"",warn:warnOf(l),qty:1}:null;
+}
+const capOf = v => clamp(Math.floor(num(v)||0),0,500)||null;
+const storeAutoName = kind => `${STORE_TYPES[kind].name} ${Object.values(S.locs).filter(l=>l.kind===kind).length+1}`;
+function readStore(){
+  for(const k of ["name","group","capacity","maxC","warn","qty"]){ const el=$("#s_"+k); if(el) LF[k]=el.value; }
+  const sp=$("#s_spaces"); if(sp) LF.spaces=sp.value==="1";
+}
+function storePreview(){
+  const box=$("#storePreview"); if(!box||!LF.kind) return;
+  box.innerHTML=rackHTML({id:LF.id,name:LF.name.trim()||storeAutoName(LF.kind),spaces:LF.spaces,capacity:capOf(LF.capacity)});
+}
+function vStore(){
+  if(!LF) return `<div class="card"><h2>That storage is gone</h2><div class="btns"><button class="btn" data-go="setup">Back to Setup</button></div></div>`;
+  const isNew=LF.id==="new", t=STORE_TYPES[LF.kind];
+  const tiles=Object.entries(STORE_TYPES).map(([k,v])=>`<label class="typepick"><input type="radio" name="s_kind" value="${k}" ${LF.kind===k?"checked":""}><span><b>${esc(v.label)}</b><small>${esc(v.hint)}</small></span></label>`).join("");
+  const known=[...new Set(Object.values(S.locs).map(l=>l.group).filter(Boolean))];
+  return `<div><h1>${isNew?"Add a storage":"Edit "+esc(S.locs[LF.id]?.name||"storage")}</h1></div>
+  <div class="card"><h2>What is it?</h2><div class="types">${tiles}</div></div>
+  ${t?`<div class="split"><form class="card" id="storeForm">
+    <label class="field"><span>Name</span><input type="text" id="s_name" value="${esc(LF.name)}" placeholder="${esc(storeAutoName(LF.kind))}"></label>
+    <label class="field"><span>Group</span><input type="text" id="s_group" list="groupList" value="${esc(LF.group)}" placeholder="None"><span class="hint">Storages in a group sit together, such as a printer and what feeds it.</span></label>
+    <datalist id="groupList">${known.map(g=>`<option value="${esc(g)}">`).join("")}</datalist>
+    <div class="g2">
+      <label class="field"><span>Spools sit</span><select id="s_spaces"><option value="1" ${LF.spaces?"selected":""}>Numbered</option><option value="0" ${LF.spaces?"":"selected"}>Loose</option></select></label>
+      <label class="field"><span>${LF.spaces?"Spaces":"Most it can hold"}</span><input type="number" inputmode="numeric" min="1" id="s_capacity" value="${esc(LF.capacity)}" placeholder="${LF.spaces?"":"No limit"}"></label>
+    </div>
+    <p class="hint">${LF.spaces?"One spool per space. It gets one sticker, and a scanned spool takes the next free space.":"Any number of spools in any order, up to the limit if you set one."}</p>
+    ${LF.kind==="dryer"?`<label class="field"><span>Top temperature (°C)</span><input type="number" inputmode="numeric" id="s_maxC" value="${esc(LF.maxC)}" placeholder="Not set"><span class="hint">Warns you when a spool wants hotter than this.</span></label>`:""}
+    <label class="field"><span>Warn before adding</span><input type="text" id="s_warn" value="${esc(LF.warn)}" placeholder="Nothing"><span class="hint">Materials that shouldn't go in here, split with commas.</span></label>
+    ${isNew?`<label class="field"><span>How many like this</span><input type="number" inputmode="numeric" min="1" max="12" id="s_qty" value="${esc(LF.qty)}"></label>`:""}
+    <div class="btns"><button class="btn go" type="submit" id="saveStore">${isNew?"Add storage":"Save changes"}</button><button type="button" class="btn" data-act="storeCancel">Cancel</button>${isNew?"":`<button type="button" class="btn bad" data-act="storeDel">Delete</button>`}</div>
+  </form>
+  <div class="card"><h3>On your stock page</h3><div id="storePreview" inert></div></div></div>`:""}`;
+}
+async function saveStore(){
+  readStore();
+  const isNew=LF.id==="new", cap=capOf(LF.capacity), name=LF.name.trim()||storeAutoName(LF.kind);
+  if(LF.spaces&&!cap){ toast("Say how many spaces it has."); return; }
+  const body={name,group:LF.group.trim(),kind:LF.kind,spaces:LF.spaces,capacity:cap,warn:LF.warn.trim(),maxC:LF.kind==="dryer"?num(LF.maxC):null};
+  if(isNew){
+    const n=clamp(parseInt(LF.qty)||1,1,12), m=/^(.*?)\s*(\d+)$/.exec(name);
+    let order=Math.max(0,...Object.values(S.locs).map(l=>l.order??0));
+    const names=n===1?[name]:Array.from({length:n},(_,i)=>m?`${m[1]} ${+m[2]+i}`:`${name} ${i+1}`);
+    for(const label of names){
+      const id=newLocId(label), doc={...body,name:label,order:++order,wantLabel:true};
+      S.locs[id]={...doc,id}; col("locations").doc(id).set(doc);
+    }
+    toast(n===1?`${name} added. Its sticker is in the queue.`:`${n} storages added. Their stickers are in the queue.`);
+  } else {
+    const held=inLoc(LF.id).length, old=S.locs[LF.id];
+    if(cap&&held>cap){ toast(`It has ${held} spools in it, so it needs room for at least ${held}.`); return; }
+    const renamed=old.name!==name||(old.group||"")!==body.group;
+    col("locations").doc(LF.id).update(renamed?{...body,wantLabel:true}:body);
+    toast(renamed?"Saved. Its sticker is back in the queue.":"Saved.");
+  }
+  LF=null; go("setup");
 }
 
 /* ---------- modal + toast ---------- */
@@ -1267,8 +1384,8 @@ const actions={
   },
   async usedUp(){
     const s=S.spools[S.param], used=s.status==="used";
-    await col("spools").doc(s.id).update(used?{status:"active"}:{status:"used",loc:null});
-    toast(used?"Back in stock.":`${s.id.toUpperCase()} marked used up.`,used?null:"Undo",()=>col("spools").doc(s.id).update({status:"active",loc:s.loc}));
+    await col("spools").doc(s.id).update(used?{status:"active"}:{status:"used",loc:null,slot:null});
+    toast(used?"Back in stock.":`${s.id.toUpperCase()} marked used up.`,used?null:"Undo",()=>col("spools").doc(s.id).update({status:"active",loc:s.loc,slot:s.slot??null}));
   },
   async reprint(){ await col("spools").doc(S.param).update({labelled:false}); toast("Sticker added to the queue."); },
   async printLoc(){ await col("locations").doc(S.param).update({wantLabel:true}); toast("Storage sticker added to the queue."); },
@@ -1277,7 +1394,6 @@ const actions={
     const s=S.spools[S.param];
     ask(`Delete ${s.id.toUpperCase()}?`,"This removes it completely. If it has just run out, Mark used up keeps the record.",[["Delete",async()=>{ await col("spools").doc(s.id).delete(); toast("Deleted."); go("stock"); },"bad"],["Cancel",null]]);
   },
-  delExamples(){ ask("Delete the examples?","Your own spools are not touched.",[["Delete",async()=>{ for(const s of Object.values(S.spools)) if(s.example) await col("spools").doc(s.id).delete(); toast("Examples deleted."); },"bad"],["Cancel",null]]); },
   hex(el){ F.hex=el.dataset.v; F.colours[0]=F.hex; F.hexTouched=true; const h=$("#f_hex"); if(h) h.value=F.hex; formPreview(); },
   colourAdd(){ readForm(); F.colours.push("#FFFFFF"); $("#colourRow").innerHTML=colourRow(); formPreview(); },
   colourDrop(){ readForm(); F.colours.pop(); $("#colourRow").innerHTML=colourRow(); formPreview(); },
@@ -1286,20 +1402,33 @@ const actions={
   pick(el){ if(el.checked) Q.skip.delete(el.dataset.v); else Q.skip.add(el.dataset.v); render(); },
   cell(el){ saveConfig({sheet:{...(S.settings.sheet||{}),start:parseInt(el.dataset.v)}}); render(); },
   pdf(){ makePDF(); },
-  async locAdd(){
-    const name=$("#newLoc").value.trim(); if(!name) return;
-    let id=slug(name), n=2; while(S.locs[id]) id=slug(name)+"-"+n++;
-    const order=Math.max(0,...Object.values(S.locs).map(l=>l.order??0))+1;
-    await col("locations").doc(id).set({name,group:"",kind:/dry/i.test(name)?"dryer":"shelf",capacity:num($("#newCap").value),order,wantLabel:true});
-    document.activeElement?.blur(); render(); toast(name+" added. Its sticker is in the queue.");
+  storeCancel(){ LF=null; go("setup"); },
+  storeDel(){
+    const l=S.locs[LF.id], here=inLoc(l.id);
+    ask(`Delete ${l.name}?`,here.length?`${here.length} spool${here.length===1?"":"s"} in it will have no storage set. Its sticker stops working.`:"Its sticker stops working.",[["Delete",async()=>{ for(const s of here) await col("spools").doc(s.id).update({loc:null,slot:null}); await col("locations").doc(l.id).delete(); LF=null; toast(l.name+" deleted."); go("setup"); },"bad"],["Cancel",null]]);
   },
-  async locDel(el){ await col("locations").doc(el.dataset.v).delete(); render(); },
+  storesClear(){
+    ask("Remove all storages?","Your spools stay in stock with no storage set. Any storage stickers you've printed stop working.",[["Remove all",async()=>{ for(const s of Object.values(S.spools)) if(s.loc) await col("spools").doc(s.id).update({loc:null,slot:null}); for(const id of Object.keys(S.locs)) await col("locations").doc(id).delete(); toast("Storages removed."); render(); },"bad"],["Cancel",null]]);
+  },
+  async storeShift(el){
+    const ls=orderedLocs(), i=ls.findIndex(l=>l.id===el.dataset.v), j=i+ +el.dataset.d; if(j<0||j>=ls.length) return;
+    [ls[i],ls[j]]=[ls[j],ls[i]];
+    ls.forEach((l,n)=>{ if(l.order!==n+1){ S.locs[l.id].order=n+1; col("locations").doc(l.id).update({order:n+1}); } });
+    render();
+  },
+  spacePick(el){
+    const s=S.spools[S.param], n=+el.dataset.v, l=S.locs[s.loc], mine=spaceOf(s), other=seated(l)[n-1];
+    if(n===mine) return;
+    col("spools").doc(s.id).update({slot:n}); S.spools[s.id].slot=n;
+    if(other){ col("spools").doc(other.id).update({slot:mine}); S.spools[other.id].slot=mine; }
+    render();
+  },
   cropSave(){ saveLogo(); },
   cropSkip(){ crop=null; render(); },
   async csv(){
     const h=["code","manufacturer","material","colour","hex","finish","storage","remaining_g","net_g","nozzle","bed","status"];
     const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
-    const rows=Object.values(S.spools).filter(s=>!s.example).sort((a,b)=>a.id.localeCompare(b.id)).map(s=>[s.id,s.brand,s.material,s.colour,s.hex,s.finish,s.status==="used"?"Used up":locName(s.loc),s.remainG,s.netG,range(s.nMin,s.nMax),range(s.bMin,s.bMax),s.status].map(q).join(","));
+    const rows=Object.values(S.spools).sort((a,b)=>a.id.localeCompare(b.id)).map(s=>[s.id,s.brand,s.material,s.colour,s.hex,s.finish,s.status==="used"?"Used up":spotName(s),s.remainG,s.netG,range(s.nMin,s.nMax),range(s.bMin,s.bMax),s.status].map(q).join(","));
     saveFile("spool-stock.csv",[h.join(","),...rows].join("\n"));
   },
   async json(){
@@ -1322,8 +1451,8 @@ document.addEventListener("change",async e=>{
   if(t.id&&t.id.startsWith("cu_")){ const st=S.settings.sheet||{}, c={...(st.custom||{})}; c[t.id.slice(3)]=num(t.value)||0; await saveConfig({sheet:{...st,custom:c}}); render(); return; }
   if(t.id==="nudgeX"||t.id==="nudgeY"){ const st=S.settings.sheet||{}; await saveConfig({sheet:{...st,[t.id==="nudgeX"?"nx":"ny"]:num(t.value)||0}}); return; }
   if(t.id==="outline"){ Q.outline=t.checked; return; }
-  if(t.dataset.locName){ const n=t.value.trim(); if(n) await col("locations").doc(t.dataset.locName).update({name:n}); return; }
-  if(t.dataset.locCap){ await col("locations").doc(t.dataset.locCap).update({capacity:num(t.value)}); return; }
+  if(t.name==="s_kind"){ readStore(); Object.assign(LF,storeDefaults(t.value)); render(); return; }
+  if(t.id==="s_spaces"){ readStore(); render(); return; }
   if(t.id==="pickScan"&&t.files[0]){
     const f=t.files[0]; t.value="";
     const out=$("#scanOut"); if(out){ out.hidden=false; out.innerHTML=`<div class="busy"><span class="spin"></span>Reading the sticker</div>`; }
@@ -1343,6 +1472,7 @@ document.addEventListener("change",async e=>{
 });
 document.addEventListener("input",e=>{
   const t=e.target;
+  if(t.id&&t.id.startsWith("s_")&&LF){ readStore(); storePreview(); return; }
   if(t.dataset&&t.dataset.colour&&F){ F.colours[+t.dataset.colour]=t.value; formPreview(); return; }
   if(t.id==="q"){ S.filter.q=t.value; const box=$("#spoolList"); if(box) box.innerHTML=stockRows(); return; }
   if(t.id&&t.id.startsWith("f_")&&F){
@@ -1364,7 +1494,7 @@ function stockRows(){
   const rows=(f.tab==="used"?Object.values(S.spools).filter(s=>s.status==="used"):live).filter(s=>{
     if(f.tab==="low"&&!isLow(s)) return false;
     if(f.mat&&(baseMat(s.material)?.key||s.material)!==f.mat) return false;
-    if(q&&![s.id,s.brand,s.material,s.colour,s.finish,locName(s.loc)].join(" ").toLowerCase().includes(q)) return false;
+    if(q&&![s.id,s.brand,s.material,s.colour,s.finish,spotName(s)].join(" ").toLowerCase().includes(q)) return false;
     return true;
   }).sort((a,b)=>a.id.localeCompare(b.id));
   return rows.map(rowHTML).join("")||emptyList(live.length);
@@ -1372,10 +1502,10 @@ function stockRows(){
 document.addEventListener("submit",async e=>{
   e.preventDefault();
   if(e.target.id==="spoolForm") submitForm();
+  if(e.target.id==="storeForm") saveStore();
   if(e.target.id==="authForm"){ try{ await firebase.auth().signInWithEmailAndPassword($("#authEmail").value.trim(),$("#authPass").value); }catch(x){ authErr(x); } }
 });
-addEventListener("online",()=>{ if(db&&!["add","edit","scan","setup"].includes(S.view)) render(); });
-addEventListener("offline",()=>{ if(db&&!["add","edit","scan","setup"].includes(S.view)) render(); });
+for(const ev of ["online","offline"]) addEventListener(ev,()=>{ if(db&&!["add","edit","scan","setup","store"].includes(S.view)) render(); });
 addEventListener("paste",e=>{
   const f=[...(e.clipboardData?.files||[])].find(x=>x.type.startsWith("image/")); if(!f) return;
   if((S.view==="add"||S.view==="edit")&&F&&F.brand){ pendingLogo=F.brand; readForm(); const dt=new DataTransfer(); dt.items.add(f); const p=$("#pickLogo"); p.files=dt.files; p.dispatchEvent(new Event("change",{bubbles:true})); }

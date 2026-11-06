@@ -1,34 +1,57 @@
 # Spool Stock setup
 
-Do these in order. Nothing here costs money.
+Do these in order to run your own copy. Nothing here costs money.
 
 ## 1. GitHub
 
-1. Sign in to GitHub as `jwilss` and create a new repository called `spool-stock`. Make it **Public** (free GitHub Pages needs that). Leave it empty.
-2. In the repo, open **Settings > Pages** and set **Source** to **GitHub Actions**.
-3. Tell Claude the repo is ready and it can push these files for you. Or upload the contents of this folder yourself, keeping the `.github` folder.
+1. Create a repository, or fork this one. Make it **Public**, as free GitHub Pages needs that.
+2. Open **Settings > Pages** and set **Source** to **GitHub Actions**.
 
 Publishing the code is safe: your data, password and logos are not in it.
 
 ## 2. Firebase
 
-1. Go to https://console.firebase.google.com and sign in with a Google account.
-2. **Add project**, call it `spool-stock`. You can turn Google Analytics off.
-3. Open https://console.firebase.google.com/project/spool-stock/firestore and press **Create database**. Choose a location near you, such as `europe-west2` (London), and **production mode**.
-4. Open the **Rules** tab, replace everything with the contents of `firestore.rules`, and press **Publish**.
-5. Open https://console.firebase.google.com/project/spool-stock/authentication, press **Get started**, open **Sign-in method**, then enable **Email/Password**.
-6. Open **Project settings** (the gear), scroll to **Your apps**, press the web icon `</>`, name it and register it. Don't tick Firebase Hosting.
-7. Copy the `firebaseConfig` object. Send it to Claude, or paste it into `site/config.js` in place of `null`. It's safe to share: `firestore.rules` is what protects your data.
+1. Go to https://console.firebase.google.com and create a project. You can turn Google Analytics off.
+2. Open **Firestore Database** and press **Create database**. Choose a location near you and **production mode**.
+3. Open the **Rules** tab, replace everything with the contents of `firestore.rules`, and press **Publish**.
+4. Open **Authentication**, press **Get started**, open **Sign-in method**, then enable **Email/Password**.
+5. Open **Project settings** (the gear), scroll to **Your apps**, press the web icon `</>`, name it and register it. Don't tick Firebase Hosting.
+6. Copy the `firebaseConfig` object.
 
-## 3. First sign in
+## 3. Your settings
 
-1. Open https://jwilss.github.io/spool-stock/
-2. Enter your email and a password, then press **Create account**. Your storages are added automatically.
-3. Back in Firebase, go to **Authentication > Settings > User actions** and untick **Enable create (sign-up)**, so nobody else can make an account.
+Fill in `site/config.js`:
+
+| Setting | What goes in it |
+|---|---|
+| `siteUrl` | Your GitHub Pages address. Sticker QR codes use this, so set it before printing. |
+| `repo` | Your repo, as `owner/name`. Setup links to its releases. |
+| `readerUrl` | Your copy of Spool Reader, or leave it out. |
+| `firebase` | The object you copied. It's safe to publish. |
+
+The Android and Windows apps open your site, so put the same address in `wrappers/android/capacitor.config.json` and `wrappers/windows/main.js`.
+
+Push to `main` and the site publishes itself.
+
+## 4. First sign in
+
+1. Open your site, enter your email and a password, then press **Create account**.
+2. Back in Firebase, go to **Authentication > Settings > User actions** and untick **Enable create (sign-up)**, so nobody else can make an account.
 
 Keep the password somewhere safe. You'll use it once on each device.
 
-## 4. Apps
+## 5. Set up your storage
+
+Accounts start with no storages, so add what you own under **Setup > Add storage**.
+
+1. Choose what it is. The type sets the defaults, such as 4 numbered spaces for a multi-material unit.
+2. Name it and change anything that doesn't match yours.
+3. Use **Group** to keep things together, such as a printer and what feeds it.
+4. Use **How many like this** if you have several of the same.
+
+Each storage gets one sticker, which goes in the queue on the Stickers page. To start again, use **Remove all storages** in Setup. Your spools stay in stock.
+
+## 6. Apps
 
 1. In the GitHub repo open **Actions > Build apps > Run workflow**.
 2. When it finishes, open **Releases**. `SpoolStock.apk` and `SpoolStock.exe` are there.
@@ -39,7 +62,7 @@ Both apps open the website inside them, so site updates reach them without reins
 
 ## Using Spool Reader
 
-Spool Reader is the separate Claude artifact for photos. It's linked in Setup.
+Spool Reader is the separate Claude artifact for photos. Publish `reader/spool-reader.html` as an artifact to get your own copy.
 
 1. **Read labels:** add photos, read them, check the results under To export.
 2. **Download file** or **Copy** there, then in Spool Stock use **Add > Import from Spool Reader**.
@@ -49,7 +72,7 @@ Spool Reader is the separate Claude artifact for photos. It's linked in Setup.
 
 Each logo only has to be found once. It's saved to your account, so every device and every future sticker pulls it from there.
 
-- **Bambu Lab, Creality, Elegoo, Anycubic and Flashforge** come through automatically as vectors.
+- **Common brands** with a Simple Icons vector come through automatically.
 - **Other brands:** open **Setup**, press **Find logo** and pick one if Wikimedia has it.
 - **If nothing's found:** upload an SVG or PNG once, or crop it from a label photo in Spool Reader.
 
