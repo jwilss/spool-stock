@@ -377,11 +377,11 @@ async function loadCatalogue(){
   try{
     const r=await fetch("catalogue.json"); if(!r.ok) return;
     const j=await r.json(), map={};
-    for(const [name,lines] of Object.entries(j.brands)) map[slug(name)]={name,lines:lines.map(l=>({...l,hay:searchText(l.n,l.m,l.a)}))};
+    for(const [name,lines] of Object.entries(j.brands)) map[slug(name)]={name,aka:(j.aliases||{})[name]||[],lines:lines.map(l=>({...l,hay:searchText(l.n,l.m,l.a)}))};
     CAT=map;
   }catch{}
 }
-const catBrand = name => CAT?.[slug(name)];
+const catBrand = name => CAT?.[slug(name)] || Object.values(CAT||{}).find(c=>c.aka.some(a=>slug(a)===slug(name)));
 const catLine = (brand,material) => { const q=norm(material); return catBrand(brand)?.lines.find(l=>norm(l.n)===q||(l.a&&norm(l.a)===q)); };
 const profileId = (b,m) => slug(b)+"__"+slug(m);
 const baseMat = m => MATERIALS.find(x=>x.re.test(m||""));
@@ -978,10 +978,10 @@ function formPreview(){
 const Picks={brands:[],lines:[]};
 const plural = (n,w) => `${n} ${w}${n===1?"":"s"}`;
 function brandOptions(q){
-  const seen=new Map(), add=(name,n)=>{ const k=slug(name); if(!seen.has(k)) seen.set(k,{name,n:0}); if(n) seen.get(k).n=n; };
-  Object.values(S.brands).forEach(b=>add(b.name)); BRANDS.forEach(b=>add(b)); Object.values(CAT||{}).forEach(c=>add(c.name,c.lines.length));
-  const t=norm(q), rank=b=>norm(b.name).startsWith(t)?0:1;
-  return [...seen.values()].filter(b=>norm(b.name).includes(t)).sort((a,b)=>rank(a)-rank(b)||a.name.localeCompare(b.name));
+  const seen=new Map(), add=(name,n,aka)=>{ const k=slug(name); if(!seen.has(k)) seen.set(k,{name,n:0,aka:[]}); if(n) seen.get(k).n=n; if(aka) seen.get(k).aka=aka; };
+  Object.values(S.brands).forEach(b=>add(b.name)); BRANDS.forEach(b=>add(b)); Object.values(CAT||{}).forEach(c=>add(c.name,c.lines.length,c.aka));
+  const t=norm(q), hit=b=>[b.name,...b.aka].some(x=>norm(x).includes(t)), rank=b=>norm(b.name).startsWith(t)?0:1;
+  return [...seen.values()].filter(hit).sort((a,b)=>rank(a)-rank(b)||a.name.localeCompare(b.name));
 }
 function lineOptions(brand,q){
   const saved=Object.values(S.profiles).filter(p=>slug(p.brand)===slug(brand)).map(p=>({n:p.material,saved:true,hay:searchText(p.material)}));
@@ -994,7 +994,7 @@ function showPicks(id){
   const rows=[], val=$("#"+id).value;
   if(id==="f_brand"){
     Picks.brands=brandOptions(val);
-    Picks.brands.forEach((b,i)=>rows.push(`<button type="button" class="pick" data-act="pickBrand" data-v="${i}"><b>${esc(b.name)}</b>${b.n?`<small>${plural(b.n,"filament")}</small>`:""}</button>`));
+    Picks.brands.forEach((b,i)=>rows.push(`<button type="button" class="pick" data-act="pickBrand" data-v="${i}"><b>${esc(b.name)}</b>${b.n?`<small>${[plural(b.n,"filament"),b.aka.length&&"also sold as "+b.aka.join(", ")].filter(Boolean).join(", ")}</small>`:""}</button>`));
     if(!rows.length) rows.push(`<div class="picknone">Not listed, but you can still use this name.</div>`);
   } else {
     const {list}=lineOptions(F.brand,val); Picks.lines=list;

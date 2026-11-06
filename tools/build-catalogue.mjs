@@ -74,5 +74,5 @@ for (const [brand, lines] of Object.entries(extra.change)) for (const [name, pat
 
 const licence = await readFile(path.join(from, "LICENSE"), "utf8");
 const count = Object.values(brands).reduce((a, l) => a + l.length, 0);
-await writeFile(to, JSON.stringify({source: "https://github.com/Donkie/SpoolmanDB", built: new Date().toISOString().slice(0, 10), notice: licence, brands}));
+await writeFile(to, JSON.stringify({source: "https://github.com/Donkie/SpoolmanDB", built: new Date().toISOString().slice(0, 10), notice: licence, aliases: extra.aliases ?? {}, brands}));
 console.log(`${Object.keys(brands).length} manufacturers, ${count} filaments`);
