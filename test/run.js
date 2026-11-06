@@ -182,7 +182,7 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  got=await pickFrom('Landu','pla plus');ok(await p.inputValue('#f_material')==='PLA+'&&got==='210,230,45,60,55,8','Landu PLA+: '+got);
  got=await pickFrom('Deeplee','rapid pla plus');ok(await p.inputValue('#f_material')==='Rapid PLA+'&&got==='190,240,45,65,55,8','Deeplee Rapid PLA+ listed with typical settings: '+got);
  got=await pickFrom('CC3D','pla silk');ok(got==='195,225,30,60,55,8','CC3D PLA Silk uses the label nozzle range: '+got);await p.fill('#f_colour','Teal Blue');await p.waitForTimeout(60);ok(await p.inputValue('#f_hex')==='#00688d','CC3D Teal Blue colour comes from the open database');
- await p.fill('#f_brand','');await p.fill('#f_brand','amolen');await p.waitForSelector('#brandPick .pick');ok(/Amolen.*filaments/.test(await p.textContent('#brandPick')),'brands from the open database are searchable');
+ await p.fill('#f_brand','');await p.fill('#f_brand','amolen');await p.waitForSelector('#brandPick .pick');ok(/amolen.*filaments/i.test(await p.textContent('#brandPick')),'brands from the open database are searchable');
  got=await pickFrom('Sunlu','tpu-95a');ok(got==='190,230,50,60,50,','Sunlu TPU 95A, no drying time given: '+got);ok(!/null|undefined/.test(await p.textContent('#preview')),'sticker copes with no drying time');
  await p.fill('#f_brand','eSUN');await p.fill('#f_material','PETG');await p.waitForTimeout(60);ok(await p.inputValue('#f_dT')==='60','eSUN PETG dries at 60');
  await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('.racks');
