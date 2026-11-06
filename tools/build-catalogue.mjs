@@ -1,13 +1,12 @@
 // Builds site/catalogue.json from a copy of SpoolmanDB (https://github.com/Donkie/SpoolmanDB).
 // Run: node tools/build-catalogue.mjs <path to SpoolmanDB> [output file] [path to Open Filament Database]
-// With the Open Filament Database, manufacturer temperature ranges and drying replace SpoolmanDB's single
-// values for exact name matches in the brands listed in OFD_BRANDS, and its colours are added to those lines.
+// With the Open Filament Database, its manufacturer ranges, drying, spool weights and colours fill in
+// matching lines, and filaments or manufacturers SpoolmanDB lacks are added.
 // tools/catalogue-extra.json holds additions and corrections checked against manufacturers' own sites.
 import {readdir, readFile, writeFile} from "node:fs/promises";
 import path from "node:path";
 
 const [from, to = "site/catalogue.json", ofd] = process.argv.slice(2);
-const OFD_BRANDS = {"eSun": "esun_3d", "Bambu Lab": "bambu_lab", "Sunlu": "sunlu", "CC3D": "cc3d"};
 if (!from) { console.error("Give the path to a copy of SpoolmanDB"); process.exit(1); }
 
 const tidy = s => s.replace(/[™®]/g, "").replace(/\s+/g, " ").trim();
@@ -16,7 +15,7 @@ const hex = h => String(h).replace("#", "").slice(0, 6).toUpperCase();
 
 function naming(name, material) {
   // Brands often give only the colour, or a word like "High Speed", so the material fills the gap
-  const raw = tidy(name.replace("{color_name}", "")).replace(/\s*-$/, "");
+  const raw = tidy(name.replace("{color_name}", "").replace(/\(NFC\)/i, "")).replace(/\s*-$/, "");
   const old = /\(Formerly ([^)]+)\)/i.exec(raw)?.[1];
   const product = tidy(raw.replace(/\(Formerly [^)]+\)/i, ""));
   const named = product.toLowerCase().includes(material.toLowerCase());
@@ -63,53 +62,85 @@ for (const file of (await readdir(folder)).filter(n => n.endsWith(".json")).sort
   brands[manufacturer] = [...unique.values()].sort((a, b) => a.n.localeCompare(b.n));
 }
 
-const words = s => new Set((s.toLowerCase().replace(/\+/g, " plus ").replace(/high speed/g, "hs").replace(/-/g, " ").match(/[a-z0-9]+/g) ?? []).filter(w => w !== "filament"));
+const words = s => new Set((s.toLowerCase().replace(/carbon fib(er|re)/g, "cf").replace(/glass fib(er|re)/g, "gf").replace(/\+/g, " plus ").replace(/high speed/g, "hs").replace(/-/g, " ").match(/[a-z0-9]+/g) ?? []).filter(w => w !== "filament"));
 const same = (a, b) => a.size === b.size && [...a].every(w => b.has(w));
+const keyOf = line => new Set([...words(line.n), ...words(line.m)]);
 const both = (lo, hi) => lo != null && hi != null ? [lo, hi] : undefined;
-let fromOfd = 0;
-if (ofd) for (const [brand, folder] of Object.entries(OFD_BRANDS)) {
-  const root = path.join(ofd, "data", folder), records = [];
-  for (const mat of await readdir(root, {withFileTypes: true})) {
-    if (!mat.isDirectory()) continue;
-    const base = JSON.parse(await readFile(path.join(root, mat.name, "material.json"), "utf8").catch(() => "{}"));
-    for (const line of await readdir(path.join(root, mat.name), {withFileTypes: true})) {
-      if (!line.isDirectory()) continue;
-      const j = JSON.parse(await readFile(path.join(root, mat.name, line.name, "filament.json"), "utf8").catch(() => "null"));
-      if (!j || j.discontinued) continue;
-      const colours = [];
-      for (const c of await readdir(path.join(root, mat.name, line.name), {withFileTypes: true})) {
-        if (!c.isDirectory()) continue;
-        const vj = JSON.parse(await readFile(path.join(root, mat.name, line.name, c.name, "variant.json"), "utf8").catch(() => "null"));
-        if (!vj?.name || !vj.color_hex || vj.discontinued) continue;
-        const hexes = [].concat(vj.color_hex).map(hex).filter(h => /^[0-9A-F]{6}$/.test(h));
+const brandKey = s => s.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(filaments?|3d)+$/, "");
+const json = async f => JSON.parse(await readFile(f, "utf8").catch(() => "null"));
+const dirs = async d => (await readdir(d, {withFileTypes: true}).catch(() => [])).filter(e => e.isDirectory()).map(e => e.name).sort();
+
+// Open Filament Database: every brand. Ranges, drying and colours go into matching lines, and filaments
+// or brands SpoolmanDB doesn't have are added.
+const tally = {ranges: 0, lines: 0, brands: 0, colours: 0};
+if (ofd) for (const folder of await dirs(path.join(ofd, "data"))) {
+  const root = path.join(ofd, "data", folder), info = await json(path.join(root, "brand.json"));
+  if (!info?.name) continue;
+  const name = Object.keys(brands).find(b => brandKey(b) === brandKey(info.name) || brandKey(b) === brandKey(folder)) ?? tidy(info.name);
+  if (!brands[name]) { brands[name] = []; tally.brands++; }
+  const list = brands[name], records = [];
+  for (const mat of await dirs(root)) {
+    const base = await json(path.join(root, mat, "material.json")) ?? {}, material = base.material ?? mat;
+    for (const id of await dirs(path.join(root, mat))) {
+      const j = await json(path.join(root, mat, id, "filament.json"));
+      if (!j?.name || j.discontinued) continue;
+      const colours = [], weights = [];
+      for (const v of await dirs(path.join(root, mat, id))) {
+        const vj = await json(path.join(root, mat, id, v, "variant.json"));
+        if (!vj?.name || vj.discontinued) continue;
+        const sizes = ((await json(path.join(root, mat, id, v, "sizes.json"))) ?? []).filter(z => !z.discontinued && (z.diameter ?? 1.75) === 1.75);
+        if (!sizes.length) continue;
+        weights.push(...sizes);
+        const hexes = [].concat(vj.color_hex ?? []).map(hex).filter(h => /^[0-9A-F]{6}$/.test(h));
         if (!hexes.length) continue;
         colours.push(hexes.length === 1 ? [tidy(vj.name), hexes[0]] : [tidy(vj.name), hexes.slice(0, 6), vj.traits?.gradual_color_change ? "gradient" : "split"]);
       }
+      if (!weights.length) continue;
+      const common = Object.entries(weights.reduce((a, z) => (a[z.filament_weight] = (a[z.filament_weight] ?? 0) + 1, a), {})).sort((a, b) => b[1] - a[1] || +b[0] - +a[0])[0][0];
+      const size = weights.find(z => String(z.filament_weight) === common && z.empty_spool_weight) ?? weights.find(z => String(z.filament_weight) === common);
       const v = k => j[k] ?? base["default_" + k];
-      records.push({colours, key: new Set([...words(j.name), ...words(mat.name)]), t: both(v("min_print_temperature"), v("max_print_temperature")), b: both(v("min_bed_temperature"), v("max_bed_temperature")), y: v("dry_temperature") ? [v("dry_temperature"), v("dry_time") ?? null] : undefined});
+      const {label} = naming(j.name.replace(/\s*\(NFC\)/i, ""), material);
+      records.push({n: label, m: material, t: both(v("min_print_temperature"), v("max_print_temperature")), b: both(v("min_bed_temperature"), v("max_bed_temperature")),
+        y: v("dry_temperature") ? [v("dry_temperature"), v("dry_time") ?? null] : undefined, d: j.density, w: +common || undefined, s: size?.empty_spool_weight, colours,
+        key: new Set([...words(label), ...words(material)])});
     }
   }
-  for (const line of brands[brand] ?? []) {
-    const key = new Set([...words(line.n), ...words(line.m)]), named = records.filter(r => same(r.key, key));
-    if (named.length !== 1) continue;
-    const r = named[0], known = new Set(line.c.map(c => c[0].toLowerCase()));
-    for (const c of r.colours) if (!known.has(c[0].toLowerCase())) { line.c.push(c); known.add(c[0].toLowerCase()); }
-    if (!(r.t && r.b && (r.t[0] < r.t[1] || r.b[0] < r.b[1]))) continue;
-    Object.assign(line, {t: r.t, b: r.b}, r.y ? {y: r.y} : {}); fromOfd++;
+  for (const r of records) {
+    const matched = list.filter(l => same(keyOf(l), r.key) || l.n.toLowerCase() === r.n.toLowerCase());
+    if (matched.length > 1) continue;
+    let line = matched[0];
+    if (!line) {
+      if (list.some(l => l.n.toLowerCase() === r.n.toLowerCase())) continue;
+      const f = /silk/i.test(r.n) ? "Silk" : /matte/i.test(r.n) ? "Matte" : /marble/i.test(r.n) ? "Marble" : /sparkle|glitter|galaxy/i.test(r.n) ? "Sparkle" : /translucent|transparent/i.test(r.n) ? "Translucent" : undefined;
+      line = {n: r.n, m: r.m, t: r.t, b: r.b, y: r.y, d: r.d, w: r.w, s: r.s, f, c: []};
+      list.push(line); tally.lines++;
+    } else {
+      if (r.t && r.b && (r.t[0] < r.t[1] || r.b[0] < r.b[1]) && records.filter(x => same(x.key, r.key)).length === 1) { Object.assign(line, {t: r.t, b: r.b}, r.y ? {y: r.y} : {}); tally.ranges++; }
+      if (line.s == null && r.s != null && line.w === r.w) line.s = r.s;
+      line.d ??= r.d;
+    }
+    const known = new Set(line.c.map(c => c[0].toLowerCase()));
+    for (const c of r.colours) if (!known.has(c[0].toLowerCase())) { line.c.push(c); known.add(c[0].toLowerCase()); tally.colours++; }
   }
+  list.sort((a, b) => a.n.localeCompare(b.n));
 }
-if (ofd) console.log(`${fromOfd} filaments given manufacturer ranges from the Open Filament Database`);
+if (ofd) console.log(`Open Filament Database: ${tally.ranges} ranges, ${tally.lines} filaments and ${tally.brands} manufacturers added, ${tally.colours} colours`);
 
 const extra = JSON.parse(await readFile(new URL("catalogue-extra.json", import.meta.url), "utf8"));
 for (const [brand, adds] of Object.entries(extra.add)) for (const line of adds) {
   const list = brands[brand] ??= [];
-  const same = list.find(l => l.n === line.n);
-  if (same) Object.assign(same, line, {c: same.c}); else list.push(line);
+  const twin = list.find(l => l.n === line.n) ?? list.find(l => same(keyOf(l), keyOf(line)));
+  if (twin) Object.assign(twin, line, {c: [...line.c, ...twin.c.filter(c => !line.c.some(x => x[0].toLowerCase() === c[0].toLowerCase()))]}); else list.push(line);
   list.sort((a, b) => a.n.localeCompare(b.n));
 }
 for (const [brand, lines] of Object.entries(extra.change)) for (const [name, patch] of Object.entries(lines)) {
   const line = brands[brand]?.find(l => l.n === name);
-  if (line) Object.assign(line, patch); else console.warn(`Correction not used: ${brand} ${name}`);
+  const twin = patch.n && patch.n !== name && brands[brand]?.find(l => l.n === patch.n);
+  if (line && twin) {
+    // A rename onto a line that now exists merges the two
+    for (const c of line.c) if (!twin.c.some(x => x[0].toLowerCase() === c[0].toLowerCase())) twin.c.push(c);
+    Object.assign(twin, patch); brands[brand].splice(brands[brand].indexOf(line), 1);
+  } else if (line) Object.assign(line, patch); else console.warn(`Correction not used: ${brand} ${name}`);
   brands[brand]?.sort((a, b) => a.n.localeCompare(b.n));
 }
 

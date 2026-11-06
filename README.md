@@ -21,7 +21,7 @@ A filament inventory for home 3D printing, with printed QR stickers, phone scann
 - **Scan to move:** point the camera at a spool, then at a storage. The camera stays on for the next one.
 - **Storage that matches yours:** add what you actually own, and see it all at a glance with each ring showing the filament's colour and how much is left.
 - **Stickers that write themselves:** logo, material, colour, print settings and a QR code, ready to print on A4 sheets.
-- **Search your filament:** find a manufacturer, then pick from their own product names, and the settings, spool weight and colours fill in.
+- **Search your filament:** find a manufacturer, then pick from their own product names, and the settings, spool weight and colours fill in. It covers about 195 manufacturers and 2,200 filaments.
 - **Your own names too:** anything that isn't listed can be typed in, and it joins that manufacturer's list with your settings.
 - **Works offline:** changes save on the device and sync when you're back online.
 - **Low stock at a glance:** weigh a spool and it works out what's left.
