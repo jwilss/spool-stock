@@ -174,6 +174,7 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  await p.fill('#f_brand','');await p.fill('#f_brand','ender');await p.waitForSelector('#brandPick .pick');ok((await p.textContent('#brandPick')).includes('also sold as Ender'),'searching Ender finds Creality');await p.click('#brandPick .pick');await p.waitForTimeout(50);ok(await p.inputValue('#f_brand')==='Creality','Ender picks Creality');
  got=await pickFrom('Creality','fast pla');ok(await p.inputValue('#f_material')==='Ender Fast PLA'&&got==='190,230,45,60,55,8','Creality Ender Fast PLA: '+got);
  got=await pickFrom('Landu','rapid petg');ok(await p.inputValue('#f_material')==='Rapid PETG'&&got==='240,270,60,80,70,8','Landu Rapid PETG listed, typical settings until checked: '+got);
+ got=await pickFrom('Bambu Lab','pla basic');ok(await p.inputValue('#f_material')==='PLA Basic'&&got==='190,230,35,45,55,8','Bambu PLA Basic: '+got);
  got=await pickFrom('Sunlu','tpu-95a');ok(got==='190,230,50,60,50,','Sunlu TPU 95A, no drying time given: '+got);ok(!/null|undefined/.test(await p.textContent('#preview')),'sticker copes with no drying time');
  await p.fill('#f_brand','eSUN');await p.fill('#f_material','PETG');await p.waitForTimeout(60);ok(await p.inputValue('#f_dT')==='60','eSUN PETG dries at 60');
  await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('.racks');
