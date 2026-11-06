@@ -7,11 +7,11 @@
   "add": {
     "eSun": [
       {
-        "n": "PETG+HS",
+        "n": "ePETG+HS",
         "m": "PETG",
         "a": [
+          "PETG+HS",
           "PETG High Speed",
-          "ePETG+HS",
           "ePETG HS"
         ],
         "t": [

@@ -129,7 +129,8 @@ if (ofd) console.log(`Open Filament Database: ${tally.ranges} ranges, ${tally.li
 const extra = JSON.parse(await readFile(new URL("catalogue-extra.json", import.meta.url), "utf8"));
 for (const [brand, adds] of Object.entries(extra.add)) for (const line of adds) {
   const list = brands[brand] ??= [];
-  const twin = list.find(l => l.n === line.n) ?? list.find(l => same(keyOf(l), keyOf(line)));
+  const names = [line.n, ...[].concat(line.a ?? [])].map(n => n.toLowerCase());
+  const twin = list.find(l => names.includes(l.n.toLowerCase())) ?? list.find(l => same(keyOf(l), keyOf(line)));
   if (twin) Object.assign(twin, line, {c: [...line.c, ...twin.c.filter(c => !line.c.some(x => x[0].toLowerCase() === c[0].toLowerCase()))]}); else list.push(line);
   list.sort((a, b) => a.n.localeCompare(b.n));
 }
