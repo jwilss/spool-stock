@@ -159,6 +159,63 @@
           ]
         ]
       }
+    ],
+    "Deeplee": [
+      {
+        "n": "Rapid PLA+",
+        "m": "PLA+",
+        "a": [
+          "Rapid PLA Plus",
+          "PLA+ Rapid"
+        ],
+        "w": 1000,
+        "c": [
+          [
+            "Black",
+            "111111"
+          ],
+          [
+            "White",
+            "F4F4F2"
+          ],
+          [
+            "Grey",
+            "8A8D8F"
+          ],
+          [
+            "Silver",
+            "A7A9AC"
+          ],
+          [
+            "Beige",
+            "D9C7A0"
+          ],
+          [
+            "Brown",
+            "7B4B2A"
+          ],
+          [
+            "Red",
+            "C8102E"
+          ],
+          [
+            "Orange",
+            "FF6A13"
+          ],
+          [
+            "Yellow",
+            "FFD100"
+          ],
+          [
+            "Green",
+            "00843D"
+          ],
+          [
+            "Blue",
+            "0057B8"
+          ]
+        ]
+      }
     ]
   },
   "change": {
