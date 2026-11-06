@@ -35,7 +35,8 @@ jobs:
         continue-on-error: true
         run: |
           git clone --depth 1 https://github.com/Donkie/SpoolmanDB.git "$RUNNER_TEMP/spoolmandb"
-          node tools/build-catalogue.mjs "$RUNNER_TEMP/spoolmandb" site/catalogue.json
+          git clone --depth 1 https://github.com/OpenFilamentCollective/open-filament-database.git "$RUNNER_TEMP/ofd"
+          node tools/build-catalogue.mjs "$RUNNER_TEMP/spoolmandb" site/catalogue.json "$RUNNER_TEMP/ofd"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

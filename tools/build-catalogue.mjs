@@ -1,10 +1,13 @@
 // Builds site/catalogue.json from a copy of SpoolmanDB (https://github.com/Donkie/SpoolmanDB).
-// Run: node tools/build-catalogue.mjs <path to SpoolmanDB> [output file]
+// Run: node tools/build-catalogue.mjs <path to SpoolmanDB> [output file] [path to Open Filament Database]
+// With the Open Filament Database, manufacturer temperature ranges and drying replace SpoolmanDB's single
+// values for exact name matches in the brands listed in OFD_BRANDS.
 // tools/catalogue-extra.json holds additions and corrections checked against manufacturers' own sites.
 import {readdir, readFile, writeFile} from "node:fs/promises";
 import path from "node:path";
 
-const [from, to = "site/catalogue.json"] = process.argv.slice(2);
+const [from, to = "site/catalogue.json", ofd] = process.argv.slice(2);
+const OFD_BRANDS = {"eSun": "esun_3d", "Bambu Lab": "bambu_lab", "Sunlu": "sunlu"};
 if (!from) { console.error("Give the path to a copy of SpoolmanDB"); process.exit(1); }
 
 const tidy = s => s.replace(/[™®]/g, "").replace(/\s+/g, " ").trim();
@@ -60,6 +63,31 @@ for (const file of (await readdir(folder)).filter(n => n.endsWith(".json")).sort
   brands[manufacturer] = [...unique.values()].sort((a, b) => a.n.localeCompare(b.n));
 }
 
+const words = s => new Set((s.toLowerCase().replace(/\+/g, " plus ").replace(/high speed/g, "hs").replace(/-/g, " ").match(/[a-z0-9]+/g) ?? []).filter(w => w !== "filament"));
+const same = (a, b) => a.size === b.size && [...a].every(w => b.has(w));
+const both = (lo, hi) => lo != null && hi != null ? [lo, hi] : undefined;
+let fromOfd = 0;
+if (ofd) for (const [brand, folder] of Object.entries(OFD_BRANDS)) {
+  const root = path.join(ofd, "data", folder), records = [];
+  for (const mat of await readdir(root, {withFileTypes: true})) {
+    if (!mat.isDirectory()) continue;
+    const base = JSON.parse(await readFile(path.join(root, mat.name, "material.json"), "utf8").catch(() => "{}"));
+    for (const line of await readdir(path.join(root, mat.name), {withFileTypes: true})) {
+      if (!line.isDirectory()) continue;
+      const j = JSON.parse(await readFile(path.join(root, mat.name, line.name, "filament.json"), "utf8").catch(() => "null"));
+      if (!j || j.discontinued) continue;
+      const v = k => j[k] ?? base["default_" + k];
+      records.push({key: new Set([...words(j.name), ...words(mat.name)]), t: both(v("min_print_temperature"), v("max_print_temperature")), b: both(v("min_bed_temperature"), v("max_bed_temperature")), y: v("dry_temperature") ? [v("dry_temperature"), v("dry_time") ?? null] : undefined});
+    }
+  }
+  for (const line of brands[brand] ?? []) {
+    const key = new Set([...words(line.n), ...words(line.m)]), hits = records.filter(r => same(r.key, key) && r.t && r.b && (r.t[0] < r.t[1] || r.b[0] < r.b[1]));
+    if (hits.length !== 1) continue;
+    Object.assign(line, {t: hits[0].t, b: hits[0].b}, hits[0].y ? {y: hits[0].y} : {}); fromOfd++;
+  }
+}
+if (ofd) console.log(`${fromOfd} filaments given manufacturer ranges from the Open Filament Database`);
+
 const extra = JSON.parse(await readFile(new URL("catalogue-extra.json", import.meta.url), "utf8"));
 for (const [brand, adds] of Object.entries(extra.add)) for (const line of adds) {
   const list = brands[brand] ??= [];
@@ -75,5 +103,5 @@ for (const [brand, lines] of Object.entries(extra.change)) for (const [name, pat
 
 const licence = await readFile(path.join(from, "LICENSE"), "utf8");
 const count = Object.values(brands).reduce((a, l) => a + l.length, 0);
-await writeFile(to, JSON.stringify({source: "https://github.com/Donkie/SpoolmanDB", built: new Date().toISOString().slice(0, 10), notice: licence, aliases: extra.aliases ?? {}, brands}));
+await writeFile(to, JSON.stringify({source: "https://github.com/Donkie/SpoolmanDB", built: new Date().toISOString().slice(0, 10), notice: licence, also: ofd ? "https://github.com/OpenFilamentCollective/open-filament-database" : undefined, aliases: extra.aliases ?? {}, brands}));
 console.log(`${Object.keys(brands).length} manufacturers, ${count} filaments`);

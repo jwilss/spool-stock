@@ -104,7 +104,7 @@ flowchart LR
 | Android | Capacitor |
 | Windows | Electron |
 | Stickers | jsPDF and qrcode-generator |
-| Filament catalogue | SpoolmanDB |
+| Filament catalogue | SpoolmanDB and the Open Filament Database |
 | Scanning | Live camera with jsQR |
 
 ## Run your own
@@ -125,6 +125,6 @@ Run the tests with `node test/run.js` and `node test/reader.js`.
 ## Good to know
 
 - Your stock is private to your account. `firestore.rules` is what protects the data. The Firebase key is kept in a repository secret and added when the site publishes, though browsers still need it, so it can be read on the live site.
-- Filament data comes from [SpoolmanDB](https://github.com/Donkie/SpoolmanDB) under the MIT licence, and refreshes each week. It's community data, so check settings against the spool. Drying settings are typical values for the material, apart from a few checked against the manufacturer.
+- Filament data comes from [SpoolmanDB](https://github.com/Donkie/SpoolmanDB) and the [Open Filament Database](https://github.com/OpenFilamentCollective/open-filament-database), both under the MIT licence, and refreshes each week. It's community data, so check settings against the spool. Drying settings are typical values for the material, apart from a few checked against the manufacturer.
 - No manufacturer logos are stored in this repo. They live in your private data and belong to their owners. The stickers shown above use made-up brands.
 - Print stickers at 100% or Actual size, and test on plain paper first.
