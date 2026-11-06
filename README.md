@@ -27,9 +27,9 @@ A filament inventory for home 3D printing, with printed QR stickers, phone scann
 
 ## Storage
 
-You start with a blank slate and add each place you keep filament. Choosing a type sets sensible defaults, and everything can be changed afterwards.
+<img src="docs/storage.png" width="260" align="right" alt="Storage editor with a type picker, name, group, spaces and a preview">
 
-<img src="docs/storage.png" width="300" alt="Storage editor with a type picker, name, group and spaces">
+You start with a blank slate and add each place you keep filament. Choosing a type sets sensible defaults, and everything can be changed afterwards.
 
 | Type | Starts with |
 |---|---|
@@ -44,11 +44,16 @@ Each storage is one thing with one sticker. A multi-material unit is a single st
 
 For each storage you can set:
 
-- The name and type
-- Numbered spaces or loose spools, and how many it holds
+- Its name and type
+- Numbered spaces or loose spools, and how many it holds, so a dryer can have as many slots as yours does
+- A top temperature, for dryers
 - A group, to keep a printer and everything feeding it together
 - Which materials to warn about before they go in
 - Where it sits in the list
+
+You can add several of the same at once, and **Remove all storages** in Setup starts you again without touching your spools.
+
+<br clear="right">
 
 ## Stickers
 
@@ -102,7 +107,7 @@ flowchart LR
 
 ## Run your own
 
-You'll need a free GitHub account and a free Firebase project. [SETUP.md](SETUP.md) goes through it step by step, and takes about half an hour.
+You'll need a free GitHub account and a free Firebase project. [SETUP.md](SETUP.md) goes through it step by step, and takes about half an hour. The Firebase key goes in a repository secret, and the publish workflow stops if it's missing.
 
 ```
 site/        the app

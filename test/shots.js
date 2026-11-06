@@ -17,20 +17,32 @@ for(const[id,o]of S)data[uid+'spools/'+id]=sp(o);
 for(const n of['Northbank','Harbour Filament','Lagan 3D'])data[uid+'brands/'+n.toLowerCase().replace(/[^a-z0-9]+/g,'-')]={name:n};
 data[uid+'config/main']={layout:2,lastId:10,sheet:{id:'l7160',start:0}};
 (async()=>{
- const feedArg=fs.existsSync(out+'/demo-feed.mjpeg')?['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream','--use-file-for-fake-video-capture='+out+'/demo-feed.mjpeg']:[];
- const b=await chromium.launch({args:feedArg});
+ let feedArg=[],b=await chromium.launch();
  const mk=async(scheme)=>{const c=await b.newContext({viewport:{width:400,height:820},deviceScaleFactor:2,serviceWorkers:'block',colorScheme:scheme,acceptDownloads:true,permissions:feedArg.length?['camera']:[]});
   await c.addInitScript({path:__dirname+'/mock-firebase.js'});
   await c.route(/vendor\/firebase-/,r=>r.fulfill({contentType:'text/javascript',body:''}));await c.route(/config\.js/,r=>r.fulfill({contentType:'text/javascript',body:cfg}));
   await c.route(/fonts\.googleapis/,r=>r.fulfill({contentType:'text/css',body:css}));await c.route(/fonts\.gstatic/,r=>r.abort());
   const p=await c.newPage();await p.goto(U);await p.evaluate(d=>{localStorage.setItem('__fb',JSON.stringify(d));localStorage.setItem('__fbUsers','{"a@b.co":"secret1"}');localStorage.setItem('__fbSession','a@b.co')},data);await p.reload();await p.waitForSelector('.racks');await p.waitForTimeout(400);return{c,p}};
+ // camera feed: a close-up of a sticker on a spool, with the QR code centred in the viewfinder
+ {const {c,p}=await mk('light');
+  const svg=await p.evaluate(()=>{const sh=curSheet();return opsToSVG(spoolOps(S.spools.s0002,sh.w,sh.h),sh.w,sh.h)});
+  const k=15,left=620-15.55*k,top=480-17.6*k;
+  const scene=await c.newPage();await scene.setViewportSize({width:1280,height:960});
+  await scene.setContent(`<!doctype html><style>html,body{margin:0;width:1280px;height:960px;overflow:hidden}
+   .side{position:absolute;inset:0;background:repeating-radial-gradient(circle at -30% 150%,#7c0b1c 0 2px,#c8102e 2px 7px) }
+   .flange{position:absolute;left:-1500px;top:-500px;width:2500px;height:2500px;border-radius:50%;background:radial-gradient(circle,#101214 0 10%,#2b2f33 10.3% 60%,#212428 60.5% 62%,#2f3338 62.5% 100%);box-shadow:0 0 50px rgba(0,0,0,.75)}
+   .sticker{position:absolute;left:${left}px;top:${top}px;width:${63.5*k}px;height:${38.1*k}px;transform:rotate(-1.6deg);transform-origin:${15.55*k}px ${17.6*k}px;box-shadow:0 5px 16px rgba(0,0,0,.55);border:0!important}
+   .light{position:absolute;inset:0;background:linear-gradient(115deg,rgba(255,255,255,.05),rgba(0,0,0,.16))}</style><div class="side"></div><div class="flange"></div>${svg}<div class="light"></div>`);
+  await scene.waitForTimeout(150);await scene.screenshot({path:out+'/demo-feed.png'});await c.close();await b.close();
+  execSync(`ffmpeg -y -loglevel error -loop 1 -framerate 15 -t 2 -i ${out}/demo-feed.png -pix_fmt yuvj420p -q:v 2 -f mjpeg ${out}/demo-feed.mjpeg`);
+  feedArg=['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream','--use-file-for-fake-video-capture='+out+'/demo-feed.mjpeg'];b=await chromium.launch({args:feedArg});}
  const {c,p}=await mk('light');
  await p.screenshot({path:docs+'/stock.png'});
- await p.evaluate(()=>{location.hash='store-ams-1'});await p.waitForSelector('#storePreview .slot');await p.waitForTimeout(200);await p.screenshot({path:docs+'/storage.png'});
+ await p.evaluate(()=>{location.hash='store-ams-1'});await p.waitForSelector('#storePreview .slot');await p.waitForTimeout(200);await p.evaluate(()=>{document.querySelector('.nav').style.display='none';document.querySelector('.main').style.paddingBottom='16px'});await p.screenshot({path:docs+'/storage.png',fullPage:true});await p.evaluate(()=>{document.querySelector('.nav').style.display='';document.querySelector('.main').style.paddingBottom=''});
  await p.evaluate(()=>{location.hash='s0004'});await p.waitForSelector('.spoolhead');await p.waitForTimeout(200);await p.screenshot({path:docs+'/spool.png'});
  await p.evaluate(()=>{location.hash='stickers'});await p.waitForSelector('.sheetmap');await p.waitForTimeout(300);
  const [d]=await Promise.all([p.waitForEvent('download'),p.click('[data-act=pdf]')]);await d.saveAs(out+'/demo.pdf');
- if(feedArg.length){await p.evaluate(()=>{location.hash='scan'});await p.waitForSelector('#camStart');await p.click('#camStart');await p.waitForFunction(()=>/Now scan a storage/.test(document.querySelector('#scanState').textContent),{timeout:25000});await p.evaluate(()=>{document.querySelector('#toast').hidden=true});await p.screenshot({path:docs+'/scan.png'});}
+ await p.evaluate(()=>{location.hash='scan'});await p.waitForSelector('#camStart');await p.click('#camStart');await p.waitForFunction(()=>/Now scan a storage/.test(document.querySelector('#scanState').textContent),{timeout:25000});await p.evaluate(()=>{document.querySelector('#toast').hidden=true});await p.screenshot({path:docs+'/scan.png'});
  await c.close();
  const {c:c2,p:p2}=await mk('dark');await p2.screenshot({path:docs+'/stock-dark.png'});await c2.close();
  await b.close();srv.close();

@@ -183,7 +183,7 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .brandrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border-top:1px solid var(--line);padding-top:8px}
 .camwrap{position:relative;aspect-ratio:4/3;background:#000;overflow:hidden;max-height:60vh;width:100%}
 .camwrap video{width:100%;height:100%;object-fit:cover;display:block}
-.camwrap i{position:absolute;inset:14%;border:3px solid var(--tag);pointer-events:none}
+.camwrap i{position:absolute;top:50%;left:50%;height:72%;aspect-ratio:1;transform:translate(-50%,-50%);border:3px solid var(--tag);pointer-events:none}
 .scanstate{font:700 22px/1.15 var(--disp);min-height:50px;display:grid;align-items:center}
 .scanstate.held{background:var(--tag);color:var(--tag-ink);padding:8px 10px}
 .authcard{max-width:420px;margin-inline:auto;width:100%}
