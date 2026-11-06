@@ -7,12 +7,10 @@
   "add": {
     "eSun": [
       {
-        "n": "ePETG+HS",
+        "n": "PETG+HS",
         "m": "PETG",
         "a": [
-          "PETG+HS",
-          "PETG High Speed",
-          "ePETG HS"
+          "PETG High Speed"
         ],
         "t": [
           220,
@@ -29,6 +27,57 @@
         "d": 1.26,
         "w": 1000,
         "c": []
+      },
+      {
+        "n": "ePETG+HS",
+        "m": "PETG",
+        "a": [
+          "ePETG HS",
+          "High Speed Upgraded PETG"
+        ],
+        "t": [
+          220,
+          260
+        ],
+        "b": [
+          75,
+          90
+        ],
+        "w": 1000,
+        "c": [
+          [
+            "Black",
+            "111111"
+          ],
+          [
+            "Fire Engine Red",
+            "C8102E"
+          ],
+          [
+            "Solid Green",
+            "00843D"
+          ],
+          [
+            "Solid Grey",
+            "8A8D8F"
+          ],
+          [
+            "Solid Orange",
+            "FF6A13"
+          ],
+          [
+            "Solid Silver",
+            "A7A9AC"
+          ],
+          [
+            "Solid Blue",
+            "0057B8"
+          ],
+          [
+            "Solid Yellow",
+            "FFD100"
+          ]
+        ]
       }
     ],
     "Sunlu": [
