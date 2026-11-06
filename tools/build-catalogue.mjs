@@ -1,13 +1,13 @@
 // Builds site/catalogue.json from a copy of SpoolmanDB (https://github.com/Donkie/SpoolmanDB).
 // Run: node tools/build-catalogue.mjs <path to SpoolmanDB> [output file] [path to Open Filament Database]
 // With the Open Filament Database, manufacturer temperature ranges and drying replace SpoolmanDB's single
-// values for exact name matches in the brands listed in OFD_BRANDS.
+// values for exact name matches in the brands listed in OFD_BRANDS, and its colours are added to those lines.
 // tools/catalogue-extra.json holds additions and corrections checked against manufacturers' own sites.
 import {readdir, readFile, writeFile} from "node:fs/promises";
 import path from "node:path";
 
 const [from, to = "site/catalogue.json", ofd] = process.argv.slice(2);
-const OFD_BRANDS = {"eSun": "esun_3d", "Bambu Lab": "bambu_lab", "Sunlu": "sunlu"};
+const OFD_BRANDS = {"eSun": "esun_3d", "Bambu Lab": "bambu_lab", "Sunlu": "sunlu", "CC3D": "cc3d"};
 if (!from) { console.error("Give the path to a copy of SpoolmanDB"); process.exit(1); }
 
 const tidy = s => s.replace(/[™®]/g, "").replace(/\s+/g, " ").trim();
@@ -76,14 +76,26 @@ if (ofd) for (const [brand, folder] of Object.entries(OFD_BRANDS)) {
       if (!line.isDirectory()) continue;
       const j = JSON.parse(await readFile(path.join(root, mat.name, line.name, "filament.json"), "utf8").catch(() => "null"));
       if (!j || j.discontinued) continue;
+      const colours = [];
+      for (const c of await readdir(path.join(root, mat.name, line.name), {withFileTypes: true})) {
+        if (!c.isDirectory()) continue;
+        const vj = JSON.parse(await readFile(path.join(root, mat.name, line.name, c.name, "variant.json"), "utf8").catch(() => "null"));
+        if (!vj?.name || !vj.color_hex || vj.discontinued) continue;
+        const hexes = [].concat(vj.color_hex).map(hex).filter(h => /^[0-9A-F]{6}$/.test(h));
+        if (!hexes.length) continue;
+        colours.push(hexes.length === 1 ? [tidy(vj.name), hexes[0]] : [tidy(vj.name), hexes.slice(0, 6), vj.traits?.gradual_color_change ? "gradient" : "split"]);
+      }
       const v = k => j[k] ?? base["default_" + k];
-      records.push({key: new Set([...words(j.name), ...words(mat.name)]), t: both(v("min_print_temperature"), v("max_print_temperature")), b: both(v("min_bed_temperature"), v("max_bed_temperature")), y: v("dry_temperature") ? [v("dry_temperature"), v("dry_time") ?? null] : undefined});
+      records.push({colours, key: new Set([...words(j.name), ...words(mat.name)]), t: both(v("min_print_temperature"), v("max_print_temperature")), b: both(v("min_bed_temperature"), v("max_bed_temperature")), y: v("dry_temperature") ? [v("dry_temperature"), v("dry_time") ?? null] : undefined});
     }
   }
   for (const line of brands[brand] ?? []) {
-    const key = new Set([...words(line.n), ...words(line.m)]), hits = records.filter(r => same(r.key, key) && r.t && r.b && (r.t[0] < r.t[1] || r.b[0] < r.b[1]));
-    if (hits.length !== 1) continue;
-    Object.assign(line, {t: hits[0].t, b: hits[0].b}, hits[0].y ? {y: hits[0].y} : {}); fromOfd++;
+    const key = new Set([...words(line.n), ...words(line.m)]), named = records.filter(r => same(r.key, key));
+    if (named.length !== 1) continue;
+    const r = named[0], known = new Set(line.c.map(c => c[0].toLowerCase()));
+    for (const c of r.colours) if (!known.has(c[0].toLowerCase())) { line.c.push(c); known.add(c[0].toLowerCase()); }
+    if (!(r.t && r.b && (r.t[0] < r.t[1] || r.b[0] < r.b[1]))) continue;
+    Object.assign(line, {t: r.t, b: r.b}, r.y ? {y: r.y} : {}); fromOfd++;
   }
 }
 if (ofd) console.log(`${fromOfd} filaments given manufacturer ranges from the Open Filament Database`);
