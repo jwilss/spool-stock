@@ -70,6 +70,7 @@ for (const [brand, adds] of Object.entries(extra.add)) for (const line of adds) 
 for (const [brand, lines] of Object.entries(extra.change)) for (const [name, patch] of Object.entries(lines)) {
   const line = brands[brand]?.find(l => l.n === name);
   if (line) Object.assign(line, patch); else console.warn(`Correction not used: ${brand} ${name}`);
+  brands[brand]?.sort((a, b) => a.n.localeCompare(b.n));
 }
 
 const licence = await readFile(path.join(from, "LICENSE"), "utf8");
