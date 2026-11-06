@@ -2,6 +2,9 @@
   "add": {
     "eSun": [
       {"n": "PETG+HS", "m": "PETG", "a": "PETG High Speed", "t": [220, 260], "b": [75, 90], "y": [60, 8], "d": 1.26, "w": 1000, "c": []}
+    ],
+    "Sunlu": [
+      {"n": "PETG High Speed", "m": "PETG", "a": "Rapid PETG", "t": [230, 270], "b": [70, 80], "y": [65, 8], "w": 1000, "c": [["White", "FFFFFF"]]}
     ]
   },
   "change": {

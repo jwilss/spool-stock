@@ -170,6 +170,7 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  let got=await pickFrom('eSUN','petg high speed');ok(await p.inputValue('#f_material')==='PETG+HS'&&got==='220,260,75,90,60,8','eSUN PETG+HS found as PETG High Speed: '+got);
  got=await pickFrom('eSUN','petg+ hs');ok(got==='220,260,75,90,60,8','eSUN PETG+HS found as PETG+ HS');
  got=await pickFrom('Sunlu','high speed matte petg');ok(got==='240,260,70,80,65,8','Sunlu High Speed Matte PETG: '+got);
+ got=await pickFrom('Sunlu','rapid petg');ok(await p.inputValue('#f_material')==='PETG High Speed'&&got==='230,270,70,80,65,8','Sunlu PETG High Speed, also sold as Rapid PETG: '+got);
  got=await pickFrom('Sunlu','tpu-95a');ok(got==='190,230,50,60,50,','Sunlu TPU 95A, no drying time given: '+got);ok(!/null|undefined/.test(await p.textContent('#preview')),'sticker copes with no drying time');
  await p.fill('#f_brand','eSUN');await p.fill('#f_material','PETG');await p.waitForTimeout(60);ok(await p.inputValue('#f_dT')==='60','eSUN PETG dries at 60');
  await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('.racks');
