@@ -27,9 +27,11 @@ Fill in `site/config.js`:
 | `siteUrl` | Your GitHub Pages address. Sticker QR codes use this, so set it before printing. |
 | `repo` | Your repo, as `owner/name`. Setup links to its releases. |
 | `readerUrl` | Your copy of Spool Reader, or leave it out. |
-| `firebase` | The object you copied. It's safe to publish. |
+| `firebase` | The object you copied, leaving `apiKey` as `__FIREBASE_API_KEY__`. |
 
 The Android and Windows apps open your site, so put the same address in `wrappers/android/capacitor.config.json` and `wrappers/windows/main.js`.
+
+Then in the GitHub repo open **Settings > Secrets and variables > Actions**, press **New repository secret**, call it `FIREBASE_API_KEY` and paste in the `apiKey` value. It's added to `config.js` each time the site publishes.
 
 Push to `main` and the site publishes itself.
 

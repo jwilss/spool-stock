@@ -1,5 +1,6 @@
 // The firebase block comes from your Firebase project settings.
-// These values are safe to publish. firestore.rules is what keeps your data private.
+// The API key is kept in the FIREBASE_API_KEY repository secret and added when the site publishes.
+// firestore.rules is what keeps your data private.
 window.SPOOL_CONFIG = {
   siteUrl: "https://jwilss.github.io/spool-stock/",
   repo: "jwilss/spool-stock",
