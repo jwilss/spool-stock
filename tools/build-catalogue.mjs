@@ -1,5 +1,6 @@
 // Builds site/catalogue.json from a copy of SpoolmanDB (https://github.com/Donkie/SpoolmanDB).
 // Run: node tools/build-catalogue.mjs <path to SpoolmanDB> [output file]
+// tools/catalogue-extra.json holds additions and corrections checked against manufacturers' own sites.
 import {readdir, readFile, writeFile} from "node:fs/promises";
 import path from "node:path";
 
@@ -57,6 +58,18 @@ for (const file of (await readdir(folder)).filter(n => n.endsWith(".json")).sort
     else unique.set(label, {...line, n: label});
   }
   brands[manufacturer] = [...unique.values()].sort((a, b) => a.n.localeCompare(b.n));
+}
+
+const extra = JSON.parse(await readFile(new URL("catalogue-extra.json", import.meta.url), "utf8"));
+for (const [brand, adds] of Object.entries(extra.add)) for (const line of adds) {
+  const list = brands[brand] ??= [];
+  const same = list.find(l => l.n === line.n);
+  if (same) Object.assign(same, line, {c: same.c}); else list.push(line);
+  list.sort((a, b) => a.n.localeCompare(b.n));
+}
+for (const [brand, lines] of Object.entries(extra.change)) for (const [name, patch] of Object.entries(lines)) {
+  const line = brands[brand]?.find(l => l.n === name);
+  if (line) Object.assign(line, patch); else console.warn(`Correction not used: ${brand} ${name}`);
 }
 
 const licence = await readFile(path.join(from, "LICENSE"), "utf8");

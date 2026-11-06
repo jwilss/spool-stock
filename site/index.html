@@ -382,14 +382,14 @@ async function loadCatalogue(){
   }catch{}
 }
 const catBrand = name => CAT?.[slug(name)];
-const catLine = (brand,material) => catBrand(brand)?.lines.find(l=>norm(l.n)===norm(material));
+const catLine = (brand,material) => { const q=norm(material); return catBrand(brand)?.lines.find(l=>norm(l.n)===q||(l.a&&norm(l.a)===q)); };
 const profileId = (b,m) => slug(b)+"__"+slug(m);
 const baseMat = m => MATERIALS.find(x=>x.re.test(m||""));
 function lookup(brand,material){
   const p = S.profiles[profileId(brand,material)];
   if(p) return {nMin:p.nMin,nMax:p.nMax,bMin:p.bMin,bMax:p.bMax,dT:p.dT,dH:p.dH,src:"saved"};
   const m = baseMat(material), c = catLine(brand,material);
-  if(c&&c.t&&c.b) return {nMin:c.t[0],nMax:c.t[1],bMin:c.b[0],bMax:c.b[1],dT:m?.d?.[0]??null,dH:m?.d?.[1]??null,src:"catalogue",base:m?.key};
+  if(c&&c.t&&c.b) return {nMin:c.t[0],nMax:c.t[1],bMin:c.b[0],bMax:c.b[1],dT:c.y?c.y[0]:m?.d?.[0]??null,dH:c.y?c.y[1]:m?.d?.[1]??null,src:"catalogue",base:c.y?null:m?.key};
   if(m) return {nMin:m.n[0],nMax:m.n[1],bMin:m.b[0],bMax:m.b[1],dT:m.d?m.d[0]:null,dH:m.d?m.d[1]:null,src:"typical",base:m.key};
   return {nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,src:"none"};
 }
@@ -796,7 +796,7 @@ function vSpool(){
       <dl class="spec" style="margin:0">
         <div><dt>Nozzle</dt><dd>${esc(range(s.nMin,s.nMax))||"-"} °C</dd></div>
         <div><dt>Bed</dt><dd>${esc(range(s.bMin,s.bMax))||"-"} °C</dd></div>
-        <div><dt>Dry</dt><dd>${s.dT?`${s.dT} °C ${s.dH||""} h`:"-"}</dd></div>
+        <div><dt>Dry</dt><dd>${s.dT?`${s.dT} °C${s.dH?` ${s.dH} h`:""}`:"-"}</dd></div>
         <div><dt>Last in dryer</dt><dd>${s.lastDried?ago(s.lastDried):"Not logged"}</dd></div>
         <div><dt>Diameter</dt><dd>${esc(s.dia||1.75)} mm</dd></div>
         <div><dt>Empty spool</dt><dd>${s.tareG?s.tareG+" g":"Not set"}</dd></div>
