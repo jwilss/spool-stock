@@ -9,7 +9,11 @@
       {
         "n": "PETG+HS",
         "m": "PETG",
-        "a": "PETG High Speed",
+        "a": [
+          "PETG High Speed",
+          "ePETG+HS",
+          "ePETG HS"
+        ],
         "t": [
           220,
           260

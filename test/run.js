@@ -168,6 +168,7 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  const pickFrom=async(brand,q)=>{await p.fill('#f_brand','');await p.fill('#f_brand',brand);await p.fill('#f_material','');await p.fill('#f_material',q);await p.waitForTimeout(50);await p.click('#linePick .pick');await p.waitForTimeout(60);return Promise.all(['nMin','nMax','bMin','bMax','dT','dH'].map(k=>p.inputValue('#f_'+k))).then(v=>v.join())};
  await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('.racks');await p.evaluate(()=>{location.hash='add'});await p.waitForSelector('#f_brand');
  let got=await pickFrom('eSUN','petg high speed');ok(await p.inputValue('#f_material')==='PETG+HS'&&got==='220,260,75,90,60,8','eSUN PETG+HS found as PETG High Speed: '+got);
+ got=await pickFrom('eSUN','epetg+hs');ok(await p.inputValue('#f_material')==='PETG+HS'&&got==='220,260,75,90,60,8','eSUN ePETG+HS spelling finds PETG+HS');
  got=await pickFrom('eSUN','petg+ hs');ok(got==='220,260,75,90,60,8','eSUN PETG+HS found as PETG+ HS');
  got=await pickFrom('Sunlu','high speed matte petg');ok(got==='240,260,70,80,65,8','Sunlu High Speed Matte PETG: '+got);
  got=await pickFrom('Sunlu','rapid petg');ok(await p.inputValue('#f_material')==='PETG High Speed'&&got==='230,270,70,80,65,8','Sunlu PETG High Speed, also sold as Rapid PETG: '+got);

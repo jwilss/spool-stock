@@ -377,12 +377,12 @@ async function loadCatalogue(){
   try{
     const r=await fetch("catalogue.json"); if(!r.ok) return;
     const j=await r.json(), map={};
-    for(const [name,lines] of Object.entries(j.brands)) map[slug(name)]={name,aka:(j.aliases||{})[name]||[],lines:lines.map(l=>({...l,hay:searchText(l.n,l.m,l.a)}))};
+    for(const [name,lines] of Object.entries(j.brands)) map[slug(name)]={name,aka:(j.aliases||{})[name]||[],lines:lines.map(l=>({...l,hay:searchText(l.n,l.m,...[].concat(l.a||[]))}))};
     CAT=map;
   }catch{}
 }
 const catBrand = name => CAT?.[slug(name)] || Object.values(CAT||{}).find(c=>c.aka.some(a=>slug(a)===slug(name)));
-const catLine = (brand,material) => { const q=norm(material); return catBrand(brand)?.lines.find(l=>norm(l.n)===q||(l.a&&norm(l.a)===q)); };
+const catLine = (brand,material) => { const q=norm(material); return catBrand(brand)?.lines.find(l=>norm(l.n)===q||[].concat(l.a||[]).some(a=>norm(a)===q)); };
 const profileId = (b,m) => slug(b)+"__"+slug(m);
 const baseMat = m => MATERIALS.find(x=>x.re.test(m||""));
 function lookup(brand,material){
