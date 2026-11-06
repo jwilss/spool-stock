@@ -1122,18 +1122,22 @@ function parseImport(text){
   let j; try{ j=JSON.parse(text); }catch{ throw "That isn't a Spool Reader export."; }
   if(!j||j.format!=="spool-stock-import"||!Array.isArray(j.spools)) throw "That isn't a Spool Reader export.";
   const items=j.spools.filter(x=>x&&x.brand&&x.material).map((x,i)=>({...x,key:i,on:true,qty:clamp(parseInt(x.qty)||1,1,20)}));
-  if(!items.length) throw "That export has no spools in it.";
-  return {batch:String(j.batch||""),items,logos:j.logos&&typeof j.logos==="object"?j.logos:{},loc:""};
+  const logos=j.logos&&typeof j.logos==="object"?j.logos:{};
+  if(!items.length&&!Object.keys(logos).length) throw "That file has nothing in it to import.";
+  return {batch:String(j.batch||""),items,logos,loc:""};
 }
 function vImport(){
   const opts=orderedLocs().map(l=>`<option value="${l.id}" ${Imp&&Imp.loc===l.id?"selected":""}>${esc(locName(l.id))}</option>`).join("");
   if(!Imp) return `<div><h1>Import from Spool Reader</h1></div>
   <div class="card">
-    <div class="btns"><label class="btn go" for="pickImport">Choose the export file</label></div>
+    <div class="btns"><label class="btn go" for="pickImport">Choose the file</label></div>
     <label class="field"><span>Or paste the export here</span><textarea id="importText" rows="5"></textarea></label>
     <div class="btns"><button class="btn" data-act="importPaste">Check it</button></div>
     <p class="authbad" id="importErr" hidden></p>
   </div>`;
+  if(!Imp.items.length) return `<div><h1>Import logos</h1></div>
+  <div class="card"><div class="list">${Object.entries(Imp.logos).map(([n,l])=>`<div class="brandrow" style="grid-template-columns:auto minmax(0,1fr)"><img class="logo" src="${esc(l.src)}" alt="${esc(n)} logo"><b>${esc(n)}</b></div>`).join("")}</div>
+    <div class="btns"><button class="btn go" data-act="importGo">Add ${Object.keys(Imp.logos).length} logos</button><button class="btn" data-act="importCancel">Cancel</button></div></div>`;
   const done=(S.settings.imported||[]).includes(Imp.batch)&&Imp.batch;
   const n=Imp.items.filter(i=>i.on).reduce((a,i)=>a+i.qty,0);
   return `<div><h1>Import from Spool Reader</h1></div>
@@ -1147,11 +1151,12 @@ function vImport(){
 async function runImport(){
   const now=Date.now(), rows=Imp.items.filter(i=>i.on), total=rows.reduce((a,i)=>a+i.qty,0);
   const {ids,last}=nextIds(total); let n=0;
+  const logosOnly=!Imp.items.length;
   for(const [name,l] of Object.entries(Imp.logos)){
-    if(!rows.some(r=>r.brand===name)||!l||!/^data:image\/png/.test(l.src||"")) continue;
+    if(!(logosOnly||rows.some(r=>r.brand===name))||!l||!/^data:image\/png/.test(l.src||"")) continue;
     const id=slug(name), old=S.brands[id]||{};
-    if(old.logo) continue;
-    const next={...old,name:old.name||name,logo:l.src,logoW:l.w,logoH:l.h,logoFrom:"Spool Reader"}; delete next.id;
+    if(old.logo&&!logosOnly) continue;
+    const next={...old,name:old.name||name,logo:l.src,logoW:l.w,logoH:l.h,logoFrom:logosOnly?"Your vector":"Spool Reader"}; delete next.id;
     col("brands").doc(id).set(next); S.brands[id]={...next,id};
   }
   for(const r of rows){
@@ -1168,6 +1173,7 @@ async function runImport(){
   }
   saveConfig({lastId:last,imported:[...(S.settings.imported||[]).slice(-40),Imp.batch].filter(Boolean)});
   for(const name of new Set(rows.map(r=>r.brand))) if(!Imp.logos[name]) autoLogo(name);
+  if(logosOnly){ const n=Object.keys(Imp.logos).length; Imp=null; toast(`Added ${n} logos.`); go("setup"); return; }
   Imp=null; toast(`Added ${total} spool${total===1?"":"s"}. Stickers are in the queue.`); go("stickers");
 }
 function stockExport(){

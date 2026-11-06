@@ -105,6 +105,20 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  await p.click('.cell:nth-child(1)');await p.waitForTimeout(100);
  const [dl3]=await Promise.all([p.waitForEvent('download'),p.click('[data-act=pdf]')]);await dl3.saveAs(out+'/stickers2.pdf');
 
+ // logos only file (needs a private logo file, which isn't kept in the repo)
+ const lp=process.env.LOGO_FILE;
+ if(lp){
+ const lf=JSON.parse(fs.readFileSync(lp));
+ await p.evaluate(()=>{location.hash='import'});await p.waitForSelector('#importText');await p.fill('#importText',JSON.stringify(lf));await p.click('[data-act=importPaste]');await p.waitForSelector('[data-act=importGo]');
+ ok((await p.textContent('[data-act=importGo]')).includes('Add 4 logos'),'logo file recognised');await p.screenshot({path:out+'/logos-import.png',fullPage:true});
+ await p.click('[data-act=importGo]');await p.waitForSelector('#apiKeyIn, [data-act=logosAll]');await p.waitForTimeout(300);
+ db=await dbOf(p);ok(['esun','prusament','hatchbox','polymaker'].every(k=>db[uid+'brands/'+k]&&db[uid+'brands/'+k].logo&&db[uid+'brands/'+k].logoW>=1000),'all four logos stored at print size');
+ await add('Prusament','PETG','Galaxy Black');await add('Hatchbox','PLA','Red');await add('Polymaker','PolyTerra PLA','Teal');
+ await p.evaluate(()=>{location.hash='stickers'});await p.waitForSelector('.sheetmap');await p.waitForTimeout(200);await p.click('.cell:nth-child(1)');await p.waitForTimeout(100);
+ const [dl4]=await Promise.all([p.waitForEvent('download'),p.click('[data-act=pdf]')]);await dl4.saveAs(out+'/stickers3.pdf');
+
+ }
+
  // stock list for Spool Reader
  await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=listSave]');
  await p.screenshot({path:out+'/setup-phone.png',fullPage:true});
