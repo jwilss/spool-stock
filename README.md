@@ -21,7 +21,8 @@ A filament inventory for home 3D printing, with printed QR stickers, phone scann
 - **Scan to move:** point the camera at a spool, then at a storage. The camera stays on for the next one.
 - **Storage that matches yours:** add what you actually own, and see it all at a glance with each ring showing the filament's colour and how much is left.
 - **Stickers that write themselves:** logo, material, colour, print settings and a QR code, ready to print on A4 sheets.
-- **Print settings filled in:** type the manufacturer and material, and the settings appear and get remembered for that filament.
+- **Search your filament:** find a manufacturer, then pick from their own product names, and the settings, spool weight and colours fill in.
+- **Your own names too:** anything that isn't listed can be typed in, and it joins that manufacturer's list with your settings.
 - **Works offline:** changes save on the device and sync when you're back online.
 - **Low stock at a glance:** weigh a spool and it works out what's left.
 
@@ -103,6 +104,7 @@ flowchart LR
 | Android | Capacitor |
 | Windows | Electron |
 | Stickers | jsPDF and qrcode-generator |
+| Filament catalogue | SpoolmanDB |
 | Scanning | Live camera with jsQR |
 
 ## Run your own
@@ -112,6 +114,7 @@ You'll need a free GitHub account and a free Firebase project. [SETUP.md](SETUP.
 ```
 site/        the app
 reader/      Spool Reader
+tools/       builds the filament catalogue
 wrappers/    Android and Windows shells
 docs/        images for this page
 test/        end-to-end tests
@@ -122,5 +125,6 @@ Run the tests with `node test/run.js` and `node test/reader.js`.
 ## Good to know
 
 - Your stock is private to your account. `firestore.rules` is what protects the data. The Firebase key is kept in a repository secret and added when the site publishes, though browsers still need it, so it can be read on the live site.
+- Filament data comes from [SpoolmanDB](https://github.com/Donkie/SpoolmanDB) under the MIT licence, and refreshes each week. It's community data, so check settings against the spool. Drying settings are typical values for the material.
 - No manufacturer logos are stored in this repo. They live in your private data and belong to their owners. The stickers shown above use made-up brands.
 - Print stickers at 100% or Actual size, and test on plain paper first.
