@@ -987,7 +987,9 @@ function lineOptions(brand,q){
   const saved=Object.values(S.profiles).filter(p=>slug(p.brand)===slug(brand)).map(p=>({n:p.material,saved:true,hay:searchText(p.material)}));
   const lines=(catBrand(brand)?.lines||[]).filter(l=>!saved.some(p=>norm(p.n)===norm(l.n)));
   const all=[...saved,...lines];
-  return {list:(all.length?all:MATERIALS.map(m=>({n:m.key,hay:searchText(m.key),generic:true}))).filter(l=>matches(l.hay,q)),own:all.length>0};
+  const t=norm(q), rank=l=>{ const n=norm(l.n), a=[].concat(l.a||[]).map(norm); return n===t||a.includes(t)?0:n.startsWith(t)||a.some(x=>x.startsWith(t))?1:2; };
+  const list=(all.length?all:MATERIALS.map(m=>({n:m.key,hay:searchText(m.key),generic:true}))).filter(l=>matches(l.hay,q));
+  return {list:t?list.map((l,i)=>[rank(l),i,l]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]).map(x=>x[2]):list,own:all.length>0};
 }
 function showPicks(id){
   const box=$(id==="f_brand"?"#brandPick":"#linePick"); if(!box||!F) return;
