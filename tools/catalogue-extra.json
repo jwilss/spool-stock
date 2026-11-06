@@ -1,19 +1,136 @@
 {
+  "aliases": {
+    "Creality": [
+      "Ender"
+    ]
+  },
   "add": {
     "eSun": [
-      {"n": "PETG+HS", "m": "PETG", "a": "PETG High Speed", "t": [220, 260], "b": [75, 90], "y": [60, 8], "d": 1.26, "w": 1000, "c": []}
+      {
+        "n": "PETG+HS",
+        "m": "PETG",
+        "a": "PETG High Speed",
+        "t": [
+          220,
+          260
+        ],
+        "b": [
+          75,
+          90
+        ],
+        "y": [
+          60,
+          8
+        ],
+        "d": 1.26,
+        "w": 1000,
+        "c": []
+      }
     ],
     "Sunlu": [
-      {"n": "PETG High Speed", "m": "PETG", "a": "Rapid PETG", "t": [230, 270], "b": [70, 80], "y": [65, 8], "w": 1000, "c": [["White", "FFFFFF"]]}
+      {
+        "n": "PETG High Speed",
+        "m": "PETG",
+        "a": "Rapid PETG",
+        "t": [
+          230,
+          270
+        ],
+        "b": [
+          70,
+          80
+        ],
+        "y": [
+          65,
+          8
+        ],
+        "w": 1000,
+        "c": [
+          [
+            "White",
+            "FFFFFF"
+          ]
+        ]
+      }
+    ],
+    "Creality": [
+      {
+        "n": "Ender Fast PLA",
+        "m": "PLA",
+        "a": "Ender PLA High Speed",
+        "t": [
+          190,
+          230
+        ],
+        "b": [
+          45,
+          60
+        ],
+        "w": 1000,
+        "c": []
+      }
+    ],
+    "Landu": [
+      {
+        "n": "Rapid PETG",
+        "m": "PETG",
+        "a": "PETG High Speed",
+        "w": 1000,
+        "c": [
+          [
+            "White",
+            "FFFFFF"
+          ],
+          [
+            "Black",
+            "111111"
+          ],
+          [
+            "Grey",
+            "8A8D8F"
+          ]
+        ]
+      }
     ]
   },
   "change": {
     "eSun": {
-      "PETG": {"y": [60, 8]}
+      "PETG": {
+        "y": [
+          60,
+          8
+        ]
+      }
     },
     "Sunlu": {
-      "High Speed Matte PETG": {"t": [240, 260], "b": [70, 80], "y": [65, 8]},
-      "TPU-95A": {"t": [190, 230], "b": [50, 60], "y": [50, null]}
+      "High Speed Matte PETG": {
+        "t": [
+          240,
+          260
+        ],
+        "b": [
+          70,
+          80
+        ],
+        "y": [
+          65,
+          8
+        ]
+      },
+      "TPU-95A": {
+        "t": [
+          190,
+          230
+        ],
+        "b": [
+          50,
+          60
+        ],
+        "y": [
+          50,
+          null
+        ]
+      }
     }
   }
 }
