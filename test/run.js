@@ -178,6 +178,7 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  got=await pickFrom('Bambu Lab','pla matte');ok(got==='190,230,35,45,50,8','Bambu PLA Matte uses manufacturer ranges: '+got);
  got=await pickFrom('eSUN','petg basic');ok(got.startsWith('250,265,65,80'),'a single value never replaces a range: '+got);
  got=await pickFrom('Bambu Lab','pva');ok(got==='220,250,35,45,55,8','unchecked drying falls back to typical: '+got);
+ got=await pickFrom('Landu','pla plus');ok(await p.inputValue('#f_material')==='PLA+'&&got==='210,230,45,60,55,8','Landu PLA+: '+got);
  got=await pickFrom('Sunlu','tpu-95a');ok(got==='190,230,50,60,50,','Sunlu TPU 95A, no drying time given: '+got);ok(!/null|undefined/.test(await p.textContent('#preview')),'sticker copes with no drying time');
  await p.fill('#f_brand','eSUN');await p.fill('#f_material','PETG');await p.waitForTimeout(60);ok(await p.inputValue('#f_dT')==='60','eSUN PETG dries at 60');
  await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('.racks');
