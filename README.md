@@ -99,6 +99,5 @@ Run the tests with `node test/run.js` and `node test/reader.js`.
 <div align="center">
 <br>
 
-Made by Jack Wilson for two P1S printers called Alduin and Betsy.
 
 </div>
