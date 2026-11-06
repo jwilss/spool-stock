@@ -116,6 +116,6 @@ Run the tests with `node test/run.js` and `node test/reader.js`.
 
 ## Good to know
 
-- Your stock is private to your account. Firebase's web settings in `site/config.js` are meant to be public, and `firestore.rules` is what protects the data.
+- Your stock is private to your account. `firestore.rules` is what protects the data. The Firebase key is kept in a repository secret and added when the site publishes, though browsers still need it, so it can be read on the live site.
 - No manufacturer logos are stored in this repo. They live in your private data and belong to their owners. The stickers shown above use made-up brands.
 - Print stickers at 100% or Actual size, and test on plain paper first.

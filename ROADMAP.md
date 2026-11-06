@@ -4,7 +4,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 
 ## Files
 
-- `site/`: the app. `index.html` holds nearly everything. `config.js` holds the addresses and Firebase details.
+- `site/`: the app. `index.html` holds nearly everything. `config.js` holds the addresses and Firebase details, with the API key added from a repository secret when the site publishes.
 - `reader/spool-reader.html`: copy of the Spool Reader artifact.
 - `wrappers/android/`: Capacitor shell around the site.
 - `wrappers/windows/`: Electron shell around the site.
