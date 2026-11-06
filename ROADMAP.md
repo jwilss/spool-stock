@@ -8,9 +8,9 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - `reader/spool-reader.html`: copy of the Spool Reader artifact.
 - `wrappers/android/`: Capacitor shell around the site.
 - `wrappers/windows/`: Electron shell around the site.
-- `.github/workflows/`: `site.yml` publishes the site, `apps.yml` builds the APK and exe.
+- `.github/workflows/`: `site.yml` adds the Firebase key from the `FIREBASE_API_KEY` secret and publishes the site, `apps.yml` builds the APK and exe.
 - `firestore.rules`: keeps each account to its own data.
-- `docs/`: images for the README, made with `test/shots.js`.
+- `docs/`: images for the README, made with `test/shots.js`. The stickers image is the only one it doesn't make.
 - `test/`: `run.js` for the app, `reader.js` for Spool Reader. Both use stand-ins for Firebase and Claude.
 - `SETUP.md`: first time setup.
 
@@ -26,6 +26,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - Print settings start from a typical table per material, then the label, then your edits, remembered per filament.
 - Logos are found once and stored per manufacturer in your account: Simple Icons for exact vector matches, Wikimedia Commons as choices, or your own upload. All are turned solid black on transparent. No API keys.
 - Stickers are black except for the colour box: solid, triangles for split colours, or a left to right blend for gradients.
+- The Firebase key isn't in the repo or its history. Browsers still need it, so it can be read in `config.js` on the live site. The key is restricted to Firebase services, sign-ups are off, and `firestore.rules` protects the data.
 
 ## Done
 
@@ -37,16 +38,22 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Storage built from scratch, with types, groups, spaces, limits and material warnings
 - [x] One storage with numbered spaces, swapping when full, and moving between spaces
 - [x] Reorder storages
+- [x] Add several storages at once, and remove all of them to start again
 - [x] Undo, and a warning when a spool wants hotter than a dryer gives
 - [x] Works with no signal
 - [x] CSV and JSON download
 - [x] Spool Reader: batch label reading, logo cropping, identify against stock
 - [x] Automatic logo lookup
 - [x] Black stickers with split and gradient colour boxes
+- [x] Firebase key moved to a repository secret and cleared from the history
+- [x] Square camera viewfinder that frames the QR code
 
 ## Check on first use
 
-- [ ] First run of both GitHub Actions workflows
+- [ ] Publish run with the `FIREBASE_API_KEY` secret, then sign in on the live site
+- [ ] First run of Build apps
+- [ ] Old `build-1` release and tag deleted
+- [ ] Older account's slots folded into one storage on the real data
 - [ ] Camera inside the APK
 - [ ] Sticker alignment on a test sheet
 - [ ] Stickers scanning once stuck to a spool
@@ -63,6 +70,8 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 
 ## Ideas
 
+- [ ] Names for spaces in a storage, such as Left and Right
+- [ ] Firebase App Check to cut down junk requests
 - [ ] Filament used per print, from printer history if a safe route exists
 - [ ] Thermal label printer output
 - [ ] NFC tags as a one tap alternative to QR
