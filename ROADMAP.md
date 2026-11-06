@@ -23,7 +23,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - Sticker QR codes hold the site address plus a code: `#s0012` for a spool, `#loc-top-shelf` for a storage.
 - The Scan page runs a live camera: scan a spool, then a storage. A phone's normal camera also works through the link.
 - A storage is one record with one sticker. `kind` picks the defaults from `STORE_TYPES`. `spaces` and `capacity` say whether spools sit in numbered spaces or loose, `group` keeps storages together, and `warn` lists materials to flag.
-- A spool in a storage with spaces also has a `slot`. Older accounts with one record per slot are folded into one storage once, on first load.
+- A spool in a storage with spaces also has a `slot`. In a loose storage it has a `pos`, which sets its order, and a moved-in spool goes to the end. Older accounts with one record per slot are folded into one storage once, on first load.
 - Spool Reader keeps its own list and hands spools over as a `spool-stock-import` JSON file. Spool Stock hands its stock back as a `spool-stock-list` file.
 - Print settings come from your own saved settings first, then the catalogue, then a typical table per material. Drying starts from that table, as the catalogue has none, unless `catalogue-extra.json` gives a value. Your edits are remembered per filament.
 - The catalogue lists manufacturers and their product names. It's fetched once and kept for offline use. Saved names join the list for that manufacturer. A filament's other names (`a`, one or a list) are searchable too. Searches treat HS as high speed, HF as high flow, CF as carbon fibre and GF as glass fibre.
@@ -43,6 +43,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Storage built from scratch, with types, groups, spaces, limits and material warnings
 - [x] One storage with numbered spaces, swapping when full, and moving between spaces
 - [x] Reorder storages
+- [x] Arrange the spools inside a storage: spaces for a unit or dryer, a set order for shelves and boxes
 - [x] Add several storages at once, and remove all of them to start again
 - [x] Undo, and a warning when a spool wants hotter than a dryer gives
 - [x] Works with no signal

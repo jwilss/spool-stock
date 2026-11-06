@@ -114,7 +114,21 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  await p.selectOption('#importLoc','rack-bottom');await p.click('[data-act=importGo]');await p.waitForSelector('.sheetmap');await p.waitForTimeout(200);
  db=await dbOf(p);const a1=Object.entries(db).filter(([k,v])=>k.includes('/spools/')&&v.brand==='Testbrand');
  ok(a1.length===2,'import adds both spools');ok(a1[0][1].nMin===250&&a1[0][1].bMax===100&&!!a1[0][1].hex,'label values kept, gaps filled typical');ok(a1[0][1].loc==='rack-bottom'&&a1[0][1].labelled===false,'filed and queued for stickers');
- ok(!!db[uid+'brands/testbrand'].logo,'logo imported');ok(db[uid+'config/main'].imported.includes(imp.batch),'import remembered');
+ ok(!!db[uid+'brands/testbrand'].logo,'logo imported');
+ // arranging a loose storage and a storage with spaces
+ const order=async()=>p.$$eval('#main .list .row .end .mono:first-child',e=>e.map(x=>x.textContent));
+ await p.evaluate(()=>{location.hash='loc-rack-bottom'});await p.waitForSelector('[data-act=arrStart]');const before=await order();
+ await p.click('[data-act=arrStart]');await p.waitForSelector('.arrange');await p.click('.arr[data-v="'+(before.length-1)+'"]');ok((await p.textContent('#arrHint')).includes(before[before.length-1]),'picking a spool says where to tap next');
+ await p.click('.arr[data-v="0"]');await p.waitForTimeout(100);let after=await order();ok(after[0]===before[before.length-1]&&after.length===before.length,'last spool moved to the front: '+before+' -> '+after);
+ await p.click('.arr[data-v="0"]');await p.click('.arr.end');await p.waitForTimeout(100);ok((await order()).join()===before.join(),'and back to the end');
+ await p.click('[data-act=arrDone]');ok(await p.$('.arrange')===null,'done closes arranging');
+ db=await dbOf(p);const rb=Object.values(db).filter(v=>v&&v.loc==='rack-bottom').map(v=>v.pos);ok(rb.every(x=>x>=1)&&new Set(rb).size===rb.length,'positions saved: '+rb);
+ await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('.racks');
+ const discs=await p.$$eval('[data-go="loc-rack-bottom"].shelf .disc',e=>e.length);ok(discs===before.length,'stock page preview follows the storage');
+ await p.evaluate(()=>{location.hash='loc-ams1-1'});await p.waitForSelector('[data-act=arrStart]');await p.click('[data-act=arrStart]');await p.waitForSelector('.arr');
+ db=await dbOf(p);const inA=Object.entries(db).filter(([k,v])=>k.includes('/spools/')&&v.loc==='ams1-1'),first=inA.find(([,v])=>v.slot===1);
+ await p.click('.arr[data-v="0"]');await p.screenshot({path:out+'/arrange-phone.png',fullPage:true});await p.click('.arr[data-v="3"]');await p.waitForTimeout(100);db=await dbOf(p);ok(db[first[0]].slot===4,'a spool moves to an empty space when arranging: '+db[first[0]].slot);
+ await p.click('[data-act=arrDone]');ok(db[uid+'config/main'].imported.includes(imp.batch),'import remembered');
  await p.evaluate(()=>{location.hash='import'});await p.waitForSelector('#importText');await p.fill('#importText',JSON.stringify(imp));await p.click('[data-act=importPaste]');await p.waitForSelector('[data-act=importGo]');
  ok((await p.textContent('#main')).includes('already imported'),'warns on a repeat import');await p.click('[data-act=importCancel]');
 

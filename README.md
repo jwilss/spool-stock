@@ -52,6 +52,8 @@ For each storage you can set:
 - Which materials to warn about before they go in
 - Where it sits in the list
 
+To change the order spools sit in, open a storage and press **Arrange**, then tap a spool and where it should go. The stock page follows that order.
+
 You can add several of the same at once, and **Remove all storages** in Setup starts you again without touching your spools.
 
 <br clear="right">

@@ -116,6 +116,13 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .spec dd{margin:0;font-family:var(--mono);font-size:15px}
 .movegroup{display:grid;gap:6px}
 .movegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px}
+.arrange{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:6px}
+.arr{display:grid;justify-items:center;gap:3px;padding:8px 4px 6px;background:var(--bg);border:1px solid var(--line);cursor:pointer;min-width:0;font:inherit}
+.arr small{font:500 12px/1.1 var(--mono);color:var(--muted)}
+.arr.empty{border-style:dashed}
+.arr.end{border-style:dashed;align-content:center;min-height:76px}
+.arr[aria-pressed="true"]{background:var(--tag);border-color:var(--tag-ink);color:var(--tag-ink)}
+.arr[aria-pressed="true"] small{color:inherit}
 .spacegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:6px}
 .move{min-height:52px;display:grid;gap:1px;align-content:center;justify-items:start;text-align:left;background:var(--bg);border:1px solid var(--line);padding:6px 9px;cursor:pointer;font-weight:600}
 .move small{font-weight:400;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
@@ -328,6 +335,9 @@ function seated(l){
   for(const s of rest){ const i=seats.indexOf(null); if(i>=0) seats[i]=s; }
   return seats;
 }
+/* Loose storages keep the order you arrange them in, by each spool's pos */
+const looseOrder = l => inLoc(l.id).sort((a,b)=>(a.pos??1e9)-(b.pos??1e9)||(a.addedAt??0)-(b.addedAt??0)||a.id.localeCompare(b.id));
+const nextPos = id => Math.max(0,...inLoc(id).map(s=>s.pos??0))+1;
 const freeSpaces = l => seated(l).flatMap((s,i)=>s?[]:[i+1]);
 const spaceOf = s => { const l=S.locs[s.loc]; return spaced(l)?seated(l).findIndex(x=>x&&x.id===s.id)+1||null:null; };
 const spotName = s => { const n=spaceOf(s); return locName(s.loc)+(n&&S.locs[s.loc].capacity>1?", space "+n:""); };
@@ -623,7 +633,7 @@ async function doMove(id,to,opts={}){
   const from=sp.loc||null, l=S.locs[to], other=opts.swap?S.spools[opts.swap]:null;
   if(from===to){ toast("Already in "+locName(to)); return; }
   const seat=!spaced(l)?null:other?spaceOf(other):freeSpaces(l)[0]??null, oldSeat=spaceOf(sp);
-  const patch={loc:to,slot:seat,status:"active",history:[{at:Date.now(),from,to},...(sp.history||[])].slice(0,30)};
+  const patch={loc:to,slot:seat,pos:spaced(l)?null:nextPos(to),status:"active",history:[{at:Date.now(),from,to},...(sp.history||[])].slice(0,30)};
   if(l&&l.kind==="dryer") patch.lastDried=Date.now();
   try{
     await col("spools").doc(id).update(patch);
@@ -709,6 +719,7 @@ function render(){
   });
   const m=$("#main");
   if(S.view!=="scan") Scanner.stop();
+  if(S.arrange&&(S.view!=="loc"||S.param!==S.arrange)){ S.arrange=null; S.arrSel=null; }
   if(!db){ m.innerHTML=!CFG.firebase?SOURCE_NOTE:!started?`<div class="busy"><span class="spin"></span>Starting up</div>`:vLogin(); return; }
   if(!S.ready&&S.loadErr){ m.innerHTML=`<div class="card"><h2>Can't open your stock</h2><p>${S.loadErr==="permission-denied"?"Firebase refused access. Open Firestore in the Firebase console, go to the Rules tab, paste in firestore.rules and press Publish, then reload this page.":"Firebase gave an error, so reload the page. If it keeps happening, note this code."}</p><p class="mono">${esc(S.loadErr)}</p></div>`; return; }
   if(!S.ready){ m.innerHTML=S.stale?`<div class="note warn">Can't reach your stock yet. Check your signal, it will load when it connects.</div>`:`<div class="busy"><span class="spin"></span>Opening your stock</div>`; return; }
@@ -734,7 +745,7 @@ function authMsg(e){
 }
 const authErr = e => { const n=$("#authErr"); if(n){ n.hidden=false; n.textContent=authMsg(e); } };
 function rackHTML(l){
-  const here=inLoc(l.id), head=`<h3><button class="rackname" data-go="loc-${l.id}">${esc(l.name)}</button><span class="mono">${here.length}${l.capacity?"/"+l.capacity:""}</span></h3>`;
+  const here=spaced(l)?inLoc(l.id):looseOrder(l), head=`<h3><button class="rackname" data-go="loc-${l.id}">${esc(l.name)}</button><span class="mono">${here.length}${l.capacity?"/"+l.capacity:""}</span></h3>`;
   if(spaced(l)){
     const n=l.capacity, cols=Math.min(n,n%4===0?4:5);
     return `<section class="rack">${head}<div class="slots" style="--n:${cols}">${seated(l).map((s,i)=>`<button class="slot ${s?"":"empty"}" data-go="${s?s.id:"loc-"+l.id}" aria-label="${esc(l.name)} space ${i+1}${s?", "+esc(s.material+" "+(s.colour||"")):", empty"}">${disc(s,40)}<small>${s?esc(s.id.toUpperCase()):i+1}</small></button>`).join("")}</div></section>`;
@@ -811,11 +822,17 @@ function vSpool(){
 function vLoc(){
   const l=S.locs[S.param];
   if(!l) return `<div class="card"><h2>That storage is gone</h2><div class="btns"><button class="btn" data-go="stock">Back to stock</button></div></div>`;
-  const here=inLoc(l.id), type=STORE_TYPES[l.kind]?.label||"Storage";
+  const type=STORE_TYPES[l.kind]?.label||"Storage", sp=spaced(l), here=sp?seated(l).filter(Boolean):looseOrder(l);
+  const arranging=S.arrange===l.id&&here.length>(sp?0:1);
+  const cells=sp?seated(l):[...here,null], sel=S.arrSel;
+  const grid=arranging?`<div class="card"><div class="cardhead"><h2>Arrange</h2><button class="btn sm go" data-act="arrDone">Done</button></div>
+    <p class="hint" id="arrHint">${sel?`Now tap where ${esc(sel.toUpperCase())} should go.`:sp?"Tap a spool, then the space it should go in.":"Tap a spool, then the spool it should go before, or the end."}</p>
+    <div class="arrange">${cells.map((s,i)=>s?`<button class="arr" data-act="arrPick" data-v="${i}" aria-pressed="${sel===s.id}" aria-label="${sp?"Space "+(i+1)+", ":""}${esc(s.id.toUpperCase()+" "+s.material+" "+(s.colour||""))}">${disc(s,40)}<small>${sp?(i+1)+" ":""}${esc(s.id.toUpperCase())}</small></button>`
+      :`<button class="arr ${sp?"empty":"end"}" data-act="arrPick" data-v="${i}" aria-label="${sp?"Space "+(i+1)+", empty":"End"}">${sp?disc(null,40)+`<small>${i+1}</small>`:"<small>End</small>"}</button>`).join("")}</div></div>`:"";
   return `<div><div class="code">${esc(type)}</div><h1>${esc(locName(l.id))}</h1></div>
-  ${spaced(l)&&l.capacity>1?rackHTML(l):""}
+  ${arranging?grid:sp&&l.capacity>1?rackHTML(l):""}
   <div class="list">${here.map(rowHTML).join("")||`<div class="card">Nothing in here. Scan a spool, then scan this storage's sticker to file it.</div>`}</div>
-  <div class="btns"><button class="btn" data-go="store-${l.id}">Edit storage</button><button class="btn" data-act="printLoc">Add sticker to queue</button></div>`;
+  <div class="btns">${here.length>(sp?0:1)&&!arranging?`<button class="btn" data-act="arrStart">Arrange</button>`:""}<button class="btn" data-go="store-${l.id}">Edit storage</button><button class="btn" data-act="printLoc">Add sticker to queue</button></div>`;
 }
 
 function vScan(){
@@ -1509,6 +1526,24 @@ const actions={
     const ls=orderedLocs(), i=ls.findIndex(l=>l.id===el.dataset.v), j=i+ +el.dataset.d; if(j<0||j>=ls.length) return;
     [ls[i],ls[j]]=[ls[j],ls[i]];
     ls.forEach((l,n)=>{ if(l.order!==n+1){ S.locs[l.id].order=n+1; col("locations").doc(l.id).update({order:n+1}); } });
+    render();
+  },
+  arrStart(){ S.arrange=S.param; S.arrSel=null; render(); },
+  arrDone(){ S.arrange=null; S.arrSel=null; render(); },
+  arrPick(el){
+    const l=S.locs[S.param], i=+el.dataset.v, sp=spaced(l), cells=sp?seated(l):looseOrder(l), at=cells[i];
+    if(!S.arrSel){ if(at){ S.arrSel=at.id; render(); } return; }
+    const id=S.arrSel; S.arrSel=null;
+    if(at&&at.id===id){ render(); return; }
+    if(sp){
+      const from=cells.findIndex(s=>s&&s.id===id);
+      col("spools").doc(id).update({slot:i+1}); S.spools[id].slot=i+1;
+      if(at){ col("spools").doc(at.id).update({slot:from+1}); S.spools[at.id].slot=from+1; }
+    } else {
+      const list=cells.filter(s=>s.id!==id), to=at?list.findIndex(s=>s.id===at.id):list.length;
+      list.splice(to,0,S.spools[id]);
+      list.forEach((s,n)=>{ if(s.pos!==n+1){ col("spools").doc(s.id).update({pos:n+1}); S.spools[s.id].pos=n+1; } });
+    }
     render();
   },
   spacePick(el){
