@@ -6,6 +6,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 
 - `site/`: the app. `index.html` holds nearly everything. `config.js` holds the addresses and Firebase details, with the API key added from a repository secret when the site publishes.
 - `site/catalogue.json`: the filament catalogue, built by `tools/build-catalogue.mjs` from SpoolmanDB.
+- `tools/catalogue-extra.json`: additions and corrections checked against manufacturers' own sites, applied every time the catalogue is built.
 - `reader/spool-reader.html`: copy of the Spool Reader artifact.
 - `wrappers/android/`: Capacitor shell around the site.
 - `wrappers/windows/`: Electron shell around the site.
@@ -24,7 +25,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - A storage is one record with one sticker. `kind` picks the defaults from `STORE_TYPES`. `spaces` and `capacity` say whether spools sit in numbered spaces or loose, `group` keeps storages together, and `warn` lists materials to flag.
 - A spool in a storage with spaces also has a `slot`. Older accounts with one record per slot are folded into one storage once, on first load.
 - Spool Reader keeps its own list and hands spools over as a `spool-stock-import` JSON file. Spool Stock hands its stock back as a `spool-stock-list` file.
-- Print settings come from your own saved settings first, then the catalogue, then a typical table per material. Drying always starts from that table, as the catalogue has none. Your edits are remembered per filament.
+- Print settings come from your own saved settings first, then the catalogue, then a typical table per material. Drying starts from that table, as the catalogue has none, unless `catalogue-extra.json` gives a value. Your edits are remembered per filament.
 - The catalogue lists manufacturers and their product names. It's fetched once and kept for offline use. Saved names join the list for that manufacturer. Searches treat HS as high speed, HF as high flow, CF as carbon fibre and GF as glass fibre.
 - `site.yml` rebuilds the catalogue from SpoolmanDB on every publish and once a week. If that fails, the committed copy is used.
 - Logos are found once and stored per manufacturer in your account: Simple Icons for exact vector matches, Wikimedia Commons as choices, or your own upload. All are turned solid black on transparent. No API keys.
