@@ -187,6 +187,13 @@ await p.evaluate(id=>{location.hash=id},picks[0]);await p.waitForSelector('.spoo
  await p.waitForSelector('[data-act=logSave]');ok((await p.textContent('#main')).includes('PLA, 7.8 g'),'dropping plain G-code anywhere opens it');
  const pick=await p.$eval('[data-lp="0"]',e=>e.value);db=await dbOf(p);const w0=db[uid+'spools/'+pick].remainG;await p.click('[data-act=logSave]');await p.waitForSelector('#toast button');await p.click('#toast button');await p.waitForTimeout(150);db=await dbOf(p);ok(db[uid+'spools/'+pick].remainG===w0,'undo puts the weight back');
 
+ // ring size follows a real 1 kg roll
+ const radius=await p.evaluate(()=>[1000,750,500,250,100,10,0,1200].map(g=>Math.round(rollR({remainG:g,netG:1000})*10)/10));
+ ok(radius[0]===47&&radius[7]===47&&radius[6]===24,'full is a 1 kg roll, empty is the core: '+radius);
+ ok((radius[0]-radius[1])/250<(radius[3]-radius[4])/150&&(radius[3]-radius[4])/150<(radius[4]-radius[6])/100,'shrinks slowly at first, then quickly: '+radius);
+ ok(radius[2]>(47+24)/2,'half a roll still looks more than half full: '+radius[2]);
+ ok(radius[5]>24,'a few grams still shows a sliver');
+
  // filament catalogue: find a manufacturer, then their own names
  await p.evaluate(()=>{location.hash='add'});await p.waitForSelector('#f_brand');await p.waitForFunction(()=>!!CAT);
  await p.fill('#f_brand','esu');await p.waitForSelector('#brandPick .pick');ok((await p.textContent('#brandPick')).includes('filaments'),'manufacturer search shows how many filaments');
