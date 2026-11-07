@@ -1507,7 +1507,8 @@ function ownedFilaments(){
 }
 const orcaName = f => `${f.brand} ${f.material} (Spool Stock)`.replace(/[\\/:*?"<>|]+/g,"-").replace(/\s+/g," ").trim();
 function orcaPreset(f){
-  const line=catLine(f.brand,f.material), v=lookup(f.brand,f.material), name=orcaName(f), own=false;
+  const line=catLine(f.brand,f.material), v=lookup(f.brand,f.material), name=orcaName(f);
+  if(line?.o) return {f,name:line.o.replace(/ @System$/,""),own:true};
   const base=orcaGenericFor(f.material,f.finish), useTemps=v.nMin!=null||v.bMin!=null;
   const p={type:"filament",name,from:"User",instantiation:"true",inherits:base,version:ORCA_VERSION,filament_settings_id:[name],filament_vendor:[f.brand]};
   const q=x=>[String(Math.round(x))];
@@ -1520,7 +1521,7 @@ function orcaPreset(f){
     for(const k of ["hot_plate_temp","textured_plate_temp","eng_plate_temp"]) Object.assign(p,{[k]:q(b),[k+"_initial_layer"]:q(b)});
   }
   if(line?.d) p.filament_density=[String(line.d)];
-  return {f,name,file:name+".json",text:JSON.stringify(p,null,4),base:base.replace(/ @System$/,""),own,useTemps};
+  return {f,name,file:name+".json",text:JSON.stringify(p,null,4),base:base.replace(/ @System$/,""),own:false,useTemps};
 }
 const CRC=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
 function makeZip(files){
@@ -1536,14 +1537,20 @@ function makeZip(files){
   return new Blob([...parts,...central,end],{type:"application/zip"});
 }
 const DESK = () => window.spoolStockDesktop?.orca;
+function orcaPlan(){
+  const all=ownedFilaments().map(orcaPreset), own=all.filter(x=>x.own), made=all.filter(x=>!x.own);
+  return {all,own,made,show:[...new Set(own.map(x=>x.name))]};
+}
 function orcaCard(){
-  const list=ownedFilaments().map(orcaPreset);
-  if(!list.length) return `<div class="card"><h2>Orca presets</h2><p>Add some spools first, then their filaments can go into Orca as presets.</p></div>`;
+  const {all,own,made}=orcaPlan();
+  if(!all.length) return `<div class="card"><h2>Orca presets</h2><p>Add some spools first, then their filaments can go into Orca.</p></div>`;
+  const row=x=>`<div><b>${esc(x.own?x.name:x.name)}</b><br><span class="muted">${x.own?"Orca's own profile, used as it is":`New preset on ${esc(x.base)}${x.useTemps?", with your temperatures":""}`}</span></div>`;
   return `<div class="card"><h2>Orca presets</h2>
-    <p>A preset for each of the ${list.length} filament${list.length===1?"":"s"} you own. Each builds on Orca's closest generic profile, such as Generic PETG or Generic PLA Silk, so flow, cooling and speed come from Orca. Nozzle and bed temperatures are the ones on your stickers.</p>
-    <div class="hist">${list.map(x=>`<div><b>${esc(x.name)}</b><br><span class="muted">Builds on ${esc(x.base)}${x.useTemps?", with your temperatures":""}</span></div>`).join("")}</div>
-    <div class="btns">${DESK()?`<button class="btn go" data-act="orcaSend">Send to Orca</button>`:""}<button class="btn ${DESK()?"":"go"}" data-act="orcaZip">Download for Orca</button></div>
-    <p class="hint">${DESK()?"Send to Orca puts them straight into Orca, then restart Orca. ":""}To import the download, in Orca use File, Import, Import Configs and choose the zip. Sending or importing again updates them.</p>
+    <p>${own.length?`Orca already has ${own.length} of your filament${own.length===1?"":"s"}, so its own profile${own.length===1?" is":"s are"} used. `:""}${made.length?`The other ${made.length} get${made.length===1?"s":""} a preset built on Orca's closest generic profile, with the nozzle and bed temperatures on your stickers.`:""}</p>
+    <div class="hist">${all.map(row).join("")}</div>
+    ${DESK()?`<label class="check"><input type="checkbox" id="orcaOnly" checked><span>Only list my filaments in Orca<br><span class="hint">Orca's filament list will show just these. Orca's settings are backed up first.</span></span></label>`:""}
+    <div class="btns">${DESK()?`<button class="btn go" data-act="orcaSend">Send to Orca</button><button class="btn" data-act="orcaRestore">Restore Orca's list</button>`:""}${made.length?`<button class="btn ${DESK()?"":"go"}" data-act="orcaZip">Download presets</button>`:""}</div>
+    <p class="hint">${DESK()?"Close Orca before sending, then open it again. ":""}${made.length?"To import the download, in Orca use File, Import, Import Configs and choose the zip. ":""}${own.length?`${DESK()?"Without the Windows app, ":""}tick Orca's own ones in Orca's filament list: ${own.map(x=>esc(x.name)).join(", ")}.`:""}</p>
   </div>`;
 }
 
@@ -1707,12 +1714,18 @@ const actions={
     ls.forEach((l,n)=>{ if(l.order!==n+1){ S.locs[l.id].order=n+1; col("locations").doc(l.id).update({order:n+1}); } });
     render();
   },
-  orcaZip(){ const list=ownedFilaments().map(orcaPreset); saveFile("spool-stock-orca-presets.zip",makeZip(list.map(x=>({name:x.file,text:x.text})))); },
+  orcaZip(){ const {made}=orcaPlan(); saveFile("spool-stock-orca-presets.zip",makeZip(made.map(x=>({name:x.file,text:x.text})))); },
   async orcaSend(){
-    const list=ownedFilaments().map(orcaPreset);
-    try{ const r=await DESK().write(list.map(x=>({name:x.file,text:x.text})));
-      if(r&&r.error) toast(r.error); else toast(`Sent ${r.written} preset${r.written===1?"":"s"} to Orca. Restart Orca to see them.`);
+    const {made,show}=orcaPlan(), only=$("#orcaOnly")?.checked;
+    try{
+      const r=await DESK().write(made.map(x=>({name:x.file,text:x.text})),only?{show}:{});
+      if(r&&r.error){ toast(r.error); return; }
+      const bits=[r.written?`${r.written} preset${r.written===1?"":"s"} sent`:"",r.shown!=null?`Orca's list set to your filaments`:""].filter(Boolean).join(" and ");
+      toast(`${bits||"Done"}. Open Orca to see them.${r.missing?.length?` Not found in Orca: ${r.missing.join(", ")}.`:""}`);
     }catch{ toast("Couldn't reach Orca from here."); }
+  },
+  async orcaRestore(){
+    try{ const r=await DESK().restore(); toast(r&&r.error?r.error:"Orca's filament list is back to how it was. Open Orca to see it."); }catch{ toast("Couldn't reach Orca from here."); }
   },
   logSave(){ const p=$("#lpPct"); if(p) LP.pct=p.value; saveLog(); },
   logCancel(){ LP=null; go("stock"); },

@@ -26,7 +26,7 @@ A filament inventory for home 3D printing, with printed QR stickers, phone scann
 - **Works offline:** changes save on the device and sync when you're back online.
 - **Low stock at a glance:** weigh a spool and it works out what's left.
 - **Log prints from Orca:** drop a sliced file on the app and it takes what each filament used off the right spools.
-- **Presets for Orca:** your filaments go into OrcaSlicer as presets, built on Orca's generic profiles, with your temperatures.
+- **Your filaments in Orca:** Orca's own profile where it has one, a preset with your temperatures where it doesn't, and Orca's list cut down to just your filaments.
 
 ## Storage
 
@@ -82,12 +82,14 @@ In Orca, use **Export plate sliced file**, then drop the file on Spool Stock (or
 
 ## Orca presets
 
-**Setup > Orca presets** makes a filament preset for each filament you own. Each preset builds on Orca's closest generic profile for the material, such as Generic PETG, Generic PETG HF or Generic PLA Silk, so flow, cooling and speed come from Orca. The nozzle and bed temperatures are the ones on your stickers.
+**Setup > Orca presets** gets every filament you own into OrcaSlicer.
 
-- **Windows app:** press **Send to Orca**, then restart Orca.
-- **Anywhere else:** press **Download for Orca**, then in Orca use **File > Import > Import Configs** and choose the zip.
+- **Orca already has it** (Bambu PLA Matte, eSUN PETG, SUNLU PLA+ and so on): Orca's own profile is used as it is.
+- **Orca doesn't:** a preset is made on Orca's closest generic profile, such as Generic PETG HF or Generic PLA Silk, with the nozzle and bed temperatures on your stickers. These show as "Brand Filament (Spool Stock)".
 
-They appear under your user presets as "Brand Filament (Spool Stock)". Sending or importing again updates them.
+In the Windows app, close Orca and press **Send to Orca**. It writes the new presets and, with **Only list my filaments in Orca** ticked, sets Orca's filament list to just your filaments. Orca's settings are backed up first, and **Restore Orca's list** puts the old list back.
+
+Without the Windows app, press **Download presets**, then in Orca use **File > Import > Import Configs** and choose the zip, and tick Orca's own ones in its filament list. Setup names them for you.
 
 ## Spool Reader
 
