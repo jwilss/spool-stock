@@ -68,6 +68,7 @@ status = {"print": {"command": "push_status", "gcode_state": "RUNNING", "mc_perc
                                                                 {"id": "2", "tray_type": "PETG", "tray_color": "F4F4F2FF", "remain": -1}]}]},
           "vt_tray": {"tray_type": "PLA", "tray_color": "00843DFF"}, "ams_mapping": [0, 2]}}
 def broker():
+    srv.accept()[0].close()  # the main-thread reachability check
     raw, _ = srv.accept()
     conn = sctx.wrap_socket(raw, server_side=True)
     t, body = read(conn)
@@ -93,14 +94,16 @@ threading.Thread(target=broker, daemon=True).start()
 spec = importlib.util.spec_from_file_location("probe", Path(__file__).resolve().parent.parent / "orca-plugin" / "probe" / "spoolstock_probe.py")
 probe = importlib.util.module_from_spec(spec); spec.loader.exec_module(probe)
 probe.MQTT_PORT = port
-probe.FTP_PORT = 1  # nothing listens: the job file check must fail quietly
+
 ok(len(registered) == 2, "registers a tab and a slicing step")
 page = registered[0]()
 html = page.get_ui()
 ok("Spool Stock Probe" in html and "window.orca" in html, "tab page builds")
 page.on_message({"type": "ready"})
 ok(page.sent[-1]["suggest"] == "127.0.0.1", "printer IP suggested from Orca's printer preset")
+probe.FTP_PORT = port + 1  # nothing listens there; the printer link must still start
 page.on_message({"type": "add", "name": "Betsy", "ip": "127.0.0.1", "serial": "", "code": "SECRET99"})
+ok("127.0.0.1" in probe._allowed, "printer reached once from the main thread before the link starts")
 for _ in range(50):
     time.sleep(0.2)
     if "request" in seen and probe._links.get("Betsy") and probe._links["Betsy"].last_sum.get("state") == "FINISH": break
@@ -128,5 +131,11 @@ ok(sl["grams"] == [12.5, 3.2] and "Landu Rapid PETG" in sl["config"]["filament_s
 conf = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "orca.conf"][0]["hints"]
 ok("access_code" in conf["sections"] and conf["access_code"]["keys"] == ["01P00A123"], "Orca's settings sections listed, keys only")
 ok(oct(os.stat(tmp / "OrcaSlicer" / "spoolstock-probe" / "printers.json").st_mode)[-3:] in ("600", "666"), "saved printers file is private")
+real = probe.socket.create_connection
+def blocked(*a, **k): raise PermissionError("Plugin attempted audited operation without permission")
+probe.socket.create_connection = blocked; probe._allowed.clear()
+note = probe.authorise("10.0.0.9")
+probe.socket.create_connection = real
+ok("Press Connect" in note and "10.0.0.9" not in probe._allowed, "a refused permission says to press Connect")
 probe.disconnect_all()
 sys.exit(0 if ok_all else 1)
