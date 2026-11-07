@@ -52,4 +52,4 @@ Pushing to `main` publishes the site through `.github/workflows/site.yml` (only 
 
 Done: the low-filament warning and Orca's theme (1.1.0), then the Stock view and live preset sync in the tab (1.2.0). Jack doesn't want a reorder or buy button.
 
-Waiting on Jack: plugin 1.2.0 on his real Orca. The preset sync follows Orca's own `sandboxes/orca_reload_local_bundle_demo.py`, but whether his 2.5 build has `orca.host.preset.bundles.reload_local` is unconfirmed. `presets.sync` in `spoolstock.log` gives `reload` as `live`, `restart` (the call isn't there) or `error` with the detail. If it's `restart`, the presets still load on the next start.
+Confirmed on his Orca (7 Nov 2026): `orca.host.preset.bundles.reload_local` exists, and the Spool Stock group loads live. A few Orca profile files are named differently from the preset inside (hyphen for slash), so the catalogue reads names from inside the files.

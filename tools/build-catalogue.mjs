@@ -160,10 +160,15 @@ async function walk(dir) {
   return out;
 }
 let linked = 0;
+// A file's name isn't always its preset's name: "Bambu Support For PLA-PETG @System.json" holds
+// "Bambu Support For PLA/PETG @System", so the name is read from inside the file. Keys are without " @System".
+const realName = new Map();
 if (orca) {
   const lib = path.join(orca, "resources", "profiles", "OrcaFilamentLibrary", "filament");
   for (const rel of await walk(lib)) {
-    const parts = rel.split(path.sep), name = parts.at(-1).replace(/\.json$/, "");
+    const parts = rel.split(path.sep), stem = parts.at(-1).replace(/\.json$/, "");
+    const name = await readFile(path.join(lib, rel), "utf8").then(t => JSON.parse(t).name).catch(() => null) || stem;
+    if (name !== stem) realName.set(stem.replace(/ @System$/, ""), name.replace(/ @System$/, ""));
     if (parts.length === 1) { if (name.startsWith("Generic ")) orcaInfo.generic.push(name); continue; }
     const vendor = parts[0], brand = ORCA_BRANDS[brandKey(vendor)] ?? Object.keys(brands).find(b => brandKey(b) === brandKey(vendor));
     if (!brand) continue;
@@ -184,9 +189,16 @@ if (orca) {
     all = execFileSync("git", ["-C", orca, "ls-tree", "-r", "--name-only", "HEAD", "--", "resources/profiles/BBL", "resources/profiles/OrcaFilamentLibrary"], {encoding: "utf8", maxBuffer: 64e6})
       .split("\n").filter(f => /\/filament\/.+\.json$/.test(f) && !/@base\.json$/.test(f)).map(f => f.split("/").pop().slice(0, -5));
   } catch (e) { console.warn("Couldn't list Orca's preset names: " + e.message); }
+  // Printer versions in Orca's BBL folder follow the same file naming, so the same correction applies to them
+  const fileStem = new Map([...realName].map(([f, r]) => [r, f]));
   const aliases = new Set(Object.values(brands).flat().map(l => l.o).filter(Boolean).map(o => o.replace(/ @System$/, "")));
   orcaInfo.variants = {};
-  for (const a of aliases) { const v = all.filter(n => n.startsWith(a + " @")); if (v.length) orcaInfo.variants[a] = v.sort(); }
+  for (const a of aliases) {
+    const f = fileStem.get(a) ?? a;
+    const v = all.filter(n => n.startsWith(f + " @")).map(n => a + n.slice(f.length));
+    if (v.length) orcaInfo.variants[a] = v.sort();
+  }
+  if (realName.size) console.log(`OrcaSlicer: ${realName.size} profiles named differently from their files, such as ${[...realName][0].join(" -> ")}`);
   console.log(`OrcaSlicer: ${Object.values(orcaInfo.variants).flat().length} preset names for ${Object.keys(orcaInfo.variants).length} filaments`);
   console.log(`OrcaSlicer: ${linked} filaments linked to Orca profiles, ${orcaInfo.generic.length} generic profiles`);
 }
