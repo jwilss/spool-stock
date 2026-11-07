@@ -17,6 +17,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - `orca-plugin/spoolstock/`: the OrcaSlicer 2.5 plugin that takes each print off the spools it used.
 - `orca-plugin/probe/`: the read-only test plugin used to find out what Orca and the printers report. Its README has what it found.
 - `SETUP.md`: first time setup.
+- `CLAUDE.md`: house rules, tests, publishing and agreed next steps, read automatically by Claude Code.
 
 ## How it fits together
 
