@@ -168,7 +168,8 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:40;background:var(--ink);color:var(--bg);padding:10px 12px;display:flex;gap:12px;align-items:center;max-width:calc(100% - 32px);width:max-content;font-weight:500}
 .toast button{background:none;border:1px solid currentColor;color:inherit;padding:4px 9px;cursor:pointer;font-weight:600}
 .modal{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.5);display:grid;place-items:center;padding:16px}
-.modal>div{background:var(--panel);border:1px solid var(--line);padding:16px;display:grid;gap:12px;max-width:440px;width:100%}
+.modal>div{background:var(--panel);border:1px solid var(--line);padding:16px;display:grid;gap:12px;max-width:440px;width:100%;min-width:0}
+.modal p{overflow-wrap:anywhere}
 .busy{display:flex;gap:10px;align-items:center;font-weight:600}
 .spin{width:18px;height:18px;border:3px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:s 1s linear infinite}
 @keyframes s{to{transform:rotate(360deg)}}
@@ -1739,6 +1740,14 @@ async function saveStore(){
 }
 
 /* ---------- modal + toast ---------- */
+/* Copy text. The Windows and Android apps refuse the newer clipboard call, so fall back to the older one. */
+async function copyText(t){
+  try{ await navigator.clipboard.writeText(t); return true; }catch{}
+  try{
+    const a=document.createElement("textarea"); a.value=t; a.setAttribute("readonly",""); a.style.cssText="position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
+    document.body.append(a); a.select(); const done=document.execCommand("copy"); a.remove(); return done;
+  }catch{ return false; }
+}
 let toastT=null;
 function toast(msg,label,fn){
   const t=$("#toast"); t.hidden=false; t.innerHTML=`<span>${esc(msg)}</span>`;
@@ -1763,7 +1772,7 @@ const actions={
   async pluginCode(){
     const u=firebase.auth().currentUser; if(!u) return;
     const code="SS1."+btoa(JSON.stringify({k:CFG.firebase.apiKey,p:CFG.firebase.projectId,u:u.uid,e:u.email,t:u.refreshToken}));
-    try{ await navigator.clipboard.writeText(code); toast("Sign-in code copied. Paste it into Orca's Spool Stock tab."); }catch{ ask("Copy this sign-in code",code,[["Done",null]]); }
+    if(await copyText(code)) toast("Sign-in code copied. Paste it into Orca's Spool Stock tab."); else ask("Copy this sign-in code",code,[["Done",null]]);
   },
   jobUndo(el){ undoJob(el.dataset.v); },
   logoClose(){ P=null; render(); },
@@ -1776,7 +1785,7 @@ const actions={
     for(const b of todo) if(await autoLogo(b.name)) n++;
     const left=todo.length-n; toast(left?`Found ${n}. ${left} still need one, so press Find logo on those.`:`Found ${n}.`); render();
   },
-  async listCopy(){ try{ await navigator.clipboard.writeText(stockExport()); toast("Stock list copied."); }catch{ toast("Couldn't copy here. Use Download instead."); } },
+  async listCopy(){ toast(await copyText(stockExport())?"Stock list copied.":"Couldn't copy here. Use Download instead."); },
   listSave(){ saveFile("spool-stock-list.json",stockExport()); },
   camStart(){ Scanner.start(); },
   camStop(){ Scanner.stop(); local.del("camOK"); },
