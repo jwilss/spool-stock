@@ -189,6 +189,9 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .typepick input:checked+span small{color:inherit}
 .typepick input:focus-visible+span{outline:2px solid var(--ink);outline-offset:2px}
 .hint{color:var(--muted);font-size:14px}
+.feedrow{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:10px}
+.feedrow .pair{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;align-items:end}
+.feedrow .btn{justify-self:start}
 .picks{max-height:264px;overflow:auto;margin-top:-8px;border:1px solid var(--line);border-top:0;background:var(--bg)}
 .pick{display:grid;gap:1px;width:100%;min-height:44px;padding:7px 10px;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);cursor:pointer}
 .pick:last-child{border-bottom:0}
@@ -306,7 +309,8 @@ const ago = t => {
 const when = t => new Date(t).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
 
 /* ---------- state ---------- */
-const S = {spools:{},locs:{},brands:{},profiles:{},settings:{},ready:0,view:"stock",param:null,filter:{q:"",mat:"",loc:"",tab:"active"},stale:false};
+const S = {spools:{},locs:{},printers:{},brands:{},profiles:{},settings:{},ready:0,view:"stock",param:null,filter:{q:"",mat:"",loc:"",tab:"active"},stale:false};
+let PF=null;
 let db=null, fs=null, uid=null, F=null, LF=null, crop=null, Imp=null;
 let internal=false, booted=false, started=false;
 const SOURCE_NOTE=`<div class="card"><h2>Almost set up</h2><p>Add your Firebase details to config.js, as described in SETUP.md, then reload.</p></div>`;
@@ -591,7 +595,7 @@ function watch(){
     upgradeStorages(seen);
     S.ready=1; dataChanged();
   },e=>{ clearTimeout(timer); S.loadErr=(e&&e.code)||"unknown"; if(S.ready) toast("Lost the link to your stock. Reload the page."); else render(); });
-  sub("spools","spools"); sub("locations","locs"); sub("brands","brands"); sub("profiles","profiles");
+  sub("spools","spools"); sub("locations","locs"); sub("brands","brands"); sub("profiles","profiles"); sub("printers","printers");
   db.doc("config/main").onSnapshot(d=>{ S.settings=d.exists?{...d.data()}:{}; if(!d.metadata.fromCache) configSeen=true; upgradeStorages(seen); dataChanged(); },()=>{});
 }
 /* Older accounts kept one storage per slot. Runs once and folds those into one storage with numbered spaces. */
@@ -623,7 +627,7 @@ function dataChanged(){
     if(!booted){ booted=true; route(true); return; }
     const el=document.activeElement;
     if(S.view==="scan") return;
-    if(["add","edit","setup","import","store","log"].includes(S.view)) { if(S.view==="setup"&&!(el&&el.closest&&el.closest("#main")&&el.matches("input,select,textarea"))) render(); return; }
+    if(["add","edit","setup","import","store","printer","log"].includes(S.view)) { if(S.view==="setup"&&!(el&&el.closest&&el.closest("#main")&&el.matches("input,select,textarea"))) render(); return; }
     if(el&&el.closest&&el.closest("#main")&&el.matches("input[type=text],input[type=number],input[type=search],textarea")) return;
     render();
   },60);
@@ -694,6 +698,30 @@ function handleScan(code,source){
 
 /* ---------- routing ---------- */
 const VIEWS=["stock","add","scan","stickers","setup","import","log"];
+/* ---------- printers: what feeds each one ---------- */
+const orderedPrinters = () => Object.values(S.printers).sort((a,b)=>(a.order??99)-(b.order??99)||a.name.localeCompare(b.name));
+const feedLabel = f => f.kind==="external"?"External spool":`AMS ${f.unit}`;
+const feedWhere = f => { const l=S.locs[f.loc]; if(!l) return "a removed storage"; return locName(l.id)+(f.kind==="external"&&spaced(l)&&l.capacity>1?`, space ${f.space||1}`:""); };
+/* Which printer feed a spool sits in, if any */
+function feedOf(s){
+  const l=S.locs[s.loc]; if(!l) return null;
+  for(const p of orderedPrinters()) for(const f of p.feeds||[]){
+    if(f.loc!==l.id) continue;
+    if(f.kind==="ams") return {printer:p,feed:f,label:`${p.name}, ${feedLabel(f)} tray ${spaceOf(s)||"?"}`};
+    if(!spaced(l)||(spaceOf(s)||1)===(f.space||1)) return {printer:p,feed:f,label:`${p.name}, external spool`};
+  }
+  return null;
+}
+/* The spool in a printer's tray, as the printer numbers them: AMS unit and tray from 0, or "external" */
+function trayToSpool(printer,unit,tray){
+  const p=typeof printer==="string"?Object.values(S.printers).find(x=>x.id===printer||x.serial===printer||x.name===printer):printer;
+  if(!p) return null;
+  const f=(p.feeds||[]).find(f=>unit==="external"?f.kind==="external":f.kind==="ams"&&f.unit===Number(unit)+1);
+  const l=f&&S.locs[f.loc]; if(!l) return null;
+  if(unit==="external") return spaced(l)?seated(l)[(f.space||1)-1]||null:looseOrder(l)[0]||null;
+  return spaced(l)?seated(l)[Number(tray)]||null:null;
+}
+window.SpoolStock={trayToSpool,feedOf};
 function go(v){
   internal=true;
   if(location.hash==="#"+v){ internal=false; route(false); return; }
@@ -707,6 +735,7 @@ function route(external){
   else if(h.startsWith("edit-")){ S.view="edit"; S.param=h.slice(5); }
   else if(h.startsWith("loc-")){ S.view="loc"; S.param=h.slice(4); }
   else if(h.startsWith("store-")){ S.view="store"; S.param=h.slice(6); storeDraft(S.param); }
+  else if(h.startsWith("printer-")){ S.view="printer"; S.param=h.slice(8); printerDraft(S.param); }
   else if(VIEWS.includes(h)){ S.view=h; S.param=null; }
   else { S.view="stock"; S.param=null; }
   if(S.view==="add"&&!F) newDraft();
@@ -736,7 +765,7 @@ function render(){
   if(!db){ m.innerHTML=!CFG.firebase?SOURCE_NOTE:!started?`<div class="busy"><span class="spin"></span>Starting up</div>`:vLogin(); return; }
   if(!S.ready&&S.loadErr){ m.innerHTML=`<div class="card"><h2>Can't open your stock</h2><p>${S.loadErr==="permission-denied"?"Firebase refused access. Open Firestore in the Firebase console, go to the Rules tab, paste in firestore.rules and press Publish, then reload this page.":"Firebase gave an error, so reload the page. If it keeps happening, note this code."}</p><p class="mono">${esc(S.loadErr)}</p></div>`; return; }
   if(!S.ready){ m.innerHTML=S.stale?`<div class="note warn">Can't reach your stock yet. Check your signal, it will load when it connects.</div>`:`<div class="busy"><span class="spin"></span>Opening your stock</div>`; return; }
-  const v={stock:vStock,add:vForm,edit:vForm,scan:vScan,stickers:vStickers,setup:vSetup,spool:vSpool,loc:vLoc,store:vStore,import:vImport,log:vLog}[S.view]||vStock;
+  const v={stock:vStock,add:vForm,edit:vForm,scan:vScan,stickers:vStickers,setup:vSetup,spool:vSpool,loc:vLoc,store:vStore,printer:vPrinter,import:vImport,log:vLog}[S.view]||vStock;
   m.innerHTML=(!navigator.onLine?`<div class="note warn">No signal. Changes are kept on this device and sync when you're back.</div>`:S.stale?`<div class="note warn">Showing your last saved copy. It may be out of date.</div>`:"")+v();
   if(S.view==="scan") Scanner.attach();
   if(S.view==="add"||S.view==="edit") formPreview();
@@ -803,6 +832,7 @@ function vSpool(){
   const spaces=spaced(inside)&&inside.capacity>1?`<div class="movegroup"><div class="lab">Space in ${esc(inside.name)}</div><div class="spacegrid">${seated(inside).map((o,i)=>{const me=o&&o.id===s.id;return `<button class="move" data-act="spacePick" data-v="${i+1}" aria-label="Space ${i+1}" ${me?'aria-current="true"':""}><span>${i+1}</span><small>${me?"Here":o?esc(o.id.toUpperCase()):"Free"}</small></button>`;}).join("")}</div></div>`:"";
   const hist=(s.history||[]).slice(0,6).map(h=>`<div>${when(h.at)}: ${esc(locName(h.from))} to ${esc(locName(h.to))}</div>`).join("");
   return `<div class="spoolhead">${disc(s,84)}<div style="min-width:0"><div class="code">${esc(s.id.toUpperCase())}${s.status==="used"?' <span class="pill ex">Used up</span>':""}</div><h1>${esc(s.material)}</h1><div>${esc(s.brand)}${s.colour?", "+esc(s.colour):""}${s.finish?", "+esc(s.finish):""}</div></div></div>
+  ${(()=>{const fd=feedOf(s);return fd?`<div class="note">Feeding ${esc(fd.label)}</div>`:"";})()}
   ${scanned?`<div class="note"><b>Scanned.</b> Tap a storage below, or scan a storage sticker in the next 5 minutes to file it there.</div>`:""}
   <div class="card"><h2>Move to</h2>${spaces}${moves||`<div class="btns"><button class="btn" data-go="store-new">Add a storage first</button></div>`}</div>
   <div class="split">
@@ -843,7 +873,8 @@ function vLoc(){
     <p class="hint" id="arrHint">${sel?`Now tap where ${esc(sel.toUpperCase())} should go.`:sp?"Tap a spool, then the space it should go in.":"Tap a spool, then the spool it should go before, or the end."}</p>
     <div class="arrange">${cells.map((s,i)=>s?`<button class="arr" data-act="arrPick" data-v="${i}" aria-pressed="${sel===s.id}" aria-label="${sp?"Space "+(i+1)+", ":""}${esc(s.id.toUpperCase()+" "+s.material+" "+(s.colour||""))}">${disc(s,40)}<small>${sp?(i+1)+" ":""}${esc(s.id.toUpperCase())}</small></button>`
       :`<button class="arr ${sp?"empty":"end"}" data-act="arrPick" data-v="${i}" aria-label="${sp?"Space "+(i+1)+", empty":"End"}">${sp?disc(null,40)+`<small>${i+1}</small>`:"<small>End</small>"}</button>`).join("")}</div></div>`:"";
-  return `<div><div class="code">${esc(type)}</div><h1>${esc(locName(l.id))}</h1></div>
+  const feeds=orderedPrinters().flatMap(p=>(p.feeds||[]).filter(f=>f.loc===l.id).map(f=>`${esc(p.name)} (${esc(feedLabel(f))}${f.kind==="external"&&spaced(l)&&l.capacity>1?`, space ${f.space||1}`:""})`));
+  return `<div><div class="code">${esc(type)}</div><h1>${esc(locName(l.id))}</h1>${feeds.length?`<p class="muted">Feeds ${feeds.join(" and ")}</p>`:""}</div>
   ${arranging?grid:sp&&l.capacity>1?rackHTML(l):""}
   <div class="list">${here.map(rowHTML).join("")||`<div class="card">Nothing in here. Scan a spool, then scan this storage's sticker to file it.</div>`}</div>
   <div class="btns">${here.length>(sp?0:1)&&!arranging?`<button class="btn" data-act="arrStart">Arrange</button>`:""}<button class="btn" data-go="store-${l.id}">Edit storage</button><button class="btn" data-act="printLoc">Add sticker to queue</button></div>`;
@@ -1367,6 +1398,9 @@ function vSetup(){
     ${rows||"<p>Nothing set up yet. Add each place you keep filament.</p>"}
     ${rows?`<div class="btns"><button class="btn" data-act="printAllLocs">Queue all storage stickers</button><button class="btn bad" data-act="storesClear">Remove all storages</button></div>`:""}
   </div>
+  <div class="card"><div class="cardhead"><h2>Printers</h2><button class="btn sm go" data-go="printer-new">Add printer</button></div>
+    ${orderedPrinters().map(p=>`<div class="storerow" style="grid-template-columns:minmax(0,1fr) auto"><span style="min-width:0"><b>${esc(p.name)}</b><span class="sub">${(p.feeds||[]).map(f=>`${esc(feedLabel(f))}: ${esc(feedWhere(f))}`).join("; ")||"Nothing feeds it yet"}</span></span><button class="btn sm" data-go="printer-${p.id}" aria-label="Edit ${esc(p.name)}">Edit</button></div>`).join("")||"<p>Add your printers and say which storage feeds each one, so prints can be matched to spools.</p>"}
+  </div>
   <div class="card"><h2>Manufacturers and logos</h2>
     ${bs.length?`<div class="btns"><button class="btn go" data-act="logosAll">Find missing logos</button></div>`:""}
     ${bs.map(b=>{const l=logoData(b);return `<div class="brandrow">${l?`<img class="logo" src="${esc(l.src)}" alt="${esc(b.name)} logo">`:`<span class="logo" style="display:grid;place-items:center;width:64px;color:#000;font-size:12px">No logo</span>`}<span style="min-width:0"><b>${esc(b.name)}</b>${b.logoFrom?`<br>${esc(b.logoFrom)}`:""}</span><button class="btn sm" data-act="logoFind" data-v="${esc(b.name)}">${l?"Change":"Find logo"}</button></div>`;}).join("")||"<p>Manufacturers appear here when you add a spool.</p>"}
@@ -1554,6 +1588,67 @@ function orcaCard(){
   </div>`;
 }
 
+/* printer editor */
+function printerDraft(id){
+  if(PF&&PF.id===id) return;
+  if(id==="new"){ PF={id,name:"",serial:"",feeds:[]}; return; }
+  const p=S.printers[id];
+  PF=p?{id,name:p.name,serial:p.serial||"",feeds:(p.feeds||[]).map(f=>({...f}))}:null;
+}
+function readPrinter(){
+  const n=$("#p_name"), sn=$("#p_serial"); if(n) PF.name=n.value; if(sn) PF.serial=sn.value;
+  PF.feeds.forEach((f,i)=>{ const u=$(`#pf_unit_${i}`), l=$(`#pf_loc_${i}`), sp=$(`#pf_space_${i}`);
+    if(u) f.unit=+u.value; if(l) f.loc=l.value; if(sp) f.space=+sp.value; });
+}
+function vPrinter(){
+  if(!PF) return `<div class="card"><h2>That printer is gone</h2><div class="btns"><button class="btn" data-go="setup">Back to Setup</button></div></div>`;
+  const isNew=PF.id==="new", spacedLocs=orderedLocs().filter(spaced), allLocs=orderedLocs();
+  const opt=(ls,sel)=>`<option value="">Choose a storage</option>`+ls.map(l=>`<option value="${l.id}" ${sel===l.id?"selected":""}>${esc(locName(l.id))}${spaced(l)?` (${l.capacity} space${l.capacity===1?"":"s"})`:""}</option>`).join("");
+  const rows=PF.feeds.map((f,i)=>{
+    const l=S.locs[f.loc];
+    if(f.kind==="ams") return `<div class="feedrow"><div class="pair">
+      <label class="field"><span>On the printer</span><select id="pf_unit_${i}">${[1,2,3,4].map(n=>`<option value="${n}" ${f.unit===n?"selected":""}>AMS ${n}</option>`).join("")}</select></label>
+      <label class="field"><span>Is this storage</span><select id="pf_loc_${i}">${opt(spacedLocs,f.loc)}</select></label></div>
+      <button type="button" class="btn sm" data-act="pfDrop" data-v="${i}">Remove</button>
+      ${l&&l.capacity!==4?`<p class="hint">An AMS has 4 trays, and this storage has ${l.capacity} space${l.capacity===1?"":"s"}. Tray 1 matches space 1 and so on.</p>`:""}</div>`;
+    return `<div class="feedrow"><div class="pair">
+      ${l&&spaced(l)&&l.capacity>1?`<label class="field"><span>Space</span><select id="pf_space_${i}">${Array.from({length:l.capacity},(_,n)=>`<option value="${n+1}" ${(f.space||1)===n+1?"selected":""}>Space ${n+1}</option>`).join("")}</select></label>`:`<label class="field"><span>Feed</span><input type="text" value="External" disabled></label>`}
+      <label class="field"><span>External spool comes from</span><select id="pf_loc_${i}">${opt(allLocs,f.loc)}</select></label></div>
+      <button type="button" class="btn sm" data-act="pfDrop" data-v="${i}">Remove</button></div>`;
+  }).join("");
+  const hasExt=PF.feeds.some(f=>f.kind==="external");
+  return `<div><h1>${isNew?"Add a printer":"Edit "+esc(S.printers[PF.id]?.name||"printer")}</h1></div>
+  <form class="card" id="printerForm">
+    <label class="field"><span>Name</span><input type="text" id="p_name" value="${esc(PF.name)}" placeholder="Printer 1" required></label>
+    <label class="field"><span>Serial number</span><input type="text" id="p_serial" value="${esc(PF.serial)}" autocomplete="off" autocapitalize="characters" placeholder="Optional"><span class="hint">On the printer under Settings, Device. The Orca plugin uses it to tell your printers apart, and can show it for you.</span></label>
+    <h3>What feeds it</h3>
+    <p class="hint">AMS 1 is the first unit on the printer. Its trays match the storage's spaces in order, so tray 1 is space 1.</p>
+    ${rows||`<p class="muted">Nothing yet.</p>`}
+    <div class="btns"><button type="button" class="btn sm" data-act="pfAms">Add an AMS</button>${hasExt?"":`<button type="button" class="btn sm" data-act="pfExt">Add the external spool</button>`}</div>
+    <div class="btns"><button class="btn go" type="submit">${isNew?"Add printer":"Save changes"}</button><button type="button" class="btn" data-act="pfCancel">Cancel</button>${isNew?"":`<button type="button" class="btn bad" data-act="pfDel">Delete</button>`}</div>
+  </form>`;
+}
+async function savePrinter(){
+  readPrinter();
+  const name=PF.name.trim(), serial=PF.serial.trim().toUpperCase().replace(/\s+/g,"");
+  if(!name){ toast("Give the printer a name."); return; }
+  const feeds=PF.feeds.map(f=>f.kind==="ams"?{kind:"ams",unit:f.unit||1,loc:f.loc||""}:{kind:"external",loc:f.loc||"",space:f.space||1});
+  if(feeds.some(f=>!f.loc)){ toast("Choose a storage for each feed, or remove it."); return; }
+  const units=feeds.filter(f=>f.kind==="ams").map(f=>f.unit);
+  if(new Set(units).size!==units.length){ toast("Each AMS number can only be used once."); return; }
+  const locs=feeds.filter(f=>f.kind==="ams").map(f=>f.loc);
+  if(new Set(locs).size!==locs.length){ toast("Each storage can only be one AMS."); return; }
+  const other=orderedPrinters().find(p=>p.id!==PF.id&&serial&&p.serial===serial);
+  if(other){ toast(`${other.name} already has that serial number.`); return; }
+  const body={name,serial,feeds};
+  if(PF.id==="new"){
+    let id=slug(name)||"printer", n=2; while(S.printers[id]) id=slug(name)+"-"+n++;
+    body.order=Math.max(0,...Object.values(S.printers).map(p=>p.order??0))+1;
+    S.printers[id]={...body,id}; col("printers").doc(id).set(body);
+  } else { S.printers[PF.id]={...S.printers[PF.id],...body}; col("printers").doc(PF.id).update(body); }
+  toast(`${name} saved.`); PF=null; go("setup");
+}
+
 /* storage editor */
 function storeDefaults(kind){ const t=STORE_TYPES[kind]; return {kind,spaces:t.spaces,capacity:t.cap??"",warn:t.warn||""}; }
 function storeDraft(id){
@@ -1701,6 +1796,11 @@ const actions={
   },
   catColour(el){ const c=catLine(F.brand,F.material)?.c[+el.dataset.v]; if(c) useColour(c); },
   storeCancel(){ LF=null; go("setup"); },
+  pfAms(){ readPrinter(); const used=PF.feeds.filter(f=>f.kind==="ams").map(f=>f.unit); PF.feeds.push({kind:"ams",unit:[1,2,3,4].find(n=>!used.includes(n))||1,loc:""}); render(); },
+  pfExt(){ readPrinter(); PF.feeds.push({kind:"external",loc:"",space:1}); render(); },
+  pfDrop(el){ readPrinter(); PF.feeds.splice(+el.dataset.v,1); render(); },
+  pfCancel(){ PF=null; go("setup"); },
+  pfDel(){ const p=S.printers[PF.id]; ask(`Delete ${p.name}?`,"Your storages and spools aren't touched.",[["Delete",async()=>{ await col("printers").doc(p.id).delete(); delete S.printers[p.id]; PF=null; toast(p.name+" deleted."); go("setup"); },"bad"],["Cancel",null]]); },
   storeDel(){
     const l=S.locs[LF.id], here=inLoc(l.id);
     ask(`Delete ${l.name}?`,here.length?`${here.length} spool${here.length===1?"":"s"} in it will have no storage set. Its sticker stops working.`:"Its sticker stops working.",[["Delete",async()=>{ for(const s of here) await col("spools").doc(s.id).update({loc:null,slot:null}); await col("locations").doc(l.id).delete(); LF=null; toast(l.name+" deleted."); go("setup"); },"bad"],["Cancel",null]]);
@@ -1782,6 +1882,7 @@ document.addEventListener("change",async e=>{
   if(t.id&&t.id.startsWith("cu_")){ const st=S.settings.sheet||{}, c={...(st.custom||{})}; c[t.id.slice(3)]=num(t.value)||0; await saveConfig({sheet:{...st,custom:c}}); render(); return; }
   if(t.id==="nudgeX"||t.id==="nudgeY"){ const st=S.settings.sheet||{}; await saveConfig({sheet:{...st,[t.id==="nudgeX"?"nx":"ny"]:num(t.value)||0}}); return; }
   if(t.id==="outline"){ Q.outline=t.checked; return; }
+  if(t.id&&/^pf_loc_\d+$/.test(t.id)&&PF){ readPrinter(); render(); return; }
   if(t.name==="s_kind"){ readStore(); Object.assign(LF,storeDefaults(t.value)); render(); return; }
   if(t.id==="s_spaces"){ readStore(); render(); return; }
   if(t.id==="pickScan"&&t.files[0]){
@@ -1843,6 +1944,7 @@ document.addEventListener("submit",async e=>{
   e.preventDefault();
   if(e.target.id==="spoolForm") submitForm();
   if(e.target.id==="storeForm") saveStore();
+  if(e.target.id==="printerForm") savePrinter();
   if(e.target.id==="authForm"){ try{ await firebase.auth().signInWithEmailAndPassword($("#authEmail").value.trim(),$("#authPass").value); }catch(x){ authErr(x); } }
 });
 for(const ev of ["online","offline"]) addEventListener(ev,()=>{ if(db&&!["add","edit","scan","setup","store"].includes(S.view)) render(); });

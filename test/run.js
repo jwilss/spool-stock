@@ -168,6 +168,20 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
 
  }
 
+ // printers and what feeds them
+ await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-go="printer-new"]');await p.click('[data-go="printer-new"]');await p.waitForSelector('#p_name');
+ await p.fill('#p_name','Betsy');await p.fill('#p_serial','01p00c590901414');await p.click('[data-act=pfAms]');await p.selectOption('#pf_loc_0','ams1-1');await p.click('[data-act=pfAms]');
+ ok(await p.inputValue('#pf_unit_1')==='2','second AMS defaults to AMS 2');await p.selectOption('#pf_loc_1','unit-1');await p.screenshot({path:out+'/printer-phone.png',fullPage:true});await p.click('#printerForm [type=submit]');await p.waitForSelector('[data-go="printer-new"]');
+ await p.click('[data-go="printer-new"]');await p.waitForSelector('#p_name');await p.fill('#p_name','Alduin');await p.click('[data-act=pfExt]');await p.selectOption('#pf_loc_0','dryer');await p.waitForSelector('#pf_space_0');await p.selectOption('#pf_space_0','1');
+ ok(!(await p.$('[data-act=pfExt]')),'only one external spool per printer');await p.fill('#p_serial','01P00C590901414');await p.click('#printerForm [type=submit]');await p.waitForFunction(()=>/already has that serial/.test(document.querySelector('#toast').textContent));ok(true,'two printers cannot share a serial');
+ await p.fill('#p_serial','01P00C530900757');await p.click('#printerForm [type=submit]');await p.waitForSelector('[data-go="printer-new"]');await p.waitForTimeout(100);
+ db=await dbOf(p);ok(db[uid+'printers/betsy'].serial==='01P00C590901414'&&db[uid+'printers/betsy'].feeds.map(f=>f.kind+f.unit+f.loc).join()==='ams1ams1-1,ams2unit-1'&&db[uid+'printers/alduin'].feeds[0].loc==='dryer'&&db[uid+'printers/alduin'].feeds[0].space===1,'printers saved with their feeds');
+ ok((await p.textContent('#main')).includes('AMS 2: Printer A Unit 1'),'Setup lists what feeds each printer');
+ const tray=await p.evaluate(()=>{const l=S.locs['ams1-1'],u=S.locs['unit-1'];return {a:SpoolStock.trayToSpool('01P00C590901414',0,0)?.id||null,want:seated(l)[0]?.id||null,b:SpoolStock.trayToSpool('Betsy',1,2)?.id||null,wantb:seated(u)[2]?.id||null,ext:SpoolStock.trayToSpool('Alduin','external')?.id||null,wantext:seated(S.locs.dryer)[0]?.id||null,none:SpoolStock.trayToSpool('Betsy',3,0)}});
+ ok(tray.a===tray.want&&tray.b===tray.wantb&&tray.ext===tray.wantext&&tray.none===null,'printer trays map to the spools in those spaces: '+JSON.stringify(tray));
+ await p.evaluate(()=>{location.hash='loc-unit-1'});await p.waitForSelector('[data-go="store-unit-1"]');ok((await p.textContent('#main')).includes('Feeds Betsy (AMS 2)'),'storage page says which printer it feeds');
+ if(tray.b){await p.evaluate(id=>{location.hash=id},tray.b);await p.waitForSelector('.spoolhead');ok((await p.textContent('#main')).includes('Feeding Betsy, AMS 2 tray 3'),'spool page says which printer tray it feeds');}
+
  // logging a print from an Orca sliced file
  const F3=__dirname+'/fixtures/';
  await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('[data-go=log]');await p.click('[data-go=log]');await p.waitForSelector('label[for=pickPrint]');
@@ -252,7 +266,7 @@ await p.evaluate(id=>{location.hash=id},picks[0]);await p.waitForSelector('.spoo
  const list=JSON.parse(fs.readFileSync(out+'/spool-stock-list.json'));ok(list.format==='spool-stock-list'&&list.spools.length>=8&&list.spools[0].storage!==undefined,'stock list downloads');
 
  // removing everything to start again
- await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=storesClear]');await p.click('[data-act=storesClear]');await p.waitForSelector('#modal:not([hidden])');await p.click('#askBtns .bad');await p.waitForFunction(()=>!document.querySelector('.storerow'));await p.waitForTimeout(150);
+ await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=storesClear]');await p.click('[data-act=storesClear]');await p.waitForSelector('#modal:not([hidden])');await p.click('#askBtns .bad');await p.waitForFunction(()=>!document.querySelector('[data-act=storeShift]'));await p.waitForTimeout(150);
  db=await dbOf(p);ok(stores(db).length===0&&!Object.values(db).some(v=>v.loc),'remove all clears storages and keeps the spools');
 
  // sign out and the Android app's limits

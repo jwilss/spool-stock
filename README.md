@@ -62,6 +62,10 @@ You can add several of the same at once, and **Remove all storages** in Setup st
 
 <br clear="right">
 
+## Printers
+
+Under **Setup > Printers**, add each printer and say what feeds it: an AMS on the printer (AMS 1 is its first unit) linked to one of your storages, and the external spool linked to a storage and space. Tray 1 of an AMS matches space 1 of its storage, and so on. A spool's page then says which printer tray it's feeding, and a storage's page says which printer it feeds. The serial number lets the Orca plugin tell your printers apart.
+
 ## Stickers
 
 Everything prints in black except the colour box, so the only colour on the sticker is the filament's own.
