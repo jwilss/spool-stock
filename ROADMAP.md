@@ -31,6 +31,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - `site.yml` rebuilds the catalogue from SpoolmanDB, the Open Filament Database and OrcaSlicer's filament library on every publish and once a week. If that fails, the committed copy is used.
 - The Open Filament Database (MIT) is merged in for every brand. Where a filament matches by name, its manufacturer ranges, drying, spool weight and colours fill in what SpoolmanDB has. Filaments and manufacturers SpoolmanDB lacks are added. Names are matched on their words, so CF and carbon fiber, or a missing "(NFC)", still match. That gives about 195 manufacturers and 2,200 filaments. `catalogue-extra.json` is applied last, so hand checked values win.
 - Logos are found once and stored per manufacturer in your account: Simple Icons for exact vector matches, Wikimedia Commons as choices, or your own upload. All are turned solid black on transparent. No API keys.
+- Spool rings are sized like a real 1 kg roll: the filament left is the area between the core and the outside, so a ring shrinks slowly at first and quickly near the core. Anything over 1 kg draws as full.
 - Stickers are black except for the colour box: solid, triangles for split colours, or a left to right blend for gradients.
 - The Firebase key isn't in the repo or its history. Browsers still need it, so it can be read in `config.js` on the live site. The key is restricted to Firebase services, sign-ups are off, and `firestore.rules` protects the data.
 

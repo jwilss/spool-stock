@@ -363,8 +363,16 @@ const pct = s => s.netG ? clamp((s.remainG??s.netG)/s.netG,0,1) : 1;
 const isLow = s => (s.remainG??s.netG??9999) <= LOW_G;
 
 let discId=0;
+/* Ring size follows a real 1 kg roll: what's left is the area between the core and the outside,
+   so the ring shrinks slowly at first and quickly near the core. */
+const FULL_G = 1000, CORE_R = 24, ROLL_R = 47;
+function rollR(s){
+  const g=Math.max(0,s.remainG??s.netG??FULL_G), f=Math.min(1,g/FULL_G);
+  const r=Math.sqrt(CORE_R*CORE_R+f*(ROLL_R*ROLL_R-CORE_R*CORE_R));
+  return g>0?Math.max(r,CORE_R+1.5):CORE_R;
+}
 function disc(s,size=44){
-  const r = s ? 24 + 23*Math.max(pct(s),.06) : 0;
+  const r = s ? rollR(s) : 0;
   let fill="", def="";
   if(s){
     const c=colourList(s), pat=patternOf(s); fill=c[0];
