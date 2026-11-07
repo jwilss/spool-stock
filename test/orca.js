@@ -1,5 +1,5 @@
 // Checks the Windows app's Orca bridge. Run: node test/orca.js
-const {writePresets, check} = require("../wrappers/windows/orca.js");
+const {writePresets, restoreList, check} = require("../wrappers/windows/orca.js");
 const fs = require("fs"), os = require("os"), path = require("path");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "orca"));
 const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) process.exitCode = 1; };
@@ -17,3 +17,26 @@ r = writePresets(tmp, [good]);
 ok(r.dir.endsWith(path.join("user", "default", "filament")), "ignores an odd folder name");
 ok(!!check({name: "../x.json", text: good.text}), "refuses paths that leave the folder");
 ok(!!check({name: "x.json", text: good.text}), "file name must match the preset name");
+
+// Orca's filament list: only your filaments, with a backup and restore
+const base = path.join(tmp, "OrcaSlicer"), crypto = require("crypto");
+const sys = (rel, name) => { const d = path.join(base, "system", rel); fs.mkdirSync(d, {recursive: true}); fs.writeFileSync(path.join(d, name + ".json"), "{}"); };
+sys("BBL/filament", "Bambu PLA Matte @BBL X1C"); sys("BBL/filament", "Bambu PLA Matte @BBL A1"); sys("BBL/filament", "Bambu PLA Matte @base");
+sys("BBL/filament", "Bambu PLA Matte Plus @BBL X1C"); sys("OrcaFilamentLibrary/filament/eSUN", "eSUN PETG @System");
+const confBody = JSON.stringify({app: {preset_folder: "default"}, filaments: {"Generic PLA": "true", "Bambu ABS @BBL X1C": "true"}}, null, 4);
+fs.writeFileSync(path.join(base, "OrcaSlicer.conf"), confBody + "\n# MD5 checksum ABC\n");
+ok(writePresets(tmp, [good], {show: ["eSUN PETG"]}, () => true).error.includes("Close Orca"), "asks you to close Orca before changing its list");
+r = writePresets(tmp, [good], {show: ["Bambu PLA Matte", "eSUN PETG", "Polymaker Nothing"]}, () => false);
+const text = fs.readFileSync(path.join(base, "OrcaSlicer.conf"), "utf8"), json = JSON.parse(text.slice(0, text.lastIndexOf("}") + 1));
+ok(JSON.stringify(Object.keys(json.filaments).sort()) === JSON.stringify(["Bambu PLA Matte @BBL A1", "Bambu PLA Matte @BBL X1C", "eSUN PETG @System"]), "list holds every installed variant of your filaments only: " + Object.keys(json.filaments));
+ok(json.app.preset_folder === "default", "the rest of Orca's settings are kept");
+const body = text.slice(0, text.lastIndexOf("}") + 1);
+ok(text.endsWith("# MD5 checksum " + crypto.createHash("md5").update(body).digest("hex").toUpperCase() + "\n"), "checksum line matches, as Orca writes it");
+ok(r.missing.length === 1 && r.missing[0] === "Polymaker Nothing" && r.written === 1, "reports filaments Orca doesn't have");
+ok(fs.readFileSync(path.join(base, "OrcaSlicer.conf.spoolstock.bak"), "utf8").includes("Bambu ABS @BBL X1C"), "Orca's original settings backed up");
+writePresets(tmp, [], {show: ["eSUN PETG"]}, () => false);
+ok(fs.readFileSync(path.join(base, "OrcaSlicer.conf.spoolstock.bak"), "utf8").includes("Bambu ABS @BBL X1C"), "a second send keeps the first backup");
+ok(restoreList(tmp, () => true).error.includes("Close Orca"), "restore also waits for Orca to close");
+ok(restoreList(tmp, () => false).restored, "restore works");
+const back = fs.readFileSync(path.join(base, "OrcaSlicer.conf"), "utf8");
+ok(back.includes("Bambu ABS @BBL X1C") && !back.includes("eSUN PETG @System") && !fs.existsSync(path.join(base, "OrcaSlicer.conf.spoolstock.bak")), "restore brings back the old list");
