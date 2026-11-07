@@ -7,7 +7,7 @@
 # name = "Spool Stock Probe"
 # description = "Read-only test for Spool Stock: logs what Orca and your Bambu printers report about AMS slots, slicing and prints."
 # author = "jwilss"
-# version = "0.2.0"
+# version = "0.2.1"
 # ///
 """Spool Stock Probe.
 
@@ -44,7 +44,7 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock Probe"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 MQTT_PORT, FTP_PORT = 8883, 990
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
 LOG_MAX = 8 * 1024 * 1024
@@ -591,21 +591,14 @@ def _suggest_ip() -> str:
 
 
 def _ask_permissions():
-    """Declare threads, and the saved printers' addresses, so Orca can ask once when it loads."""
+    """Declare threads when the plugin loads. Printer addresses are allowed later, from the tab."""
     req = getattr(orca, "request_permissions", None)
     if not callable(req):
         return
     try:
         req(threading=True)
     except Exception as e:
-        log("permissions.request_failed", kind="threading", error=f"{type(e).__name__}: {e}")
-    ips = [p["ip"] for p in load_printers() if p.get("ip")]
-    if ips:
-        try:
-            req(network=ips)
-            log("permissions.declared", network=ips)
-        except Exception as e:
-            log("permissions.request_failed", kind="network", error=f"{type(e).__name__}: {e}")
+        log("permissions.request_failed", error=f"{type(e).__name__}: {e}")
 
 
 Pages = getattr(getattr(orca, "pages", None), "PagesPluginCapabilityBase", None)
