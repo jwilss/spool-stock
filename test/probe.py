@@ -147,5 +147,57 @@ probe.socket.create_connection = blocked; probe._allowed.clear()
 note = probe.authorise("10.0.0.9")
 probe.socket.create_connection = real
 ok("Press Connect" in note and "10.0.0.9" not in probe._allowed, "a refused permission says to press Connect")
+# fake printer file server: implicit FTPS, TLS before the welcome line, like a Bambu printer on port 990
+import io, zipfile
+zb = io.BytesIO()
+with zipfile.ZipFile(zb, "w") as z:
+    z.writestr("Metadata/slice_info.config", '<config><plate><metadata key="index" value="1"/><filament id="1" type="PETG" color="#2850E0" used_m="3.30" used_g="10.10"/><filament id="2" type="PETG" color="#0ACC38" used_m="1.83" used_g="5.60"/></plate></config>')
+    z.writestr("Metadata/plate_1.gcode", "G1 X1\n")
+job_zip = zb.getvalue()
+fsrv = socket.socket(); fsrv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); fsrv.bind(("127.0.0.1", 0)); fsrv.listen(2)
+ftp_seen = []
+def ftp_server():
+    raw, _ = fsrv.accept()
+    c = sctx.wrap_socket(raw, server_side=True)
+    f = c.makefile("rb")
+    c.sendall(b"220 Bambu FTPS\r\n")
+    data_l = None
+    def data_send(payload):
+        d, _ = data_l.accept(); d = sctx.wrap_socket(d, server_side=True)
+        d.sendall(payload)
+        try: d.unwrap()
+        except Exception: pass
+        d.close()
+    while True:
+        line = f.readline().decode().strip()
+        if not line: break
+        cmd, _, arg = line.partition(" ")
+        ftp_seen.append(cmd.upper())
+        cmd = cmd.upper()
+        if cmd == "USER": c.sendall(b"331 ok\r\n")
+        elif cmd == "PASS": c.sendall(b"230 ok\r\n" if arg == "SECRET99" else b"530 no\r\n")
+        elif cmd in ("PBSZ", "PROT", "TYPE"): c.sendall(b"200 ok\r\n")
+        elif cmd == "PASV":
+            data_l = socket.socket(); data_l.bind(("127.0.0.1", 0)); data_l.listen(1); dp = data_l.getsockname()[1]
+            c.sendall(f"227 Entering Passive Mode (127,0,0,1,{dp >> 8},{dp & 255})\r\n".encode())
+        elif cmd == "NLST":
+            c.sendall(b"150 here\r\n")
+            data_send(("/cache/Bracket.gcode.3mf\r\n/cache/old.gcode.3mf\r\n" if arg in ("/", "/cache") else "").encode())
+            c.sendall(b"226 done\r\n")
+        elif cmd == "RETR":
+            c.sendall(b"150 here\r\n"); data_send(job_zip); c.sendall(b"226 done\r\n")
+        elif cmd == "QUIT":
+            c.sendall(b"221 bye\r\n"); break
+        else: c.sendall(b"502 no\r\n")
+    c.close()
+threading.Thread(target=ftp_server, daemon=True).start()
+probe.FTP_PORT = fsrv.getsockname()[1]
+link.stop.clear()
+got = link._check_job_once({"file": "Bracket.gcode.3mf", "job": "Bracket", "phase": "end", "percent_at": 100}, 1)
+logtext = (tmp / "OrcaSlicer" / "spoolstock-probe" / "probe.log").read_text(encoding="utf-8")
+jf = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "printer.job_file"]
+ok(got and jf and jf[-1]["path"] == "/cache/Bracket.gcode.3mf", "job file found over implicit FTPS, where TLS starts before the welcome line")
+ok(jf and [f["used_g"] for f in jf[-1]["plates"][0]["filaments"]] == ["10.10", "5.60"], "per-filament grams read from the job file")
+ok(ftp_seen[:2] == ["USER", "PASS"] and "RETR" in ftp_seen, "logs in as bblp and only lists and downloads")
 probe.disconnect_all()
 sys.exit(0 if ok_all else 1)
