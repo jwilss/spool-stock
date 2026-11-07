@@ -14,6 +14,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - `firestore.rules`: keeps each account to its own data.
 - `docs/`: images for the README, made with `test/shots.js`. The stickers image is the only one it doesn't make.
 - `test/`: `run.js` for the app, `reader.js` for Spool Reader. Both use stand-ins for Firebase and Claude.
+- `orca-plugin/probe/`: a read-only OrcaSlicer 2.5 test plugin that logs what Orca and the printers report (events, slices, AMS trays, tray mapping, the job file).
 - `SETUP.md`: first time setup.
 
 ## How it fits together
@@ -66,6 +67,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [ ] Old `build-1` release and tag deleted
 - [ ] Older account's slots folded into one storage on the real data
 - [ ] Weekly catalogue refresh running in GitHub Actions
+- [ ] Run the Orca probe plugin through a print on Alduin and Betsy, and send the log
 - [ ] Log a print with a real Orca export from Alduin and Betsy
 - [ ] Import the Orca presets zip into Orca, and Send to Orca from the rebuilt Windows app, including the filament list
 - [ ] Camera inside the APK

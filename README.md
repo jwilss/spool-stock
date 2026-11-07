@@ -141,7 +141,7 @@ docs/        images for this page
 test/        end-to-end tests
 ```
 
-Run the tests with `node test/run.js`, `node test/reader.js` and `node test/orca.js`.
+Run the tests with `node test/run.js`, `node test/reader.js`, `node test/orca.js` and `python3 test/probe.py`.
 
 ## Good to know
 
