@@ -26,7 +26,7 @@ A filament inventory for home 3D printing, with printed QR stickers, phone scann
 - **Works offline:** changes save on the device and sync when you're back online.
 - **Low stock at a glance:** weigh a spool and it works out what's left.
 - **Log prints from Orca:** drop a sliced file on the app and it takes what each filament used off the right spools.
-- **Presets for Orca:** your filaments go into OrcaSlicer as presets, built on Orca's own profiles, with your temperatures.
+- **Presets for Orca:** your filaments go into OrcaSlicer as presets, built on Orca's generic profiles, with your temperatures.
 
 ## Storage
 
@@ -82,7 +82,7 @@ In Orca, use **Export plate sliced file**, then drop the file on Spool Stock (or
 
 ## Orca presets
 
-**Setup > Orca presets** makes a filament preset for each filament you own. A preset builds on Orca's own profile for that filament where Orca's filament library has one (eSUN, SUNLU, Polymaker, ELEGOO, Overture, Bambu Lab and others), or the closest generic profile, so flow, cooling and speed come from Orca. The nozzle and bed temperatures are the ones on your stickers.
+**Setup > Orca presets** makes a filament preset for each filament you own. Each preset builds on Orca's closest generic profile for the material, such as Generic PETG, Generic PETG HF or Generic PLA Silk, so flow, cooling and speed come from Orca. The nozzle and bed temperatures are the ones on your stickers.
 
 - **Windows app:** press **Send to Orca**, then restart Orca.
 - **Anywhere else:** press **Download for Orca**, then in Orca use **File > Import > Import Configs** and choose the zip.

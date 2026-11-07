@@ -1507,8 +1507,8 @@ function ownedFilaments(){
 }
 const orcaName = f => `${f.brand} ${f.material} (Spool Stock)`.replace(/[\\/:*?"<>|]+/g,"-").replace(/\s+/g," ").trim();
 function orcaPreset(f){
-  const line=catLine(f.brand,f.material), v=lookup(f.brand,f.material), name=orcaName(f), own=!!line?.o;
-  const base=own?line.o:orcaGenericFor(f.material,f.finish), useTemps=v.nMin!=null||v.bMin!=null;
+  const line=catLine(f.brand,f.material), v=lookup(f.brand,f.material), name=orcaName(f), own=false;
+  const base=orcaGenericFor(f.material,f.finish), useTemps=v.nMin!=null||v.bMin!=null;
   const p={type:"filament",name,from:"User",instantiation:"true",inherits:base,version:ORCA_VERSION,filament_settings_id:[name],filament_vendor:[f.brand]};
   const q=x=>[String(Math.round(x))];
   if(useTemps&&v.nMin!=null&&v.nMax!=null){
@@ -1540,8 +1540,8 @@ function orcaCard(){
   const list=ownedFilaments().map(orcaPreset);
   if(!list.length) return `<div class="card"><h2>Orca presets</h2><p>Add some spools first, then their filaments can go into Orca as presets.</p></div>`;
   return `<div class="card"><h2>Orca presets</h2>
-    <p>A preset for each of the ${list.length} filament${list.length===1?"":"s"} you own. Each builds on Orca's own profile for that filament where Orca has one, or the closest generic profile, so flow, cooling and speed come from Orca. Nozzle and bed temperatures are the ones on your stickers.</p>
-    <div class="hist">${list.map(x=>`<div><b>${esc(x.name)}</b><br><span class="muted">Builds on ${x.own?"Orca's own ":""}${esc(x.base)}${x.useTemps?", with your temperatures":""}</span></div>`).join("")}</div>
+    <p>A preset for each of the ${list.length} filament${list.length===1?"":"s"} you own. Each builds on Orca's closest generic profile, such as Generic PETG or Generic PLA Silk, so flow, cooling and speed come from Orca. Nozzle and bed temperatures are the ones on your stickers.</p>
+    <div class="hist">${list.map(x=>`<div><b>${esc(x.name)}</b><br><span class="muted">Builds on ${esc(x.base)}${x.useTemps?", with your temperatures":""}</span></div>`).join("")}</div>
     <div class="btns">${DESK()?`<button class="btn go" data-act="orcaSend">Send to Orca</button>`:""}<button class="btn ${DESK()?"":"go"}" data-act="orcaZip">Download for Orca</button></div>
     <p class="hint">${DESK()?"Send to Orca puts them straight into Orca, then restart Orca. ":""}To import the download, in Orca use File, Import, Import Configs and choose the zip. Sending or importing again updates them.</p>
   </div>`;
