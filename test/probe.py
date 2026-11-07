@@ -33,7 +33,8 @@ class Preset:
     def __init__(self, name, cfg): self.name, self.cfg = name, cfg
     def config_value(self, k): return self.cfg.get(k, "")
 bundle = types.SimpleNamespace(current_printer_preset=lambda: Preset("Bambu Lab P1S 0.4 nozzle", {"printer_model": "Bambu Lab P1S", "print_host": "127.0.0.1"}),
-                               printers=[Preset("Bambu Lab P1S 0.4 nozzle", {"print_host": "127.0.0.1"})])
+                               printers=[Preset("Bambu Lab P1S 0.4 nozzle", {"print_host": "127.0.0.1"})],
+                               current_filament_preset_names=lambda: ["Bambu PLA Matte @BBL X1C"])
 orca.host = types.SimpleNamespace(app_info=lambda: {"version": "2.5.0"}, preset_bundle=lambda: bundle, ui=types.SimpleNamespace())
 sys.modules["orca"] = orca
 
@@ -119,15 +120,24 @@ page.on_lifecycle_event("LifecycleEvent.PrintJobStarted", types.SimpleNamespace(
 gc = tmp / "x.gcode"; gc.write_text("G1 X1\n; filament used [g] = 12.50, 3.20\n")
 ctx = types.SimpleNamespace(step="Step.psGCodePostProcess", gcode_path=str(gc), config_value=lambda k: {"filament_settings_id": '"Bambu PLA Matte @BBL X1C";"Landu Rapid PETG (Spool Stock)"', "filament_colour": "#C8102E;#F4F4F2", "filament_type": "PLA;PETG"}.get(k, ""))
 ok(registered[1]().execute(ctx) == "ok", "slicing step runs")
+ex = tmp / ".1.0.gcode"
+ex.write_text("; HEADER_BLOCK_START\n; total filament used [g] : 15.7\n; HEADER_BLOCK_END\nG1 X1\n; filament used [g] = 10.10, 5.60\n; CONFIG_BLOCK_START\n; filament_settings_id = \"Generic PETG @BBL P1S\";\"Landu Rapid PETG (Spool Stock)\"\n; filament_colour = #2850E0;#0ACC38\n; filament_type = PETG;PETG\n; CONFIG_BLOCK_END\n")
+page.on_lifecycle_event("LifecycleEvent.GCodeExportFinished", types.SimpleNamespace(name="Multicolor", msg=str(ex), code="Ok"))
 page.on_message({"type": "snapshot"})
 time.sleep(0.5)
 logtext = (tmp / "OrcaSlicer" / "spoolstock-probe" / "probe.log").read_text(encoding="utf-8")
 kinds = [json.loads(l)["kind"] for l in logtext.splitlines()]
-for k in ("probe.start", "orca.api", "orca.printer", "orca.conf", "printer.connected", "printer.serial_found", "printer.certificate", "printer.first_report", "printer.change", "printer.full_status", "orca.event", "slice.step", "printer.job_file_error"):
+for k in ("probe.start", "orca.api", "orca.printer", "orca.conf", "printer.connected", "printer.serial_found", "printer.certificate", "printer.first_report", "printer.change", "printer.full_status", "orca.event", "slice.step", "slice.gcode", "printer.job_file_error"):
     ok(k in kinds, "logs " + k)
 ok("SECRET99" not in logtext, "access code never written to the log")
 sl = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "slice.step"][0]
 ok(sl["grams"] == [12.5, 3.2] and "Landu Rapid PETG" in sl["config"]["filament_settings_id"], "slice grams and presets logged")
+sg = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "slice.gcode"][0]
+ok(sg["grams"] == [10.1, 5.6] and "Landu Rapid PETG" in sg["config"]["filament_settings_id"] and sg["config"]["filament_type"] == "PETG;PETG", "exported G-code read when Orca says where it is")
+je = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "printer.job_file_error"][0]
+jp = {j["phase"] for j in [json.loads(l) for l in logtext.splitlines()] if j["kind"] == "printer.job_file_error"}; ok(jp == {"running", "end"} and je["stage"] == "connect" and je["attempt"] == 1, "job file looked for once printing is under way and again at the end, with the stage that failed")
+pi = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "orca.printer"][0]["info"]
+ok(pi.get("filament_presets") == ["Bambu PLA Matte @BBL X1C"], "Orca's chosen filament presets listed")
 conf = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "orca.conf"][0]["hints"]
 ok("access_code" in conf["sections"] and conf["access_code"]["keys"] == ["01P00C512345678"], "Orca's settings sections listed, keys only")
 ok(oct(os.stat(tmp / "OrcaSlicer" / "spoolstock-probe" / "printers.json").st_mode)[-3:] in ("600", "666"), "saved printers file is private")

@@ -7,7 +7,7 @@
 # name = "Spool Stock Probe"
 # description = "Read-only test for Spool Stock: logs what Orca and your Bambu printers report about AMS slots, slicing and prints."
 # author = "jwilss"
-# version = "0.2.2"
+# version = "0.3.0"
 # ///
 """Spool Stock Probe.
 
@@ -44,7 +44,7 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock Probe"
-VERSION = "0.2.2"
+VERSION = "0.3.0"
 MQTT_PORT, FTP_PORT = 8883, 990
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
 LOG_MAX = 8 * 1024 * 1024
@@ -168,15 +168,10 @@ def orca_printer_info() -> dict:
                 out[key] = str(cur.config_value(key))[:200]
             except Exception as e:
                 out[key] = f"<{type(e).__name__}>"
-        hosts = []
-        for p in bundle.printers:
-            try:
-                h = str(p.config_value("print_host") or "")
-            except Exception:
-                h = ""
-            if h:
-                hosts.append({"preset": getattr(p, "name", ""), "print_host": h[:200]})
-        out["print_hosts"] = hosts
+        try:
+            out["filament_presets"] = [str(x) for x in bundle.current_filament_preset_names()][:32]
+        except Exception as e:
+            out["filament_presets"] = f"<{type(e).__name__}: {e}>"
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
     return out
@@ -322,6 +317,7 @@ class Link:
         self.stop = threading.Event()
         self.last_sum: dict = {}
         self.jobs_checked: set[str] = set()
+        self.job_file = ""
         threading.Thread(target=self.run, daemon=True, name="probe-" + printer.get("name", "printer")).start()
 
     def run(self):
@@ -424,14 +420,30 @@ class Link:
         self.last_sum = s
         if s.get("state") != old_state:
             log("printer.full_status", printer=self.p.get("name"), why=f"state {old_state} -> {s.get('state')}", status=self.status)
-        if s.get("state") in ("RUNNING", "PREPARE", "FINISH", "FAILED") and s.get("file"):
-            key = f"{s.get('task_id')}|{s.get('file')}"
+        if s.get("file"):
+            self.job_file = s["file"]
+        # The printer is busy reading the file while it prepares, so look once printing is under way
+        # (layer 1 or later) and again when it ends, by which time the report has cleared the file name.
+        state = s.get("state")
+        phase = "end" if state in ("FINISH", "FAILED") and old_state not in ("FINISH", "FAILED", None) else (
+            "running" if state == "RUNNING" and (s.get("layer") or 0) >= 1 else "")
+        if phase and self.job_file:
+            key = f"{phase}|{self.job_file}|{s.get('job')}"
             if key not in self.jobs_checked:
                 self.jobs_checked.add(key)
-                threading.Thread(target=self.check_job, args=(s,), daemon=True).start()
+                job = dict(s, file=self.job_file, phase=phase, percent_at=s.get("percent"))
+                threading.Thread(target=self.check_job, args=(job,), daemon=True).start()
 
     def check_job(self, s: dict):
-        """Find the job's .3mf on the printer and log its per-filament grams. Read-only."""
+        """Find the job's .3mf on the printer and log its per-filament grams. Read-only. Tries 3 times."""
+        for attempt in range(1, 4):
+            if self.stop.is_set() or self._check_job_once(s, attempt):
+                return
+            time.sleep(20)
+
+    def _check_job_once(self, s: dict, attempt: int) -> bool:
+        stage = "connect"
+        started = time.monotonic()
         try:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
@@ -449,17 +461,19 @@ class Link:
                     conn = self.context.wrap_socket(conn, server_hostname=self.host, session=self.sock.session)
                     return conn, size
 
-            ftp = Ftps(context=ctx, timeout=20)
+            ftp = Ftps(context=ctx, timeout=30)
             ftp.connect(self.p["ip"], FTP_PORT)
+            stage = "login"
             ftp.login("bblp", self.p["code"])
             ftp.prot_p()
+            stage = "list"
             listing = {}
             for folder in ("/", "/cache", "/model"):
                 try:
                     listing[folder] = ftp.nlst(folder)[:200]
                 except ftplib.all_errors as e:
                     listing[folder] = f"<{e}>"
-            log("printer.files", printer=self.p.get("name"), job_file=s.get("file"), job=s.get("job"), listing=listing)
+            log("printer.files", printer=self.p.get("name"), phase=s.get("phase"), job_file=s.get("file"), job=s.get("job"), listing=listing)
             want = [x for x in (s.get("file"), s.get("job")) if x]
             names = [n for v in listing.values() if isinstance(v, list) for n in v]
             hit = None
@@ -472,9 +486,9 @@ class Link:
                 if hit:
                     break
             if not hit:
-                log("printer.job_file_not_found", printer=self.p.get("name"), wanted=want)
+                log("printer.job_file_not_found", printer=self.p.get("name"), phase=s.get("phase"), wanted=want)
                 ftp.quit()
-                return
+                return True
             buf = io.BytesIO()
             size = [0]
             def keep(chunk):
@@ -482,6 +496,7 @@ class Link:
                 if size[0] > JOB_MAX:
                     raise ValueError("job file too large")
                 buf.write(chunk)
+            stage = "download"
             ftp.retrbinary(f"RETR {hit}", keep)
             ftp.quit()
             z = zipfile.ZipFile(buf)
@@ -493,9 +508,13 @@ class Link:
                 for pl in root.iter("plate"):
                     meta = {m.get("key"): m.get("value") for m in pl.findall("metadata")}
                     plates.append({"meta": meta, "filaments": [f.attrib for f in pl.findall("filament")]})
-            log("printer.job_file", printer=self.p.get("name"), path=hit, entries=entries[:60], plates=plates)
+            log("printer.job_file", printer=self.p.get("name"), phase=s.get("phase"), percent=s.get("percent_at"),
+                path=hit, bytes=size[0], seconds=round(time.monotonic() - started, 1), entries=entries[:60], plates=plates)
+            return True
         except Exception as e:
-            log("printer.job_file_error", printer=self.p.get("name"), error=f"{type(e).__name__}: {e}")
+            log("printer.job_file_error", printer=self.p.get("name"), phase=s.get("phase"), attempt=attempt, stage=stage,
+                seconds=round(time.monotonic() - started, 1), error=f"{type(e).__name__}: {e}")
+            return False
 
 
 _links: dict[str, Link] = {}
@@ -569,6 +588,38 @@ def grams_from_gcode(path: str) -> list[float]:
     except Exception as e:
         log("slice.read_error", error=str(e))
     return []
+
+
+GCODE_KEYS = ("filament_settings_id", "filament_type", "filament_colour", "filament_vendor", "filament_ids",
+              "printer_settings_id", "printer_model")
+
+
+def slice_from_gcode(path: str) -> dict:
+    """Per-filament grams and the filament settings Orca wrote at the end of an exported G-code."""
+    out: dict = {"path": path}
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            head = f.read(60_000).decode("utf-8", "replace").splitlines()
+            f.seek(max(0, size - 400_000))
+            tail = f.read().decode("utf-8", "replace").splitlines()
+        out["bytes"] = size
+        cfg = {}
+        for line in head + tail:
+            if not line.startswith("; ") or " = " not in line:
+                continue
+            k, v = line[2:].split(" = ", 1)
+            k = k.strip()
+            if k == "filament used [g]":
+                out["grams"] = [float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", v)]
+            elif k == "total filament used [g]":
+                out["total_g"] = v.strip()
+            elif k in GCODE_KEYS:
+                cfg[k] = v.strip()[:1000]
+        out["config"] = cfg
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+    return out
 
 
 # ---------- the tab ----------
@@ -718,7 +769,14 @@ if Pages is not None:
                 log("page.error", trace=traceback.format_exc())
 
         def on_lifecycle_event(self, event, ctx):
-            log("orca.event", event=str(event), fields=_fields(ctx))
+            fields = _fields(ctx)
+            log("orca.event", event=str(event), fields=fields)
+            # Orca says where it wrote the G-code. Read it straight away, before it's cleaned up.
+            if "GCodeExportFinished" in str(event) and fields.get("msg"):
+                try:
+                    log("slice.gcode", plate=fields.get("name"), **slice_from_gcode(str(fields["msg"])))
+                except Exception:
+                    log("slice.error", trace=traceback.format_exc())
 
         def on_unload(self):
             disconnect_all()
