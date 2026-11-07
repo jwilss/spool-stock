@@ -7,7 +7,7 @@
 # name = "Spool Stock Probe"
 # description = "Read-only test for Spool Stock: logs what Orca and your Bambu printers report about AMS slots, slicing and prints."
 # author = "jwilss"
-# version = "0.2.1"
+# version = "0.2.2"
 # ///
 """Spool Stock Probe.
 
@@ -44,7 +44,7 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock Probe"
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 MQTT_PORT, FTP_PORT = 8883, 990
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
 LOG_MAX = 8 * 1024 * 1024
@@ -250,6 +250,32 @@ def _read_packet(sock):
     return first[0], (_recv_exact(sock, size) if size else b"")
 
 
+def cert_names(der: bytes) -> list[str]:
+    """Every common name (CN) in a DER certificate. A Bambu printer's own certificate is named
+    after its serial number."""
+    out, i = [], 0
+    while True:
+        i = der.find(b"\x06\x03\x55\x04\x03", i)
+        if i < 0:
+            return out
+        j = i + 5
+        if j + 2 <= len(der):
+            n = der[j + 1]
+            if n < 128:
+                try:
+                    out.append(der[j + 2:j + 2 + n].decode("utf-8", "replace"))
+                except Exception:
+                    pass
+        i = j
+
+
+def serial_from_cert(der: bytes) -> str:
+    for name in cert_names(der):
+        if re.fullmatch(r"[0-9A-Z]{12,20}", name or ""):
+            return name
+    return ""
+
+
 def _merge(base: dict, new: dict) -> None:
     for k, v in new.items():
         if isinstance(v, dict) and isinstance(base.get(k), dict):
@@ -327,6 +353,20 @@ class Link:
         ip, code = self.p["ip"], self.p["code"]
         with socket.create_connection((ip, MQTT_PORT), timeout=10) as raw, ctx.wrap_socket(raw, server_hostname=ip) as s:
             s.settimeout(5)
+            if not self.serial:
+                try:
+                    der = s.getpeercert(binary_form=True) or b""
+                    names = cert_names(der)
+                    found = serial_from_cert(der)
+                    log("printer.certificate", printer=self.p.get("name"), names=names)
+                    if found:
+                        self.serial = found
+                        self.p["serial"] = found
+                        log("printer.serial_found", printer=self.p.get("name"), serial=found, source="certificate")
+                except Exception as e:
+                    log("printer.certificate_error", printer=self.p.get("name"), error=str(e))
+            if not self.serial:
+                raise ConnectionError("serial number unknown: add it from the printer's screen (Settings, Device)")
             body = _mstr("MQTT") + b"\x04\xc2" + struct.pack("!H", 60) + _mstr("spoolstock-probe-" + os.urandom(3).hex()) + _mstr("bblp") + _mstr(code)
             s.sendall(_pkt(0x10, body))
             ack = _read_packet(s)
