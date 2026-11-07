@@ -238,9 +238,10 @@ await p.evaluate(id=>{location.hash=id},picks[0]);await p.waitForSelector('.spoo
  ok(!pv.some(([n])=>/^Bambu Lab ASA \(/.test(n)),'no preset for a filament Orca already has (Bambu ASA)');
  ok((await p.textContent('#main')).includes("Orca's own profile, used as it is"),'Setup says which use Orca\'s own profile');
  const gen=pv.find(([,j])=>j.nozzle_temperature);ok(gen&&+gen[1].nozzle_temperature[0]>=+gen[1].nozzle_temperature_range_low[0]&&+gen[1].nozzle_temperature[0]<=+gen[1].nozzle_temperature_range_high[0]&&gen[1].textured_plate_temp,'new presets carry the temperatures');
- await p.evaluate(()=>{window.__sent=null;window.spoolStockDesktop={orca:{write:async(f,o)=>{window.__sent={f,o};return {written:f.length,shown:3,missing:[]}},restore:async()=>({restored:true})}};location.hash='stock'});await p.waitForSelector('.racks');
+ await p.evaluate(()=>{window.__sent=null;window.spoolStockDesktop={orca:{version:3,write:async(f,o)=>{window.__sent={f,o};return {written:f.length,shown:3,missing:[]}},restore:async()=>({restored:true})}};location.hash='stock'});await p.waitForSelector('.racks');
  await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=orcaSend]');ok(await p.isChecked('#orcaOnly'),'only list my filaments is on by default');await p.click('[data-act=orcaSend]');await p.waitForFunction(()=>/set to your filaments/.test(document.querySelector('#toast').textContent));
- const sent=await p.evaluate(()=>window.__sent);ok(sent.f.length===pv.length&&sent.o.show.includes('Bambu ASA'),'Send to Orca hands over the new presets and the list to show: '+sent.o.show);
+ const sent=await p.evaluate(()=>window.__sent);ok(sent.f.length===pv.length&&sent.o.show.includes('Bambu ASA @System')&&sent.o.show.some(n=>/^Bambu ASA @BBL /.test(n)),'Send to Orca hands over exact Orca names, Bambu printer versions included: '+sent.o.show.length);
+ await p.evaluate(()=>{window.spoolStockDesktop.orca.version=undefined;window.__sent=null});await p.click('[data-act=orcaSend]');await p.waitForFunction(()=>/update the Windows app/.test(document.querySelector('#toast').textContent));ok((await p.evaluate(()=>window.__sent.o.show))===undefined,'an older Windows app only gets the presets, so it can\'t empty Orca\'s list');
  await p.click('[data-act=orcaRestore]');await p.waitForFunction(()=>/back to how it was/.test(document.querySelector('#toast').textContent));ok(true,'restore is offered');
  await p.evaluate(()=>{delete window.spoolStockDesktop});
 

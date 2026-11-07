@@ -7,6 +7,7 @@
 // tools/catalogue-extra.json holds additions and corrections checked against manufacturers' own sites.
 import {readdir, readFile, writeFile} from "node:fs/promises";
 import path from "node:path";
+import {execFileSync} from "node:child_process";
 
 const [from, to = "site/catalogue.json", ofd, orca] = process.argv.slice(2);
 if (!from) { console.error("Give the path to a copy of SpoolmanDB"); process.exit(1); }
@@ -175,6 +176,18 @@ if (orca) {
     }
   }
   orcaInfo.generic.sort();
+  // Every preset name Orca has for those filaments, including the versions made for Bambu printers
+  // ("SUNLU PETG @BBL X1C"). Newer Orca packs its profiles into one file per brand, so the names
+  // can't be read from the user's disk.
+  let all = [];
+  try {
+    all = execFileSync("git", ["-C", orca, "ls-tree", "-r", "--name-only", "HEAD", "--", "resources/profiles/BBL", "resources/profiles/OrcaFilamentLibrary"], {encoding: "utf8", maxBuffer: 64e6})
+      .split("\n").filter(f => /\/filament\/.+\.json$/.test(f) && !/@base\.json$/.test(f)).map(f => f.split("/").pop().slice(0, -5));
+  } catch (e) { console.warn("Couldn't list Orca's preset names: " + e.message); }
+  const aliases = new Set(Object.values(brands).flat().map(l => l.o).filter(Boolean).map(o => o.replace(/ @System$/, "")));
+  orcaInfo.variants = {};
+  for (const a of aliases) { const v = all.filter(n => n.startsWith(a + " @")); if (v.length) orcaInfo.variants[a] = v.sort(); }
+  console.log(`OrcaSlicer: ${Object.values(orcaInfo.variants).flat().length} preset names for ${Object.keys(orcaInfo.variants).length} filaments`);
   console.log(`OrcaSlicer: ${linked} filaments linked to Orca profiles, ${orcaInfo.generic.length} generic profiles`);
 }
 

@@ -86,10 +86,12 @@ function writePresets(appData, files, opts = {}, running = orcaRunning) {
   if (show) {
     const base = orcaBase(appData), conf = readConf(base);
     if (!conf) return {...result, error: "Sent the presets, but couldn't read Orca's settings to set its filament list."};
+    // The site sends Orca's exact preset names. Older Orca keeps one file per preset on disk, so any
+    // installed variants found there are added too.
     const installed = systemFilaments(base), visible = {}, missing = [];
     for (const name of show) {
-      const hits = installed.filter(n => n === name || n.startsWith(name + " @"));
-      if (hits.length) hits.forEach(n => { visible[n] = "true"; }); else missing.push(name);
+      visible[name] = "true";
+      installed.filter(n => n.startsWith(name.replace(/ @System$/, "") + " @")).forEach(n => { visible[n] = "true"; });
     }
     if (!fs.existsSync(path.join(base, BACKUP))) fs.writeFileSync(path.join(base, BACKUP), conf.text, "utf8");
     conf.json.filaments = visible;
