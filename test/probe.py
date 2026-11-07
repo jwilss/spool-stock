@@ -11,7 +11,7 @@ def ok(c, m):
 tmp = Path(tempfile.mkdtemp())
 os.environ["APPDATA"] = str(tmp)
 (tmp / "OrcaSlicer").mkdir()
-(tmp / "OrcaSlicer" / "OrcaSlicer.conf").write_text(json.dumps({"app": {"preset_folder": "default", "user_access_code": "x"}, "access_code": {"01P00A123": "SECRET99"}, "filaments": {}}) + "\n# MD5 checksum X\n")
+(tmp / "OrcaSlicer" / "OrcaSlicer.conf").write_text(json.dumps({"app": {"preset_folder": "default", "user_access_code": "x"}, "access_code": {"01P00C512345678": "SECRET99"}, "filaments": {}}) + "\n# MD5 checksum X\n")
 
 # stand-in orca module
 orca = types.ModuleType("orca")
@@ -39,7 +39,7 @@ sys.modules["orca"] = orca
 
 # fake printer: MQTT over TLS
 cert, key = tmp / "c.pem", tmp / "k.pem"
-subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(cert), "-days", "1", "-subj", "/CN=printer"], check=True, capture_output=True)
+subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(cert), "-days", "1", "-subj", "/CN=01P00C512345678"], check=True, capture_output=True)
 srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); srv.bind(("127.0.0.1", 0)); srv.listen(1)
 port = srv.getsockname()[1]
 sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); sctx.load_cert_chain(cert, key)
@@ -78,7 +78,7 @@ def broker():
     seen["login"] = (user, pw)
     conn.sendall(b"\x20\x02\x00\x00")
     t, body = read(conn); seen["subscribe"] = body[4:4+struct.unpack("!H", body[2:4])[0]].decode()
-    publish(conn, "device/01P00A123/report", status)
+    publish(conn, "device/01P00C512345678/report", status)
     conn.settimeout(10)
     try:
         while True:
@@ -86,7 +86,7 @@ def broker():
             if pk is None: break
             if pk[0] >> 4 == 3:
                 n = struct.unpack("!H", pk[1][:2])[0]; seen["request"] = (pk[1][2:2+n].decode(), pk[1][2+n:].decode())
-                publish(conn, "device/01P00A123/report", {"print": {"command": "push_status", "gcode_state": "FINISH", "mc_percent": 100}})
+                publish(conn, "device/01P00C512345678/report", {"print": {"command": "push_status", "gcode_state": "FINISH", "mc_percent": 100}})
     except Exception:
         pass
 threading.Thread(target=broker, daemon=True).start()
@@ -108,14 +108,14 @@ for _ in range(50):
     time.sleep(0.2)
     if "request" in seen and probe._links.get("Betsy") and probe._links["Betsy"].last_sum.get("state") == "FINISH": break
 ok(seen.get("login") == ("bblp", "SECRET99"), "logs in as bblp with the access code")
-ok(seen.get("subscribe") == "device/+/report", "subscribes to reports, serial unknown at first")
-ok(seen.get("request", ("", ""))[0] == "device/01P00A123/request" and "pushall" in seen["request"][1], "learns the serial and asks for full status")
+ok(seen.get("subscribe") == "device/01P00C512345678/report", "reads the serial from the printer's certificate and subscribes to that printer only")
+ok(seen.get("request", ("", ""))[0] == "device/01P00C512345678/request" and "pushall" in seen["request"][1], "asks for full status")
 link = probe._links["Betsy"]
 s = link.last_sum
 time.sleep(0.5)
 ok(len(s["trays"]) == 2 and s["trays"][0]["type"] == "PLA" and s["external"]["type"] == "PLA", "AMS trays and external spool read")
 ok(s["mapping_fields"].get("ams_mapping") == [0, 2], "tray mapping field captured")
-page.on_lifecycle_event("LifecycleEvent.PrintJobStarted", types.SimpleNamespace(name="Bracket", device_id="01P00A123", code="Info"))
+page.on_lifecycle_event("LifecycleEvent.PrintJobStarted", types.SimpleNamespace(name="Bracket", device_id="01P00C512345678", code="Info"))
 gc = tmp / "x.gcode"; gc.write_text("G1 X1\n; filament used [g] = 12.50, 3.20\n")
 ctx = types.SimpleNamespace(step="Step.psGCodePostProcess", gcode_path=str(gc), config_value=lambda k: {"filament_settings_id": '"Bambu PLA Matte @BBL X1C";"Landu Rapid PETG (Spool Stock)"', "filament_colour": "#C8102E;#F4F4F2", "filament_type": "PLA;PETG"}.get(k, ""))
 ok(registered[1]().execute(ctx) == "ok", "slicing step runs")
@@ -123,13 +123,13 @@ page.on_message({"type": "snapshot"})
 time.sleep(0.5)
 logtext = (tmp / "OrcaSlicer" / "spoolstock-probe" / "probe.log").read_text(encoding="utf-8")
 kinds = [json.loads(l)["kind"] for l in logtext.splitlines()]
-for k in ("probe.start", "orca.api", "orca.printer", "orca.conf", "printer.connected", "printer.serial_found", "printer.first_report", "printer.change", "printer.full_status", "orca.event", "slice.step", "printer.job_file_error"):
+for k in ("probe.start", "orca.api", "orca.printer", "orca.conf", "printer.connected", "printer.serial_found", "printer.certificate", "printer.first_report", "printer.change", "printer.full_status", "orca.event", "slice.step", "printer.job_file_error"):
     ok(k in kinds, "logs " + k)
 ok("SECRET99" not in logtext, "access code never written to the log")
 sl = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "slice.step"][0]
 ok(sl["grams"] == [12.5, 3.2] and "Landu Rapid PETG" in sl["config"]["filament_settings_id"], "slice grams and presets logged")
 conf = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "orca.conf"][0]["hints"]
-ok("access_code" in conf["sections"] and conf["access_code"]["keys"] == ["01P00A123"], "Orca's settings sections listed, keys only")
+ok("access_code" in conf["sections"] and conf["access_code"]["keys"] == ["01P00C512345678"], "Orca's settings sections listed, keys only")
 ok(oct(os.stat(tmp / "OrcaSlicer" / "spoolstock-probe" / "printers.json").st_mode)[-3:] in ("600", "666"), "saved printers file is private")
 real = probe.socket.create_connection
 def blocked(*a, **k): raise PermissionError("Plugin attempted audited operation without permission")
