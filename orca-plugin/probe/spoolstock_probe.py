@@ -7,7 +7,7 @@
 # name = "Spool Stock Probe"
 # description = "Read-only test for Spool Stock: logs what Orca and your Bambu printers report about AMS slots, slicing and prints."
 # author = "jwilss"
-# version = "0.3.0"
+# version = "0.3.1"
 # ///
 """Spool Stock Probe.
 
@@ -44,7 +44,7 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock Probe"
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 MQTT_PORT, FTP_PORT = 8883, 990
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
 LOG_MAX = 8 * 1024 * 1024
@@ -450,11 +450,19 @@ class Link:
             ctx.verify_mode = ssl.CERT_NONE
 
             class Ftps(ftplib.FTP_TLS):
-                def connect(self, host="", port=0, timeout=-999, source_address=None):
-                    r = super().connect(host, port, timeout, source_address)
-                    self.sock = self.context.wrap_socket(self.sock, server_hostname=self.host)
-                    self.file = self.sock.makefile("r", encoding=self.encoding)
-                    return r
+                """Implicit FTPS, as Bambu printers use on port 990: TLS starts before the printer says hello,
+                so the socket is wrapped the moment it's made, not after the welcome line."""
+                _plain = None
+
+                @property
+                def sock(self):
+                    return self._plain
+
+                @sock.setter
+                def sock(self, value):
+                    if value is not None and not isinstance(value, ssl.SSLSocket):
+                        value = self.context.wrap_socket(value, server_hostname=self.host)
+                    self._plain = value
 
                 def ntransfercmd(self, cmd, rest=None):
                     conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)

@@ -16,13 +16,15 @@ Access codes are kept in `printers.json` beside the log, on your PC only, and ar
 
 ## What the first run showed
 
-From a two-colour print on a P1S with two AMS units, and an external-spool print on another P1S:
+From a two-colour PETG print on a P1S fed by two AMS units, then PETG from the AMS on that printer and ASA from the external spool on another P1S at the same time:
 
-- **Which tray each filament used:** the printer's `project_file` message, and every status report after it, carry `ams_mapping` (`[0, 1]` means filament 1 from AMS 1 tray 1 and filament 2 from AMS 1 tray 2) and `ams_mapping2` (`{ams_id, slot_id}` per filament). These stay until the next job. External spool prints show `tray_now` 254.
+- **Which tray each filament used:** only in the printer's `project_file` message, sent once when the job starts. It carries `ams_mapping` (`[0, 1]` means filament 1 from AMS 1 tray 1 and filament 2 from AMS 1 tray 2) and `ams_mapping2` (`{ams_id, slot_id}` per filament). The status reports never include it, so a plugin that connects after the job starts misses it and has to go by `tray_now`. External spool prints show `tray_now` 254.
 - **Proof it happened:** `tray_now` moves 0, then 255 while changing, then 1, then 255 at the end.
 - **Grams:** not in the printer's reports. The AMS shows `remain` as -1 even for Bambu RFID spools, so the grams come from the sliced file.
 - **Orca's events:** `PrintJobStarted` and `PrintJobFinished` mean the upload, not the print, and carry the printer's serial in `device_id`. `PrintStateChanged` gives PREPARE, RUNNING, PAUSE, FINISH and IDLE with the serial in `name`, but only for the printer selected in Orca. `GCodeExportFinished` gives the path of the G-code Orca just wrote.
-- **Job file:** reading it over FTPS while the printer was still preparing timed out, so 0.3.0 waits until layer 1 and tries again at the end, up to three times each.
+- **Job file:** every attempt timed out. The cause was the probe, not the printer: Bambu's file server starts encryption before it says hello, and the probe waited for the hello first. 0.3.1 fixes that, waits until layer 1, and tries again at the end.
+- **Two printers at once:** both reports came through side by side with no trouble. Orca's own print states follow only the printer selected in Orca, switching when you send to the other one.
+- **Which slice was sent:** Orca reuses one temporary G-code path and overwrites it on every slice, so the slice that was sent is the last one exported before `PrintJobStarted`, and it has to be read straight away.
 - **The slicing step** never ran, so 0.3.0 reads the G-code from the export event instead.
 
 ## Use
