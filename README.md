@@ -26,6 +26,7 @@ A filament inventory for home 3D printing, with printed QR stickers, phone scann
 - **Works offline:** changes save on the device and sync when you're back online.
 - **Low stock at a glance:** weigh a spool and it works out what's left.
 - **Log prints from Orca:** drop a sliced file on the app and it takes what each filament used off the right spools.
+- **Presets for Orca:** your filaments go into OrcaSlicer as presets, built on Orca's own profiles, with your temperatures.
 
 ## Storage
 
@@ -79,6 +80,15 @@ Stickers download as an A4 PDF, and the app remembers where you got to on a part
 
 In Orca, use **Export plate sliced file**, then drop the file on Spool Stock (or press **Log a print** and choose it). Plain G-code works too. It reads the grams each filament used and suggests which spool each came from: same material first, then spools in a unit, holder or dryer, then the nearest colour. Check them, lower the percentage for a failed or cancelled print, and confirm. Each spool keeps a list of its prints, and there's an Undo.
 
+## Orca presets
+
+**Setup > Orca presets** makes a filament preset for each filament you own. A preset builds on Orca's own profile for that filament where Orca's filament library has one (eSUN, SUNLU, Polymaker, ELEGOO, Overture, Bambu Lab and others), or the closest generic profile, so flow, cooling and speed come from Orca. The nozzle and bed temperatures are the ones on your stickers.
+
+- **Windows app:** press **Send to Orca**, then restart Orca.
+- **Anywhere else:** press **Download for Orca**, then in Orca use **File > Import > Import Configs** and choose the zip.
+
+They appear under your user presets as "Brand Filament (Spool Stock)". Sending or importing again updates them.
+
 ## Spool Reader
 
 Photo work lives in a separate tool that runs on Claude. It reads filament labels in batches, identifies unmarked spools against your stock list, and exports a file that Spool Stock imports in one go.
@@ -129,7 +139,7 @@ docs/        images for this page
 test/        end-to-end tests
 ```
 
-Run the tests with `node test/run.js` and `node test/reader.js`.
+Run the tests with `node test/run.js`, `node test/reader.js` and `node test/orca.js`.
 
 ## Good to know
 

@@ -379,7 +379,7 @@ function disc(s,size=44){
 
 /* ---------- print settings lookup ---------- */
 /* Filament catalogue: manufacturers and their own product names, from SpoolmanDB. Fetched once and kept for offline use. */
-let CAT=null;
+let CAT=null, ORCA_GENERIC=[];
 const norm = s => String(s||"").toLowerCase().replace(/[™®]/g,"").replace(/[^a-z0-9+.]+/g," ").trim();
 const ALIASES = [["high speed","hs"],["high flow","hf"],["carbon fibre","cf"],["carbon fiber","cf"],["glass fibre","gf"],["glass fiber","gf"]];
 function searchText(...parts){
@@ -393,7 +393,7 @@ async function loadCatalogue(){
     const r=await fetch("catalogue.json"); if(!r.ok) return;
     const j=await r.json(), map={};
     for(const [name,lines] of Object.entries(j.brands)) map[slug(name)]={name,aka:(j.aliases||{})[name]||[],lines:lines.map(l=>({...l,hay:searchText(l.n,l.m,...[].concat(l.a||[]))}))};
-    CAT=map;
+    CAT=map; ORCA_GENERIC=j.orca?.generic||[];
   }catch{}
 }
 const catBrand = name => CAT?.[slug(name)] || Object.values(CAT||{}).find(c=>c.aka.some(a=>slug(a)===slug(name)));
@@ -1366,6 +1366,7 @@ function vSetup(){
     ${P?logoPanel():""}
 
   </div>
+  ${orcaCard()}
   <div class="card"><h2>Spool Reader</h2><p>Reads labels and identifies spools from photos. Give it your stock list so it can check against what you own.</p>
     <div class="btns">${CFG.readerUrl?`<a class="btn" href="${esc(CFG.readerUrl)}" target="_blank" rel="noopener">Open Spool Reader</a>`:""}<button class="btn" data-act="listCopy">Copy stock list</button><button class="btn" data-act="listSave">Download stock list</button><button class="btn" data-go="import">Import spools</button></div>
   </div>
@@ -1478,6 +1479,64 @@ async function saveLog(){
 }
 async function takePrintFile(f){
   try{ startLog(await readSliced(f)); }catch(m){ toast(typeof m==="string"?m:"Couldn't read that file."); }
+}
+
+/* Orca filament presets for the filaments you own */
+const ORCA_VERSION="2.4.0.0";
+function orcaGenericFor(material,finish){
+  const t=` ${String(material).toUpperCase()} ${String(finish||"").toUpperCase()} `, k=baseMat(material)?.key||"";
+  const fast=/\bHS\b|HIGH ?SPEED|RAPID|FAST|HYPER|\bHF\b/.test(t);
+  const want=k==="PLA"?(/SILK/.test(t)?"PLA Silk":/MATTE/.test(t)?"PLA Matte":fast?"PLA High Speed":"PLA")
+    :k==="PETG"?(fast?"PETG HF":"PETG"):k==="PET-CF"?"PETG-CF":k==="PPS"?"PC"
+    :/HIPS/.test(t)?"HIPS":/PCTG/.test(t)?"PCTG":/\bPP\b/.test(t)?"PP":k||"PLA";
+  const has=n=>ORCA_GENERIC.includes(`Generic ${n} @System`)?`Generic ${n} @System`:null;
+  return has(want)||has(k)||"Generic PLA @System";
+}
+function ownedFilaments(){
+  const m=new Map();
+  for(const s of liveSpools()){ const k=slug(s.brand)+"|"+norm(s.material); if(!m.has(k)) m.set(k,{brand:s.brand,material:s.material,finish:s.finish,spools:[]}); m.get(k).spools.push(s); }
+  return [...m.values()].sort((a,b)=>(a.brand+a.material).localeCompare(b.brand+b.material));
+}
+const orcaName = f => `${f.brand} ${f.material} (Spool Stock)`.replace(/[\\/:*?"<>|]+/g,"-").replace(/\s+/g," ").trim();
+function orcaPreset(f){
+  const line=catLine(f.brand,f.material), v=lookup(f.brand,f.material), name=orcaName(f), own=!!line?.o;
+  const base=own?line.o:orcaGenericFor(f.material,f.finish), useTemps=v.nMin!=null||v.bMin!=null;
+  const p={type:"filament",name,from:"User",instantiation:"true",inherits:base,version:ORCA_VERSION,filament_settings_id:[name],filament_vendor:[f.brand]};
+  const q=x=>[String(Math.round(x))];
+  if(useTemps&&v.nMin!=null&&v.nMax!=null){
+    const n=Math.round((v.nMin+v.nMax)/10)*5;
+    Object.assign(p,{nozzle_temperature:q(n),nozzle_temperature_initial_layer:q(Math.min(v.nMax,n+5)),nozzle_temperature_range_low:q(v.nMin),nozzle_temperature_range_high:q(v.nMax)});
+  }
+  if(useTemps&&v.bMin!=null&&v.bMax!=null){
+    const b=Math.round((v.bMin+v.bMax)/2);
+    for(const k of ["hot_plate_temp","textured_plate_temp","eng_plate_temp"]) Object.assign(p,{[k]:q(b),[k+"_initial_layer"]:q(b)});
+  }
+  if(line?.d) p.filament_density=[String(line.d)];
+  return {f,name,file:name+".json",text:JSON.stringify(p,null,4),base:base.replace(/ @System$/,""),own,useTemps};
+}
+const CRC=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
+function makeZip(files){
+  const enc=new TextEncoder(), parts=[], central=[]; let off=0;
+  for(const {name,text} of files){
+    const nm=enc.encode(name), data=enc.encode(text); let crc=0xFFFFFFFF; for(const b of data) crc=CRC[(crc^b)&255]^(crc>>>8); crc=(crc^0xFFFFFFFF)>>>0;
+    const lh=new DataView(new ArrayBuffer(30)); lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0x0800,true); lh.setUint32(14,crc,true); lh.setUint32(18,data.length,true); lh.setUint32(22,data.length,true); lh.setUint16(26,nm.length,true);
+    const ch=new DataView(new ArrayBuffer(46)); ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true); ch.setUint16(8,0x0800,true); ch.setUint32(16,crc,true); ch.setUint32(20,data.length,true); ch.setUint32(24,data.length,true); ch.setUint16(28,nm.length,true); ch.setUint32(42,off,true);
+    parts.push(lh,nm,data); central.push(ch,nm); off+=30+nm.length+data.length;
+  }
+  const size=central.reduce((a,x)=>a+x.byteLength,0), end=new DataView(new ArrayBuffer(22));
+  end.setUint32(0,0x06054b50,true); end.setUint16(8,files.length,true); end.setUint16(10,files.length,true); end.setUint32(12,size,true); end.setUint32(16,off,true);
+  return new Blob([...parts,...central,end],{type:"application/zip"});
+}
+const DESK = () => window.spoolStockDesktop?.orca;
+function orcaCard(){
+  const list=ownedFilaments().map(orcaPreset);
+  if(!list.length) return `<div class="card"><h2>Orca presets</h2><p>Add some spools first, then their filaments can go into Orca as presets.</p></div>`;
+  return `<div class="card"><h2>Orca presets</h2>
+    <p>A preset for each of the ${list.length} filament${list.length===1?"":"s"} you own. Each builds on Orca's own profile for that filament where Orca has one, or the closest generic profile, so flow, cooling and speed come from Orca. Nozzle and bed temperatures are the ones on your stickers.</p>
+    <div class="hist">${list.map(x=>`<div><b>${esc(x.name)}</b><br><span class="muted">Builds on ${x.own?"Orca's own ":""}${esc(x.base)}${x.useTemps?", with your temperatures":""}</span></div>`).join("")}</div>
+    <div class="btns">${DESK()?`<button class="btn go" data-act="orcaSend">Send to Orca</button>`:""}<button class="btn ${DESK()?"":"go"}" data-act="orcaZip">Download for Orca</button></div>
+    <p class="hint">${DESK()?"Send to Orca puts them straight into Orca, then restart Orca. ":""}To import the download, in Orca use File, Import, Import Configs and choose the zip. Sending or importing again updates them.</p>
+  </div>`;
 }
 
 /* storage editor */
@@ -1639,6 +1698,13 @@ const actions={
     [ls[i],ls[j]]=[ls[j],ls[i]];
     ls.forEach((l,n)=>{ if(l.order!==n+1){ S.locs[l.id].order=n+1; col("locations").doc(l.id).update({order:n+1}); } });
     render();
+  },
+  orcaZip(){ const list=ownedFilaments().map(orcaPreset); saveFile("spool-stock-orca-presets.zip",makeZip(list.map(x=>({name:x.file,text:x.text})))); },
+  async orcaSend(){
+    const list=ownedFilaments().map(orcaPreset);
+    try{ const r=await DESK().write(list.map(x=>({name:x.file,text:x.text})));
+      if(r&&r.error) toast(r.error); else toast(`Sent ${r.written} preset${r.written===1?"":"s"} to Orca. Restart Orca to see them.`);
+    }catch{ toast("Couldn't reach Orca from here."); }
   },
   logSave(){ const p=$("#lpPct"); if(p) LP.pct=p.value; saveLog(); },
   logCancel(){ LP=null; go("stock"); },
