@@ -168,6 +168,25 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
 
  }
 
+ // logging a print from an Orca sliced file
+ const F3=__dirname+'/fixtures/';
+ await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('[data-go=log]');await p.click('[data-go=log]');await p.waitForSelector('label[for=pickPrint]');
+ await p.setInputFiles('#pickPrint',F3+'unsliced.3mf');await p.waitForFunction(()=>/hasn't been sliced/.test(document.querySelector('#toast').textContent));ok(true,'an unsliced 3MF is explained');
+ await p.setInputFiles('#pickPrint',F3+'print.gcode.3mf');await p.waitForSelector('[data-act=logSave]');
+ ok((await p.$$('.useRow')).length===2&&(await p.textContent('#main')).includes('12.5 g')&&(await p.textContent('#main')).includes('PETG, 3.2 g'),'sliced 3MF read: two filaments with grams');
+ const picks=await p.$$eval('[data-lp]',e=>e.map(x=>x.value));ok(picks[0]&&picks[0]!==picks[1],'a different spool suggested for each filament: '+picks);
+ db=await dbOf(p);ok(/PLA/i.test(db[uid+'spools/'+picks[0]].material)&&(!picks[1]||/PETG/i.test(db[uid+'spools/'+picks[1]].material)),'suggestions match the material: '+picks.map(id=>id&&db[uid+'spools/'+id].material));
+ db=await dbOf(p);const was=picks.map(id=>id?db[uid+'spools/'+id].remainG??db[uid+'spools/'+id].netG:null);
+ await p.screenshot({path:out+'/log-phone.png',fullPage:true});
+ await p.fill('#lpPct','50');await p.click('[data-act=logSave]');await p.waitForSelector('.racks');await p.waitForTimeout(150);
+ db=await dbOf(p);const now0=db[uid+'spools/'+picks[0]];ok(now0.remainG===Math.max(0,Math.round(was[0]-6.25))&&now0.prints[0].g===6.3&&now0.prints[0].name==='print','half a print takes half the grams off: '+was[0]+' -> '+now0.remainG);
+ await p.evaluate(()=>{location.hash='log'});await p.waitForSelector('label[for=pickPrint]');await p.setInputFiles('#pickPrint',F3+'print.gcode.3mf');await p.waitForSelector('[data-act=logSave]');ok((await p.textContent('#main')).includes('already logged'),'warns when a print is logged twice');await p.click('[data-act=logCancel]');await p.waitForSelector('.racks');
+await p.evaluate(id=>{location.hash=id},picks[0]);await p.waitForSelector('.spoolhead');ok((await p.textContent('#main')).includes('Prints'),'the spool page lists its prints');
+ const gtext=fs.readFileSync(F3+'print.gcode','utf8');
+ await p.evaluate(t=>{const dt=new DataTransfer();dt.items.add(new File([t],'part.gcode'));document.body.dispatchEvent(new DragEvent('drop',{dataTransfer:dt,bubbles:true,cancelable:true}))},gtext);
+ await p.waitForSelector('[data-act=logSave]');ok((await p.textContent('#main')).includes('PLA, 7.8 g'),'dropping plain G-code anywhere opens it');
+ const pick=await p.$eval('[data-lp="0"]',e=>e.value);db=await dbOf(p);const w0=db[uid+'spools/'+pick].remainG;await p.click('[data-act=logSave]');await p.waitForSelector('#toast button');await p.click('#toast button');await p.waitForTimeout(150);db=await dbOf(p);ok(db[uid+'spools/'+pick].remainG===w0,'undo puts the weight back');
+
  // filament catalogue: find a manufacturer, then their own names
  await p.evaluate(()=>{location.hash='add'});await p.waitForSelector('#f_brand');await p.waitForFunction(()=>!!CAT);
  await p.fill('#f_brand','esu');await p.waitForSelector('#brandPick .pick');ok((await p.textContent('#brandPick')).includes('filaments'),'manufacturer search shows how many filaments');

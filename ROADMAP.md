@@ -43,6 +43,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Storage built from scratch, with types, groups, spaces, limits and material warnings
 - [x] One storage with numbered spaces, swapping when full, and moving between spaces
 - [x] Reorder storages
+- [x] Log a print from an Orca or Bambu Studio sliced file (.gcode.3mf) or G-code, matching filaments to spools, with a percentage for failed prints, a print list per spool and Undo
 - [x] Arrange the spools inside a storage: spaces for a unit or dryer, a set order for shelves and boxes
 - [x] Add several storages at once, and remove all of them to start again
 - [x] Undo, and a warning when a spool wants hotter than a dryer gives
@@ -62,6 +63,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [ ] Old `build-1` release and tag deleted
 - [ ] Older account's slots folded into one storage on the real data
 - [ ] Weekly catalogue refresh running in GitHub Actions
+- [ ] Log a print with a real Orca export from Alduin and Betsy
 - [ ] Camera inside the APK
 - [ ] Sticker alignment on a test sheet
 - [ ] Stickers scanning once stuck to a spool

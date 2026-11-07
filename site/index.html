@@ -116,6 +116,10 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 .spec dd{margin:0;font-family:var(--mono);font-size:15px}
 .movegroup{display:grid;gap:6px}
 .movegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px}
+.useRow{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start}
+.useRow~.useRow{border-top:1px solid var(--line);padding-top:10px}
+.useRow .sw{cursor:default}
+.dropping{outline:3px dashed var(--tag);outline-offset:-6px}
 .arrange{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:6px}
 .arr{display:grid;justify-items:center;gap:3px;padding:8px 4px 6px;background:var(--bg);border:1px solid var(--line);cursor:pointer;min-width:0;font:inherit}
 .arr small{font:500 12px/1.1 var(--mono);color:var(--muted)}
@@ -225,6 +229,7 @@ input[type=color]{width:44px;height:44px;padding:2px;background:var(--bg);border
 <div id="modal" class="modal" hidden></div>
 <input type="file" id="pickScan" accept="image/*" capture="environment" hidden>
 <input type="file" id="pickLogo" accept="image/*" hidden>
+<input type="file" id="pickPrint" accept=".3mf,.gcode,.gco,.bgcode" hidden>
 <input type="file" id="pickImport" accept=".json,application/json,text/plain" hidden>
 
 <script src="config.js"></script>
@@ -610,7 +615,7 @@ function dataChanged(){
     if(!booted){ booted=true; route(true); return; }
     const el=document.activeElement;
     if(S.view==="scan") return;
-    if(["add","edit","setup","import","store"].includes(S.view)) { if(S.view==="setup"&&!(el&&el.closest&&el.closest("#main")&&el.matches("input,select,textarea"))) render(); return; }
+    if(["add","edit","setup","import","store","log"].includes(S.view)) { if(S.view==="setup"&&!(el&&el.closest&&el.closest("#main")&&el.matches("input,select,textarea"))) render(); return; }
     if(el&&el.closest&&el.closest("#main")&&el.matches("input[type=text],input[type=number],input[type=search],textarea")) return;
     render();
   },60);
@@ -680,7 +685,7 @@ function handleScan(code,source){
 }
 
 /* ---------- routing ---------- */
-const VIEWS=["stock","add","scan","stickers","setup","import"];
+const VIEWS=["stock","add","scan","stickers","setup","import","log"];
 function go(v){
   internal=true;
   if(location.hash==="#"+v){ internal=false; route(false); return; }
@@ -723,7 +728,7 @@ function render(){
   if(!db){ m.innerHTML=!CFG.firebase?SOURCE_NOTE:!started?`<div class="busy"><span class="spin"></span>Starting up</div>`:vLogin(); return; }
   if(!S.ready&&S.loadErr){ m.innerHTML=`<div class="card"><h2>Can't open your stock</h2><p>${S.loadErr==="permission-denied"?"Firebase refused access. Open Firestore in the Firebase console, go to the Rules tab, paste in firestore.rules and press Publish, then reload this page.":"Firebase gave an error, so reload the page. If it keeps happening, note this code."}</p><p class="mono">${esc(S.loadErr)}</p></div>`; return; }
   if(!S.ready){ m.innerHTML=S.stale?`<div class="note warn">Can't reach your stock yet. Check your signal, it will load when it connects.</div>`:`<div class="busy"><span class="spin"></span>Opening your stock</div>`; return; }
-  const v={stock:vStock,add:vForm,edit:vForm,scan:vScan,stickers:vStickers,setup:vSetup,spool:vSpool,loc:vLoc,store:vStore,import:vImport}[S.view]||vStock;
+  const v={stock:vStock,add:vForm,edit:vForm,scan:vScan,stickers:vStickers,setup:vSetup,spool:vSpool,loc:vLoc,store:vStore,import:vImport,log:vLog}[S.view]||vStock;
   m.innerHTML=(!navigator.onLine?`<div class="note warn">No signal. Changes are kept on this device and sync when you're back.</div>`:S.stale?`<div class="note warn">Showing your last saved copy. It may be out of date.</div>`:"")+v();
   if(S.view==="scan") Scanner.attach();
   if(S.view==="add"||S.view==="edit") formPreview();
@@ -757,7 +762,7 @@ function vStock(){
   const racks=groups().map(([g,ls])=>`${g?`<h2 class="grouphead">${esc(g)}</h2>`:""}<div class="racks">${ls.map(rackHTML).join("")}</div>`).join("");
   const mats=[...new Set(live.map(s=>baseMat(s.material)?.key||s.material))].sort();
   const f=S.filter;
-  return `<div class="summary">${live.length} spool${live.length===1?"":"s"}, ${kg.toFixed(1)} kg${low?`, ${low} low`:""}</div>
+  return `<div class="cardhead"><div class="summary">${live.length} spool${live.length===1?"":"s"}, ${kg.toFixed(1)} kg${low?`, ${low} low`:""}</div>${live.length?`<button class="btn sm" data-go="log">Log a print</button>`:""}</div>
   ${racks||`<div class="racks"><div class="card"><h2>Set up your storage</h2><p>Add each place you keep filament, such as a multi-material unit, a dryer or a shelf.</p><div class="btns"><button class="btn go" data-go="store-new">Add a storage</button></div></div></div>`}
   <div class="tools">
     <input type="search" id="q" aria-label="Search spools" placeholder="Search brand, material, colour or code" value="${esc(f.q)}">
@@ -815,6 +820,7 @@ function vSpool(){
       <div class="btns"><button class="btn" data-go="edit-${s.id}">Edit</button><button class="btn" data-act="reprint">Print sticker again</button></div>
     </div>
   </div>
+  ${(s.prints||[]).length?`<div class="card"><h2>Prints</h2><div class="hist">${s.prints.slice(0,8).map(x=>`<div>${when(x.at)}: ${esc(x.name)}, ${x.g} g</div>`).join("")}</div></div>`:""}
   ${hist?`<div class="card"><h2>Moves</h2><div class="hist">${hist}</div></div>`:""}
   <div class="btns"><button class="btn bad" data-act="delSpool">Delete spool</button></div>`;
 }
@@ -1368,6 +1374,112 @@ function vSetup(){
   <div class="card"><h2>Backup</h2><div class="btns"><button class="btn" data-act="csv">Download spool list (CSV)</button><button class="btn" data-act="json">Download full backup (JSON)</button></div></div>`;
 }
 
+/* logging a print from a sliced file (Orca or Bambu Studio .gcode.3mf, or plain G-code) */
+let LP=null;
+async function unzipEntry(file,want){
+  const buf=new Uint8Array(await file.arrayBuffer()), dv=new DataView(buf.buffer);
+  let e=buf.length-22; while(e>=0&&dv.getUint32(e,true)!==0x06054b50) e--;
+  if(e<0) throw "That file isn't a sliced 3MF.";
+  let p=dv.getUint32(e+16,true); const n=dv.getUint16(e+10,true), names=[];
+  for(let i=0;i<n;i++){
+    const method=dv.getUint16(p+10,true), size=dv.getUint32(p+20,true), nl=dv.getUint16(p+28,true), xl=dv.getUint16(p+30,true), cl=dv.getUint16(p+32,true), at=dv.getUint32(p+42,true);
+    const name=new TextDecoder().decode(buf.subarray(p+46,p+46+nl)); names.push(name);
+    if(want.test(name)){
+      const start=at+30+dv.getUint16(at+26,true)+dv.getUint16(at+28,true), raw=buf.subarray(start,start+size);
+      if(method===0) return new TextDecoder().decode(raw);
+      const out=new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw")));
+      return await out.text();
+    }
+    p+=46+nl+xl+cl;
+  }
+  return null;
+}
+function gcodeUse(text){
+  const grab=re=>{ const m=re.exec(text); return m?m[1].trim():null; };
+  let g=grab(/;\s*filament used \[g\]\s*[=:]\s*([^\n]+)/i);
+  const total=grab(/;\s*total filament weight \[g\]\s*[=:]\s*([^\n]+)/i);
+  const grams=(g||total||"").split(/[,;]/).map(x=>parseFloat(x)).filter(x=>Number.isFinite(x));
+  const types=(grab(/;\s*filament_type\s*=\s*([^\n]+)/i)||"").split(";").map(x=>x.trim());
+  const cols=(grab(/;\s*filament_colou?r\s*=\s*([^\n]+)/i)||"").split(/[;,]/).map(x=>x.trim());
+  return grams.map((v,i)=>({id:i+1,g:v,type:types[i]||types[0]||"",hex:/^#?[0-9a-f]{6}/i.test(cols[i]||"")?"#"+cols[i].replace("#","").slice(0,6):""})).filter(f=>f.g>0);
+}
+async function readSliced(file){
+  const name=file.name.replace(/\.(gcode\.3mf|3mf|gcode|gco|bgcode)$/i,"");
+  if(/\.3mf$/i.test(file.name)){
+    const info=await unzipEntry(file,/Metadata\/slice_info\.config$/i);
+    if(info){
+      const doc=new DOMParser().parseFromString(info,"text/xml"), plates=[...doc.querySelectorAll("plate")].map(pl=>{
+        const meta=k=>pl.querySelector(`metadata[key="${k}"]`)?.getAttribute("value");
+        const fil=[...pl.querySelectorAll("filament")].map(f=>({id:+f.getAttribute("id"),g:parseFloat(f.getAttribute("used_g")),type:f.getAttribute("type")||"",hex:f.getAttribute("color")||""})).filter(f=>f.g>0);
+        return {plate:meta("index")||"1",fil};
+      }).filter(p=>p.fil.length);
+      if(plates.length) return {name,plates};
+    }
+    const gc=await unzipEntry(file,/Metadata\/plate_\d+\.gcode$/i);
+    if(gc){ const fil=gcodeUse(gc.slice(0,400000)+gc.slice(-400000)); if(fil.length) return {name,plates:[{plate:"1",fil}]}; }
+    throw "That 3MF hasn't been sliced. In Orca use Export plate sliced file.";
+  }
+  const text=await file.slice(0,400000).text()+"\n"+await file.slice(Math.max(0,file.size-400000)).text();
+  const fil=gcodeUse(text); if(!fil.length) throw "Couldn't find filament usage in that G-code.";
+  return {name,plates:[{plate:"1",fil}]};
+}
+const rgb = h => { const m=/^#?([0-9a-f]{6})/i.exec(h||""); if(!m) return null; const n=parseInt(m[1],16); return [n>>16,n>>8&255,n&255]; };
+const colourGap = (a,b) => { const x=rgb(a), y=rgb(b); return x&&y?Math.hypot(x[0]-y[0],x[1]-y[1],x[2]-y[2])/441:0.5; };
+const loaded = s => { const l=S.locs[s.loc]; return !!l&&(spaced(l)||["ams","holder","dryer"].includes(l.kind)); };
+function spoolChoices(f){
+  const want=baseMat(f.type)?.key||f.type.toUpperCase();
+  return liveSpools().map(s=>{
+    const mat=(baseMat(s.material)?.key||s.material.toUpperCase())===want||s.material.toUpperCase().includes(f.type.toUpperCase());
+    const gap=Math.min(...colourList(s).map(c=>colourGap(c,f.hex)));
+    return {s,score:(loaded(s)?0:1)+(mat?0:3)+gap*2};
+  }).sort((a,b)=>a.score-b.score);
+}
+function startLog(r){
+  const key=r.name+"|"+r.plates.map(p=>p.fil.map(f=>f.g).join(",")).join("/");
+  LP={...r,key,plate:0,pct:100}; pickSpools(); go("log"); render();
+}
+function pickSpools(){
+  const taken=new Set();
+  LP.pick=LP.plates[LP.plate].fil.map(f=>{ const c=spoolChoices(f).find(c=>!taken.has(c.s.id)&&c.score<3); if(c) taken.add(c.s.id); return c?c.s.id:""; });
+}
+function vLog(){
+  if(!LP) return `<div><h1>Log a print</h1></div>
+  <div class="card"><p>In Orca, use <b>Export plate sliced file</b>, then drop the file here or choose it. Plain G-code works too.</p>
+    <div class="btns"><label class="btn go" for="pickPrint">Choose the file</label></div>
+    <p class="hint">You can also drop it anywhere on this page.</p></div>`;
+  const pl=LP.plates[LP.plate], done=(S.settings.logged||[]).includes(LP.key);
+  const rows=pl.fil.map((f,i)=>{
+    const ch=spoolChoices(f), opt=(c)=>`<option value="${c.s.id}" ${LP.pick[i]===c.s.id?"selected":""}>${esc(c.s.id.toUpperCase()+" "+c.s.material+" "+(c.s.colour||"")+", "+(c.s.remainG??c.s.netG??"?")+" g"+(loaded(c.s)?", "+spotName(c.s):""))}</option>`;
+    return `<div class="useRow"><span class="sw" style="background:${esc(f.hex||"#9AA5AB")}" aria-hidden="true"></span><div class="field"><span>Filament ${f.id}: ${esc(f.type||"Unknown")}, ${Math.round(f.g*10)/10} g</span>
+      <select data-lp="${i}"><option value="">Don't take this off a spool</option><optgroup label="Best matches">${ch.slice(0,6).map(opt).join("")}</optgroup><optgroup label="Everything else">${ch.slice(6).map(opt).join("")}</optgroup></select></div></div>`;
+  }).join("");
+  return `<div><div class="code">Log a print</div><h1>${esc(LP.name)}</h1></div>
+  ${done?`<div class="note warn">You've already logged this print. Logging it again takes the filament off twice.</div>`:""}
+  <div class="card">
+    ${LP.plates.length>1?`<label class="field"><span>Plate</span><select id="lpPlate">${LP.plates.map((p,i)=>`<option value="${i}" ${i===LP.plate?"selected":""}>Plate ${esc(p.plate)}</option>`).join("")}</select></label>`:""}
+    ${rows}
+    <label class="field"><span>How much of it printed (%)</span><input type="number" inputmode="numeric" min="1" max="100" id="lpPct" value="${LP.pct}"><span class="hint">Lower this for a print that failed or was cancelled.</span></label>
+    <div class="btns"><button class="btn go" data-act="logSave">Take it off</button><button class="btn" data-act="logCancel">Cancel</button></div>
+  </div>`;
+}
+async function saveLog(){
+  const pl=LP.plates[LP.plate], pct=clamp(num(LP.pct)||100,1,100)/100, now=Date.now(), before={}, use={};
+  pl.fil.forEach((f,i)=>{ const id=LP.pick[i]; if(id) use[id]=(use[id]||0)+f.g*pct; });
+  if(!Object.keys(use).length){ toast("Pick at least one spool."); return; }
+  for(const [id,g] of Object.entries(use)){
+    const s=S.spools[id]; before[id]={remainG:s.remainG??s.netG??null,prints:s.prints||[]};
+    const left=Math.max(0,Math.round((s.remainG??s.netG??0)-g)), prints=[{at:now,name:LP.name,g:Math.round(g*10)/10},...(s.prints||[])].slice(0,30);
+    col("spools").doc(id).update({remainG:left,prints}); S.spools[id]={...s,remainG:left,prints};
+  }
+  saveConfig({logged:[...(S.settings.logged||[]).slice(-60),LP.key]});
+  const n=Object.keys(use).length, low=Object.keys(use).filter(id=>isLow(S.spools[id])).map(id=>id.toUpperCase());
+  LP=null; go("stock");
+  toast(`Taken off ${n} spool${n===1?"":"s"}.${low.length?` ${low.join(", ")} ${low.length===1?"is":"are"} now low.`:""}`,"Undo",()=>{ for(const [id,b] of Object.entries(before)) col("spools").doc(id).update(b); });
+}
+async function takePrintFile(f){
+  try{ startLog(await readSliced(f)); }catch(m){ toast(typeof m==="string"?m:"Couldn't read that file."); }
+}
+
 /* storage editor */
 function storeDefaults(kind){ const t=STORE_TYPES[kind]; return {kind,spaces:t.spaces,capacity:t.cap??"",warn:t.warn||""}; }
 function storeDraft(id){
@@ -1528,6 +1640,8 @@ const actions={
     ls.forEach((l,n)=>{ if(l.order!==n+1){ S.locs[l.id].order=n+1; col("locations").doc(l.id).update({order:n+1}); } });
     render();
   },
+  logSave(){ const p=$("#lpPct"); if(p) LP.pct=p.value; saveLog(); },
+  logCancel(){ LP=null; go("stock"); },
   arrStart(){ S.arrange=S.param; S.arrSel=null; render(); },
   arrDone(){ S.arrange=null; S.arrSel=null; render(); },
   arrPick(el){
@@ -1591,6 +1705,10 @@ document.addEventListener("change",async e=>{
     if(code) handleScan(code,"page"); else toast(raw?"That code isn't one of your stickers.":"Couldn't find a code in that photo. Get closer and try again.");
     return;
   }
+  if(t.id==="pickPrint"&&t.files[0]){ const f=t.files[0]; t.value=""; takePrintFile(f); return; }
+  if(t.dataset&&t.dataset.lp!=null&&LP){ LP.pick[+t.dataset.lp]=t.value; return; }
+  if(t.id==="lpPlate"&&LP){ LP.plate=+t.value; pickSpools(); render(); return; }
+  if(t.id==="lpPct"&&LP){ LP.pct=t.value; return; }
   if(t.id==="pickImport"&&t.files[0]){ const f=t.files[0]; t.value=""; try{ Imp=parseImport(await f.text()); render(); }catch(m){ toast(String(m)); } return; }
   if(t.dataset&&t.dataset.imp!=null&&Imp){ const it=Imp.items.find(i=>String(i.key)===t.dataset.imp); if(it) it.on=t.checked; const l=$("#importLoc"); Imp.loc=l?l.value:""; render(); return; }
   if(t.id==="pickLogo"&&t.files[0]){
@@ -1641,6 +1759,16 @@ document.addEventListener("submit",async e=>{
   if(e.target.id==="authForm"){ try{ await firebase.auth().signInWithEmailAndPassword($("#authEmail").value.trim(),$("#authPass").value); }catch(x){ authErr(x); } }
 });
 for(const ev of ["online","offline"]) addEventListener(ev,()=>{ if(db&&!["add","edit","scan","setup","store"].includes(S.view)) render(); });
+const isPrintFile = f => /\.(3mf|gcode|gco)$/i.test(f?.name||"");
+addEventListener("dragover",e=>{ if(db&&[...(e.dataTransfer?.items||[])].some(i=>i.kind==="file")){ e.preventDefault(); document.body.classList.add("dropping"); } });
+addEventListener("dragleave",e=>{ if(!e.relatedTarget) document.body.classList.remove("dropping"); });
+addEventListener("drop",e=>{
+  document.body.classList.remove("dropping");
+  if(!db||!e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  const f=[...e.dataTransfer.files].find(isPrintFile);
+  if(f) takePrintFile(f); else toast("Drop an Orca sliced file (.gcode.3mf) or G-code here.");
+});
 addEventListener("paste",e=>{
   const f=[...(e.clipboardData?.files||[])].find(x=>x.type.startsWith("image/")); if(!f) return;
   if((S.view==="add"||S.view==="edit")&&F&&F.brand){ pendingLogo=F.brand; readForm(); const dt=new DataTransfer(); dt.items.add(f); const p=$("#pickLogo"); p.files=dt.files; p.dispatchEvent(new Event("change",{bubbles:true})); }
