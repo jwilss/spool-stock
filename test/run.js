@@ -264,6 +264,7 @@ await p.evaluate(id=>{location.hash=id},picks[0]);await p.waitForSelector('.spoo
  const [oz]=await Promise.all([p.waitForEvent('download'),p.click('[data-act=orcaZip]')]);await oz.saveAs(out+'/orca.zip');
  const presets=JSON.parse(require('child_process').execSync(`python3 -I -c "import zipfile,json,sys;z=zipfile.ZipFile(sys.argv[1]);print(json.dumps({n:json.loads(z.read(n)) for n in z.namelist()}))" ${out}/orca.zip`).toString());
  const cat=JSON.parse(fs.readFileSync(__dirname+'/../site/catalogue.json')),known=new Set([...cat.orca.generic,...Object.values(cat.brands).flat().map(l=>l.o).filter(Boolean)]);
+ ok(cat.brands['Bambu Lab'].find(l=>l.n==='Support for PLA/PETG').o==='Bambu Support For PLA/PETG @System'&&(cat.orca.variants['Bambu Support For PLA/PETG']||[]).includes('Bambu Support For PLA/PETG @BBL X1C'),'Orca names come from inside its files, not the file names (PLA/PETG, not PLA-PETG)');
  const pv=Object.entries(presets);ok(pv.length>=3&&pv.every(([n,j])=>j.type==='filament'&&j.from==='User'&&j.name+'.json'===n&&j.filament_settings_id[0]===j.name&&/^\d+\.\d+\.\d+\.\d+$/.test(j.version)),'zip holds valid Orca user presets: '+pv.length);
  ok(pv.every(([,j])=>known.has(j.inherits)&&j.inherits.startsWith('Generic ')),'new presets build on generic profiles Orca has: '+[...new Set(pv.map(([,j])=>j.inherits))].join('; '));
  ok(!pv.some(([n])=>/^Bambu Lab ASA \(/.test(n)),'no preset for a filament Orca already has (Bambu ASA)');
