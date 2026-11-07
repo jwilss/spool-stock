@@ -12,12 +12,22 @@ Takes each print's filament off the right spools in Spool Stock, for Bambu print
 
 ## Stock and presets
 
-The tab has three views: **Prints** (the printers, prints waiting for you and recent results), **Stock** and **Presets**.
+The tab has four views: **Prints** (the printers, prints waiting for you and recent results), **Stock**, **Presets** and **Cameras**.
 
 - **Stock** shows every spool that isn't used up: its colour, a bar for what's left, and its storage and space. Search by code, brand, material, colour or storage, show only low spools (150 g or less, as in the app), and group by storage, material or brand. A spool a printer feeds from has that printer's name on it. It refreshes about once a minute, or press **Refresh**.
 - **Presets** adds a **Spool Stock** group to Orca's filament list, with one preset for each filament you own. Ones Orca already has a profile for build on it unchanged. The rest build on Orca's closest generic profile with the temperatures from your stickers, the same as **Setup > Orca presets** in the app. Press **Add them to Orca** once. After that the group follows your stock: Spool Stock sends the list whenever your filaments change, and the plugin picks it up within a minute or two, or straight away with **Update now**. **Remove them from Orca** takes the group out again.
 
 The presets live in Orca's own folder as a local preset bundle, `user\<your preset folder>\_local\spool-stock\`. Orca 2.5 builds that can reload a bundle while open show the change straight away. Older ones need a restart, and the tab says so. Copies of the same presets sent before by the Windows app are moved to `spoolstock\old-presets\`, so nothing shows twice.
+
+## Cameras
+
+**Cameras** plays RTSP cameras, such as Tapo ones, inside Orca. There's nothing else to install: the plugin connects to each camera and passes its video to the tab as it comes, without re-encoding it.
+
+1. For a Tapo camera, make a Camera Account first: in the Tapo app, open the camera's settings, then **Advanced Settings**, then **Camera Account**.
+2. In **Cameras**, give the camera a name, paste its link and pick the printer it watches. The link is `rtsp://username:password@CAMERA-IP/stream2`. A space, `@` or `/` in the username or password is fine as it is.
+3. Press **Add**. The picture appears in a few seconds, with the printer's current print under it.
+
+`stream2` is the lighter stream and plenty for watching prints. `stream1` is full quality. Cameras only stream while the Cameras view is open, and let go about 10 seconds after you leave it. Only H.264 video can be shown. The links, with their passwords, stay in `cameras.json` on this PC and never go to Spool Stock or the log.
 
 ## Low spool warnings
 
@@ -42,7 +52,8 @@ The tab shows each printer's Spool Stock match, and while printing, which spool 
 - Printer IPs and access codes stay in `%APPDATA%\OrcaSlicer\spoolstock\printers.json` on this PC. They're never sent to Spool Stock.
 - The sign-in is kept in `account.json` in the same folder. It can only reach your own stock. Changing your Spool Stock password cancels it.
 - The only thing sent to a printer is Bambu's standard request for its status. The job file is only read.
-- The log, `spoolstock.log`, never contains access codes or the sign-in.
+- Camera links and passwords stay in `cameras.json` in the same folder.
+- The log, `spoolstock.log`, never contains access codes, camera passwords or the sign-in.
 
 ## If Orca blocks the connection
 

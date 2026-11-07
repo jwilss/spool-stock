@@ -1535,7 +1535,7 @@ function pluginCard(){
   const url="spool_stock.py";
   return `<div class="card"><h2>Orca plugin</h2>
     <p>For Bambu printers in LAN mode. When a print ends, the plugin takes what it used off the spools in the trays it printed from, going by the printers above. A failed or cancelled print waits in Orca's Spool Stock tab, with how far it got, for you to check.</p>
-    <p>Its tab also shows your stock, and it can keep a Spool Stock group in Orca's filament list with one preset for each filament you own, updated as your stock changes.</p>
+    <p>Its tab also shows your stock and your cameras (Tapo and other RTSP cameras), and it can keep a Spool Stock group in Orca's filament list with one preset for each filament you own, updated as your stock changes.</p>
     <div class="btns">${url?`<a class="btn" href="${esc(url)}" download>Download the plugin</a>`:""}<button class="btn" data-act="pluginCode">Copy sign-in code</button></div>
     <p class="hint">Paste the code into the plugin's tab once. It lets the plugin change your stock, so treat it like a password. Changing your password cancels it.</p>
     ${jobs.length?`<h3>Prints from Orca</h3><div class="hist">${jobs.map(j=>`<div class="jobrow"><span>${when(j.at)}: ${esc(j.printer||"")}, ${esc(j.job||"print")}<br><span class="sub">${(j.items||[]).map(i=>`${i.g} g off ${esc(String(i.spool||"").toUpperCase())}`).join(", ")}${j.pct&&j.pct<100?`, ${j.pct}% printed`:""}${j.undone?". Undone":""}</span></span>${j.undone?"":`<button class="btn sm" data-act="jobUndo" data-v="${esc(j.id)}">Undo</button>`}</div>`).join("")}</div>`:""}
