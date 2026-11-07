@@ -387,7 +387,7 @@ function disc(s,size=44){
 
 /* ---------- print settings lookup ---------- */
 /* Filament catalogue: manufacturers and their own product names, from SpoolmanDB. Fetched once and kept for offline use. */
-let CAT=null, ORCA_GENERIC=[];
+let CAT=null, ORCA_GENERIC=[], ORCA_VARIANTS={};
 const norm = s => String(s||"").toLowerCase().replace(/[™®]/g,"").replace(/[^a-z0-9+.]+/g," ").trim();
 const ALIASES = [["high speed","hs"],["high flow","hf"],["carbon fibre","cf"],["carbon fiber","cf"],["glass fibre","gf"],["glass fiber","gf"]];
 function searchText(...parts){
@@ -401,7 +401,7 @@ async function loadCatalogue(){
     const r=await fetch("catalogue.json"); if(!r.ok) return;
     const j=await r.json(), map={};
     for(const [name,lines] of Object.entries(j.brands)) map[slug(name)]={name,aka:(j.aliases||{})[name]||[],lines:lines.map(l=>({...l,hay:searchText(l.n,l.m,...[].concat(l.a||[]))}))};
-    CAT=map; ORCA_GENERIC=j.orca?.generic||[];
+    CAT=map; ORCA_GENERIC=j.orca?.generic||[]; ORCA_VARIANTS=j.orca?.variants||{};
   }catch{}
 }
 const catBrand = name => CAT?.[slug(name)] || Object.values(CAT||{}).find(c=>c.aka.some(a=>slug(a)===slug(name)));
@@ -1508,7 +1508,7 @@ function ownedFilaments(){
 const orcaName = f => `${f.brand} ${f.material} (Spool Stock)`.replace(/[\\/:*?"<>|]+/g,"-").replace(/\s+/g," ").trim();
 function orcaPreset(f){
   const line=catLine(f.brand,f.material), v=lookup(f.brand,f.material), name=orcaName(f);
-  if(line?.o) return {f,name:line.o.replace(/ @System$/,""),own:true};
+  if(line?.o){ const alias=line.o.replace(/ @System$/,""); return {f,name:alias,own:true,names:[line.o,...(ORCA_VARIANTS[alias]||[])]}; }
   const base=orcaGenericFor(f.material,f.finish), useTemps=v.nMin!=null||v.bMin!=null;
   const p={type:"filament",name,from:"User",instantiation:"true",inherits:base,version:ORCA_VERSION,filament_settings_id:[name],filament_vendor:[f.brand]};
   const q=x=>[String(Math.round(x))];
@@ -1539,7 +1539,7 @@ function makeZip(files){
 const DESK = () => window.spoolStockDesktop?.orca;
 function orcaPlan(){
   const all=ownedFilaments().map(orcaPreset), own=all.filter(x=>x.own), made=all.filter(x=>!x.own);
-  return {all,own,made,show:[...new Set(own.map(x=>x.name))]};
+  return {all,own,made,show:[...new Set(own.flatMap(x=>x.names))]};
 }
 function orcaCard(){
   const {all,own,made}=orcaPlan();
@@ -1716,12 +1716,12 @@ const actions={
   },
   orcaZip(){ const {made}=orcaPlan(); saveFile("spool-stock-orca-presets.zip",makeZip(made.map(x=>({name:x.file,text:x.text})))); },
   async orcaSend(){
-    const {made,show}=orcaPlan(), only=$("#orcaOnly")?.checked;
+    const {made,show}=orcaPlan(), wantList=$("#orcaOnly")?.checked, only=wantList&&(DESK().version||0)>=3;
     try{
       const r=await DESK().write(made.map(x=>({name:x.file,text:x.text})),only?{show}:{});
       if(r&&r.error){ toast(r.error); return; }
       const bits=[r.written?`${r.written} preset${r.written===1?"":"s"} sent`:"",r.shown!=null?`Orca's list set to your filaments`:""].filter(Boolean).join(" and ");
-      toast(`${bits||"Done"}. Open Orca to see them.${r.missing?.length?` Not found in Orca: ${r.missing.join(", ")}.`:""}`);
+      toast(`${bits||"Done"}. Open Orca to see them.${wantList&&!only?" To set Orca's list as well, update the Windows app from the releases page.":""}`);
     }catch{ toast("Couldn't reach Orca from here."); }
   },
   async orcaRestore(){
