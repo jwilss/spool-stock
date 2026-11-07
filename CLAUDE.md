@@ -8,7 +8,7 @@ Jack's filament inventory. Read `ROADMAP.md` first: it has the file map, how eve
 - UK spelling. No em dashes in docs, UI text or commit messages. Plain, direct wording, written for Jack rather than about him.
 - No manufacturer logos in this repo. They live in each user's Firestore data.
 - The Firebase API key is never committed. `site/config.js` keeps `__FIREBASE_API_KEY__`, and `site.yml` fills it from the `FIREBASE_API_KEY` secret.
-- Printer IPs and access codes never go to Firebase or into a log. They stay in the Orca plugin's folder on Jack's PC.
+- Printer IPs and access codes, and camera links and passwords, never go to Firebase or into a log. They stay in the Orca plugin's folder on Jack's PC.
 - No API keys for logo lookups.
 - Keep the app one HTML file with no framework.
 - Update `ROADMAP.md` (and the README if it's user-facing) with each change, and tick off what's done.
@@ -50,6 +50,8 @@ Pushing to `main` publishes the site through `.github/workflows/site.yml` (only 
 
 ## Next, agreed with Jack
 
-Done: the low-filament warning and Orca's theme (1.1.0), then the Stock view and live preset sync in the tab (1.2.0). Jack doesn't want a reorder or buy button.
+Done: the low-filament warning and Orca's theme (1.1.0), the Stock view and live preset sync in the tab (1.2.0), and Cameras (1.3.0). Jack doesn't want a reorder or buy button.
+
+Waiting on Jack: Cameras with his Tapo cameras on the real Orca. Orca 2.5 also has its own "Custom camera source" (MJPEG or a web page, one for all printers), which is why the plugin relays RTSP itself instead.
 
 Confirmed on his Orca (7 Nov 2026): `orca.host.preset.bundles.reload_local` exists, and the Spool Stock group loads live. A few Orca profile files are named differently from the preset inside (hyphen for slash), so the catalogue reads names from inside the files.

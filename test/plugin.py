@@ -447,14 +447,154 @@ ok('"presets.sync"' in logtext and '"reload": "restart"' in logtext, "the log sa
 bundles_api.reload_local = reload_local
 st = plug.handle({"type": "presets_off"})
 ok(not list((bdir / "filament").iterdir()) and reloads[-1] == "spool-stock" and not st["presets"]["on"], "turning it off empties the group and reloads")
-(tmp / "tab-state.json").write_text(json.dumps(plug.handle({"type": "presets_now"})))
+
+# ---- cameras: a fake Tapo streaming real H.264 over RTSP, with Digest sign-in ----
+import hashlib
+h264 = tmp / "cam.h264"
+subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=15", "-t", "4", "-c:v", "libx264", "-profile:v", "baseline",
+                "-x264-params", "keyint=15:min-keyint=15:slices=1:scenecut=0", "-pix_fmt", "yuv420p", "-f", "h264", str(h264)], check=True)
+raw = h264.read_bytes()
+nals = [n.lstrip(b"\x00") for n in re.split(b"\x00\x00\x01", raw) if n.strip(b"\x00")]
+nals = [n[:-1] if n.endswith(b"\x00") else n for n in nals]
+AUS, cur = [], []
+for n in nals:
+    cur.append(n)
+    if n[0] & 0x1F in (1, 5): AUS.append(cur); cur = []
+SPS = next(n for n in nals if n[0] & 0x1F == 7); PPS = next(n for n in nals if n[0] & 0x1F == 8)
+CAM = {"user": "printer cam", "pass": "pa@ss/1", "realm": "TP-LINK IP-CAM", "nonce": "f00dcafe", "log": [], "playing": 0}
+def md5(x): return hashlib.md5(x.encode()).hexdigest()
+def rtp(seq, ts, pay, mark): return struct.pack(">BBHII", 0x80, (0x80 if mark else 0) | 96, seq & 0xFFFF, ts & 0xFFFFFFFF, 0x1234) + pay
+def cam_conn(c):
+    lock = threading.Lock(); buf = b""; playing = threading.Event()
+    def send(b):
+        with lock: c.sendall(b)
+    def stream():
+        seq, ts = 0, 0xFFFFF000   # starts near the wrap, to check it's handled
+        while playing.is_set():
+            for au in AUS:
+                if not playing.is_set(): break
+                pkts = []
+                params = [n for n in au if n[0] & 0x1F in (7, 8)]
+                if params: pkts.append(bytes([24]) + b"".join(struct.pack(">H", len(n)) + n for n in params))
+                for n in (n for n in au if n[0] & 0x1F not in (7, 8)):
+                    if len(n) <= 1200: pkts.append(n)
+                    else:
+                        body, hdr = n[1:], n[0]
+                        parts = [body[i:i + 1200] for i in range(0, len(body), 1200)]
+                        for i, part in enumerate(parts):
+                            pkts.append(bytes([(hdr & 0xE0) | 28, (0x80 if i == 0 else 0) | (0x40 if i == len(parts) - 1 else 0) | (hdr & 0x1F)]) + part)
+                for i, pk in enumerate(pkts):
+                    r = rtp(seq, ts, pk, i == len(pkts) - 1); seq += 1
+                    try: send(b"$\x00" + struct.pack(">H", len(r)) + r)
+                    except OSError: return
+                ts += 6000; time.sleep(1 / 15)
+    try:
+        while True:
+            while b"\r\n\r\n" not in buf:
+                d = c.recv(4096)
+                if not d: return
+                buf += d
+            head, buf = buf.split(b"\r\n\r\n", 1)
+            lines = head.decode().split("\r\n"); method, url = lines[0].split()[:2]
+            h = {l.split(":", 1)[0].lower(): l.split(":", 1)[1].strip() for l in lines[1:] if ":" in l}
+            CAM["log"].append((method, url, h.get("authorization", "")))
+            cseq = h.get("cseq", "0")
+            auth = h.get("authorization", "")
+            want = md5(f"{md5(CAM['user'] + ':' + CAM['realm'] + ':' + CAM['pass'])}:{CAM['nonce']}:{md5(method + ':' + url)}")
+            if method not in ("OPTIONS", "TEARDOWN") and f'response="{want}"' not in auth:
+                send(f'RTSP/1.0 401 Unauthorized\r\nCSeq: {cseq}\r\nWWW-Authenticate: Basic realm="{CAM["realm"]}"\r\nWWW-Authenticate: Digest realm="{CAM["realm"]}", nonce="{CAM["nonce"]}"\r\n\r\n'.encode()); continue
+            port = c.getsockname()[1]
+            if method == "DESCRIBE":
+                if not url.endswith("/stream2"): send(f"RTSP/1.0 404 Not Found\r\nCSeq: {cseq}\r\n\r\n".encode()); continue
+                sdp = (f"v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=Session streamed by \"TP-LINK RTSP Server\"\r\nt=0 0\r\nm=audio 0 RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\na=control:track2\r\n"
+                       f"m=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 packetization-mode=1; profile-level-id=42C01E; sprop-parameter-sets={base64.b64encode(SPS).decode()},{base64.b64encode(PPS).decode()}\r\na=control:track1\r\n")
+                send(f"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\nContent-Base: rtsp://127.0.0.1:{port}/stream2/\r\nContent-Type: application/sdp\r\nContent-Length: {len(sdp)}\r\n\r\n{sdp}".encode())
+            elif method == "SETUP":
+                ok_track = url == f"rtsp://127.0.0.1:{port}/stream2/track1" and "interleaved=0-1" in h.get("transport", "")
+                send(f"RTSP/1.0 {'200 OK' if ok_track else '461 Unsupported Transport'}\r\nCSeq: {cseq}\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nSession: 7788;timeout=60\r\n\r\n".encode())
+            elif method == "PLAY":
+                send(f"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\nSession: 7788\r\n\r\n".encode()); playing.set(); CAM["playing"] += 1
+                threading.Thread(target=stream, daemon=True).start()
+            elif method == "TEARDOWN":
+                playing.clear(); send(f"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\n\r\n".encode()); return
+            else:
+                send(f"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\nSession: 7788\r\n\r\n".encode())
+    except OSError: pass
+    finally: playing.clear(); c.close()
+csrv = socket.socket(); csrv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); csrv.bind(("127.0.0.1", 0)); csrv.listen(5)
+def cam_server():
+    while True:
+        c, _ = csrv.accept(); threading.Thread(target=cam_conn, args=(c,), daemon=True).start()
+threading.Thread(target=cam_server, daemon=True).start()
+CPORT = csrv.getsockname()[1]
+plug.CAM_IDLE = 3
+
+ok(plug.parse_rtsp("rtsp://printer cam:pa@ss/1@192.168.1.50/stream2") == {"user": "printer cam", "password": "pa@ss/1", "host": "192.168.1.50", "port": 554, "url": "rtsp://192.168.1.50/stream2"},
+   "camera links with a space, @ and / in the sign-in still read right")
+ok(plug.parse_rtsp("rtsp://printer%20cam:pw@10.0.0.2:8554/stream1")["user"] == "printer cam" and plug.parse_rtsp("http://x/") is None, "an encoded space works, and a web link is refused")
+ok(plug.sps_size(SPS) == (320, 240), "picture size read from the camera's video settings")
+qc = plug.Camera("q", "rtsp://u:p@h/stream2", "q"); qc.auth = ("digest", {"realm": "r", "nonce": "n", "qop": "auth,auth-int", "algorithm": "MD5"})
+qa = qc._authorisation("PLAY", "rtsp://h/stream2"); qd = dict(re.findall(r'(\w+)="?([^",]*)"?', qa[7:]))
+ok(qd.get("qop") == "auth" and qd.get("nc") == "00000001" and qd["response"] == md5(f"{md5('u:r:p')}:n:00000001:{qd['cnonce']}:auth:{md5('PLAY:rtsp://h/stream2')}"),
+   "the stricter Digest sign-in (qop) works too")
+st = plug.handle({"type": "cam_add", "name": "Betsy cam", "url": f"rtsp://printer cam:pa@ss/1@127.0.0.1:{CPORT}/stream2", "printer": "Betsy"})
+cams = st["cameras"]
+ok(len(cams) == 1 and cams[0]["printer"] == "Betsy" and cams[0]["host"] == "127.0.0.1" and "url" not in cams[0], "camera added, and the tab never gets its link or password")
+cid = cams[0]["id"]
+got, gen, seq, replies = [], 0, -1, []
+end = time.time() + 6
+while time.time() < end:
+    r = plug.handle({"type": "cams", "want": [{"id": cid, "gen": gen, "seq": seq}]})["cams"][0]
+    replies.append(r)
+    if r.get("init"): gen, seq = r["gen"], -1; got = [base64.b64decode(r["init"])]
+    if r.get("chunks") and r["gen"] == gen: got += [base64.b64decode(x) for x in r["chunks"]]; seq = r["seq"]
+    time.sleep(0.3)
+ok(replies[-1]["status"] == "Live" and replies[-1]["mime"] == 'video/mp4; codecs="avc1.%02X%02X%02X"' % (SPS[1], SPS[2], SPS[3]), "camera goes live: " + replies[-1]["status"] + " " + replies[-1].get("mime", ""))
+auth_used = [a for m, u, a in CAM["log"] if m == "DESCRIBE"]
+ok(len(auth_used) == 2 and not auth_used[0] and auth_used[1].startswith("Digest ") and 'username="printer cam"' in auth_used[1], "signs in with Digest when the camera asks, over Basic")
+mp4 = tmp / "cam.mp4"; mp4.write_bytes(b"".join(got))
+pr = json.loads(subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-show_streams", "-of", "json", str(mp4)], capture_output=True, text=True).stdout or "{}")
+vs = (pr.get("streams") or [{}])[0]
+ok(vs.get("codec_name") == "h264" and vs.get("width") == 320 and vs.get("height") == 240 and int(vs.get("nb_read_frames", 0)) >= 45,
+   f"what reaches the tab is playable video: {vs.get('codec_name')} {vs.get('width')}x{vs.get('height')}, {vs.get('nb_read_frames')} frames")
+dec = subprocess.run(["ffmpeg", "-v", "error", "-i", str(mp4), "-f", "null", "-"], capture_output=True, text=True)
+ok(dec.returncode == 0 and not dec.stderr.strip(), "decodes without errors" + (": " + dec.stderr[:200] if dec.stderr.strip() else ""))
+(tmp / "cam-replies.json").write_text(json.dumps([r for r in replies if r.get("init") or r.get("chunks")]))
+late = plug.handle({"type": "cams", "want": [{"id": cid, "gen": 0, "seq": -1}]})["cams"][0]
+ok(late.get("init") and plug.mp4_init(SPS, PPS)[0] == base64.b64decode(late["init"]) and late["chunks"] and (base64.b64decode(late["chunks"][0])[4:8] == b"moof"),
+   "a page that opens later gets the header and starts from a keyframe")
+first = base64.b64decode(late["chunks"][0]); trun = first.index(b"trun")
+ok(struct.unpack(">I", first[trun + 24:trun + 28])[0] == 0x02000000, "and that first frame is a keyframe")
+playing_before = CAM["playing"]
+time.sleep(plug.CAM_IDLE + 2.5)
+ok(any(m == "TEARDOWN" for m, _, _ in CAM["log"]) and not plug._cams[cid].thread.is_alive(), "lets the camera go once the Cameras page stops asking")
+r = plug.handle({"type": "cams", "want": [{"id": cid, "gen": gen, "seq": seq}]})["cams"][0]
+ok(wait(lambda: plug.handle({"type": "cams", "want": [{"id": cid, "gen": gen, "seq": seq}]})["cams"][0].get("init")) and CAM["playing"] == playing_before + 1,
+   "and reconnects with a fresh stream when it's opened again")
+plug.handle({"type": "cam_add", "name": "Wrong", "url": f"rtsp://printer cam:nope@127.0.0.1:{CPORT}/stream2"})
+wid = next(c["id"] for c in plug.cameras_view() if c["name"] == "Wrong")
+ok(wait(lambda: "didn't accept the username and password" in plug.handle({"type": "cams", "want": [{"id": wid}]})["cams"][0]["status"], 8), "a wrong password is explained")
+plug.handle({"type": "cam_add", "name": "Path", "url": f"rtsp://printer cam:pa@ss/1@127.0.0.1:{CPORT}/stream9"})
+pid = next(c["id"] for c in plug.cameras_view() if c["name"] == "Path")
+ok(wait(lambda: "no stream at that link" in plug.handle({"type": "cams", "want": [{"id": pid}]})["cams"][0]["status"], 8), "a wrong stream name is explained")
+ok("isn't an RTSP link" in plug.handle({"type": "cam_add", "url": "http://192.168.1.50/stream2"})["hint"], "a web link is refused with an example")
+plug.handle({"type": "cam_edit", "id": cid, "printer": "Alduin"})
+ok(plug.cameras_view()[0]["printer"] == "Alduin", "a camera can be moved to another printer")
+for x in (wid, pid): plug.handle({"type": "cam_remove", "id": x})
+ok([c["id"] for c in plug.cameras_view()] == [cid] and wid not in plug._cams, "removing a camera stops it")
+camfile = tmp / "OrcaSlicer" / "spoolstock" / "cameras.json"
+ok(oct(os.stat(camfile).st_mode)[-3:] in ("600", "666"), "camera links are kept in a private file")
+
+(tmp / "tab-state.json").write_text(json.dumps({**plug.handle({"type": "presets_now"}), "cameras": [{"id": "c1", "name": "Betsy cam", "printer": "Betsy", "host": "127.0.0.1"}]}))
 (tmp / "tab.html").write_text(html)
-r = subprocess.run(["node", str(Path(__file__).resolve().parent / "plugin-tab.js"), str(tmp / "tab.html"), str(tmp / "tab-state.json")] + ([os.environ["TAB_SHOTS"]] if os.environ.get("TAB_SHOTS") else []), capture_output=True, text=True)
+r = subprocess.run(["node", str(Path(__file__).resolve().parent / "plugin-tab.js"), str(tmp / "tab.html"), str(tmp / "tab-state.json")] + ([str(tmp / "cam-replies.json")] if (tmp / "cam-replies.json").exists() else [""]) + ([os.environ["TAB_SHOTS"]] if os.environ.get("TAB_SHOTS") else []), capture_output=True, text=True)
 print(r.stdout.strip()); ok(r.returncode == 0, "the tab's Stock and Presets views work in a browser" + (": " + r.stderr[-300:] if r.returncode else ""))
 
 # ---- privacy ----
 logtext = (tmp / "OrcaSlicer" / "spoolstock" / "spoolstock.log").read_text(encoding="utf-8")
-ok("SECRET99" not in logtext and REFRESH not in logtext and "APIKEY" not in logtext and "IDTOKEN1" not in logtext, "access code, sign-in and API key never written to the log")
+ok("SECRET99" not in logtext and REFRESH not in logtext and "APIKEY" not in logtext and "IDTOKEN1" not in logtext and "pa@ss/1" not in logtext and "nope@" not in logtext,
+   "access codes, camera passwords, sign-in and API key never written to the log")
+ok('"camera.connected"' in logtext and '"camera.stopped"' in logtext, "the log says when a camera connects and stops")
 acct = tmp / "OrcaSlicer" / "spoolstock" / "account.json"
 ok(oct(os.stat(acct).st_mode)[-3:] in ("600", "666") and oct(os.stat(tmp / "OrcaSlicer" / "spoolstock" / "printers.json").st_mode)[-3:] in ("600", "666"), "saved sign-in and printers are private files")
 ok(all(c[1] in ("/token",) or c[1].startswith(f"/v1/{ROOT}") for c in calls), "talks only to the sign-in and database addresses")

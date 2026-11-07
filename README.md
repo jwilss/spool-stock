@@ -89,6 +89,7 @@ For Bambu printers in LAN mode, with OrcaSlicer 2.5. It watches each printer, an
 - **Failed or cancelled prints** wait in Orca's Spool Stock tab, with how far the printer got filled in, for you to check and confirm.
 - The tray comes from the printer and the grams from the job file on it, so it works however the print was sent.
 - **Stock** in its tab shows every spool with its colour, a bar for what's left and where it is, with search, a low only switch, and grouping by storage, material or brand. Spools a printer feeds from are marked with its name.
+- **Cameras** in its tab plays your Tapo or other RTSP cameras inside Orca, each with its printer's current print under it.
 - **Presets** in its tab keeps a Spool Stock group in Orca's filament list, with one preset for each filament you own. It's built the same way as below, and updates by itself while Orca is open.
 
 Download it and copy its sign-in code from **Setup > Orca plugin**. [orca-plugin/spoolstock](orca-plugin/spoolstock/README.md) has the steps. Printer IPs and access codes stay on your PC.

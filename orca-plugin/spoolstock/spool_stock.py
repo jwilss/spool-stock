@@ -5,9 +5,9 @@
 # [tool.orcaslicer.plugin]
 # id = "spool-stock"
 # name = "Spool Stock"
-# description = "Takes each print's filament off the right spools in Spool Stock, shows your stock, and keeps a Spool Stock group of your filaments in Orca's filament list."
+# description = "Takes each print's filament off the right spools in Spool Stock, shows your stock and cameras, and keeps a Spool Stock group of your filaments in Orca's filament list."
 # author = "jwilss"
-# version = "1.2.0"
+# version = "1.3.0"
 # ///
 """Spool Stock for OrcaSlicer 2.5.
 
@@ -19,7 +19,8 @@ A finished print is taken off straight away, with Undo in the app. A failed or c
 the Spool Stock tab with how far it got, for you to confirm.
 
 The tab also shows your stock, and can keep a Spool Stock group in Orca's filament list: one preset for each
-filament you own, written as a local preset bundle and reloaded while Orca is open.
+filament you own, written as a local preset bundle and reloaded while Orca is open. Its Cameras view plays RTSP
+cameras such as Tapo ones, relayed by the plugin, with nothing else to install.
 
 The only thing sent to a printer is Bambu's standard request for its status. Printer IPs and access
 codes stay in this plugin's folder on this PC and are never sent to Spool Stock or written to the log.
@@ -27,6 +28,7 @@ codes stay in this plugin's folder on this PC and are never sent to Spool Stock 
 
 import base64
 import ftplib
+import hashlib
 import io
 import json
 import os
@@ -48,7 +50,7 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock"
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 MQTT_PORT, FTP_PORT = 8883, 990
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
 TOKEN_URL = "https://securetoken.googleapis.com/v1/token"
@@ -1073,6 +1075,9 @@ def disconnect_all() -> None:
     for link in _links.values():
         link.stop.set()
     _links.clear()
+    for cam in list(_cams.values()):
+        cam.stop.set()
+    _cams.clear()
 
 
 # ---------- your stock, for the Stock view in the tab ----------
@@ -1328,6 +1333,538 @@ def remove_presets() -> None:
     log("presets.off", reload=how, detail=detail)
 
 
+# ---------- cameras: Tapo and other RTSP cameras, played in the tab ----------
+#
+# Orca's tab is a web page, which can't play RTSP. The plugin connects to each camera itself (RTSP over TCP),
+# takes the H.264 video out of the RTP packets and rewraps it as fragmented MP4, which the page plays with
+# MediaSource. Nothing is decoded or re-encoded. A camera is only streamed while the Cameras view asks for it.
+# Camera links (with their passwords) stay in cameras.json on this PC and are never logged.
+
+CAMERAS = DATA / "cameras.json"
+CAM_IDLE = 10          # seconds without the page asking before a camera is let go
+CAM_KEEP = 300         # fragments kept for a page that's catching up
+
+
+def load_cameras() -> list[dict]:
+    items = _read_json(CAMERAS, [])
+    for c in items:
+        u = parse_rtsp(c.get("url", ""))
+        if u:
+            _secrets.add(u["password"])
+            _secrets.add(c["url"])
+    return items
+
+
+def save_cameras(items: list[dict]) -> None:
+    _write_json(CAMERAS, items, private=True)
+
+
+def parse_rtsp(url: str) -> dict | None:
+    """rtsp://user:password@host[:port]/path. Lenient: a space or @ in the name or password is fine."""
+    m = re.match(r"^\s*rtsp://(.+)$", url or "", re.I)
+    if not m:
+        return None
+    rest = m.group(1).strip()
+    # the host comes after the last @, so an @ or / in the password still works
+    at = rest.rfind("@")
+    cred, after = (rest[:at], rest[at + 1:]) if at >= 0 else ("", rest)
+    hostport, _, path = after.partition("/")
+    user, _, password = cred.partition(":")
+    host, _, port = hostport.partition(":")
+    if not host or (port and not port.isdigit()):
+        return None
+    user, password = urllib.parse.unquote(user), urllib.parse.unquote(password)
+    port_n = int(port or 554)
+    return {"user": user, "password": password, "host": host, "port": port_n,
+            "url": f"rtsp://{host}{':' + str(port_n) if port else ''}/{path}"}
+
+
+# --- H.264 bits ---
+
+def _unescape(nal: bytes) -> bytes:
+    return nal.replace(b"\x00\x00\x03", b"\x00\x00")
+
+
+class _Bits:
+    def __init__(self, data: bytes):
+        self.d, self.i = data, 0
+
+    def u(self, n: int) -> int:
+        v = 0
+        for _ in range(n):
+            v = (v << 1) | ((self.d[self.i >> 3] >> (7 - (self.i & 7))) & 1)
+            self.i += 1
+        return v
+
+    def ue(self) -> int:
+        z = 0
+        while self.u(1) == 0:
+            z += 1
+            if z > 31:
+                raise ValueError("bad exp-Golomb code")
+        return (1 << z) - 1 + self.u(z)
+
+    def se(self) -> int:
+        v = self.ue()
+        return (v + 1) // 2 if v & 1 else -(v // 2)
+
+
+def sps_size(sps: bytes) -> tuple[int, int]:
+    """Width and height from an H.264 sequence parameter set (NAL header included)."""
+    b = _Bits(_unescape(sps[1:]))
+    profile = b.u(8)
+    b.u(16)
+    b.ue()
+    chroma = 1
+    if profile in (100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135):
+        chroma = b.ue()
+        if chroma == 3:
+            b.u(1)
+        b.ue(); b.ue(); b.u(1)
+        if b.u(1):
+            for i in range(8 if chroma != 3 else 12):
+                if b.u(1):
+                    last, nxt = 8, 8
+                    for _ in range(16 if i < 6 else 64):
+                        if nxt:
+                            nxt = (last + b.se() + 256) % 256
+                        last = nxt or last
+    b.ue()
+    poc = b.ue()
+    if poc == 0:
+        b.ue()
+    elif poc == 1:
+        b.u(1); b.se(); b.se()
+        for _ in range(b.ue()):
+            b.se()
+    b.ue(); b.u(1)
+    w_mbs, h_maps = b.ue() + 1, b.ue() + 1
+    frame_mbs_only = b.u(1)
+    if not frame_mbs_only:
+        b.u(1)
+    b.u(1)
+    l = r = t = bt = 0
+    if b.u(1):
+        l, r, t, bt = b.ue(), b.ue(), b.ue(), b.ue()
+    cx, cy = (2, 2) if chroma == 1 else (2, 1) if chroma == 2 else (1, 1)
+    return w_mbs * 16 - (l + r) * cx, (2 - frame_mbs_only) * h_maps * 16 - (t + bt) * cy * (2 - frame_mbs_only)
+
+
+def _box(kind: bytes, *parts: bytes) -> bytes:
+    body = b"".join(parts)
+    return struct.pack(">I", 8 + len(body)) + kind + body
+
+
+def _full(kind: bytes, version: int, flags: int, *parts: bytes) -> bytes:
+    return _box(kind, struct.pack(">I", (version << 24) | flags), *parts)
+
+
+_MATRIX = struct.pack(">9I", 0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000)
+
+
+def mp4_init(sps: bytes, pps: bytes) -> tuple[bytes, str]:
+    """The MP4 header (ftyp and moov) for one H.264 track at 90 kHz, and the codec string for MediaSource."""
+    w, h = sps_size(sps)
+    avcc = _box(b"avcC", bytes([1, sps[1], sps[2], sps[3], 0xFF, 0xE1]), struct.pack(">H", len(sps)), sps,
+                b"\x01", struct.pack(">H", len(pps)), pps)
+    avc1 = _box(b"avc1", b"\x00" * 6, struct.pack(">H", 1), b"\x00" * 16, struct.pack(">HH", w, h),
+                struct.pack(">II", 0x480000, 0x480000), b"\x00" * 4, struct.pack(">H", 1), b"\x00" * 32,
+                struct.pack(">Hh", 0x18, -1), avcc)
+    stbl = _box(b"stbl", _full(b"stsd", 0, 0, struct.pack(">I", 1), avc1), _full(b"stts", 0, 0, b"\x00" * 4),
+                _full(b"stsc", 0, 0, b"\x00" * 4), _full(b"stsz", 0, 0, b"\x00" * 8), _full(b"stco", 0, 0, b"\x00" * 4))
+    minf = _box(b"minf", _full(b"vmhd", 0, 1, b"\x00" * 8),
+                _box(b"dinf", _full(b"dref", 0, 0, struct.pack(">I", 1), _full(b"url ", 0, 1))), stbl)
+    mdia = _box(b"mdia", _full(b"mdhd", 0, 0, struct.pack(">IIII", 0, 0, 90000, 0), struct.pack(">HH", 0x55C4, 0)),
+                _full(b"hdlr", 0, 0, b"\x00" * 4, b"vide", b"\x00" * 12, b"Video\x00"), minf)
+    tkhd = _full(b"tkhd", 0, 3, struct.pack(">IIIII", 0, 0, 1, 0, 0), b"\x00" * 8, struct.pack(">hhhH", 0, 0, 0, 0),
+                 _MATRIX, struct.pack(">II", w << 16, h << 16))
+    mvhd = _full(b"mvhd", 0, 0, struct.pack(">IIII", 0, 0, 1000, 0), struct.pack(">IH", 0x10000, 0x100), b"\x00" * 10,
+                 _MATRIX, b"\x00" * 24, struct.pack(">I", 2))
+    moov = _box(b"moov", mvhd, _box(b"trak", tkhd, mdia),
+                _box(b"mvex", _full(b"trex", 0, 0, struct.pack(">IIIII", 1, 1, 0, 0, 0))))
+    ftyp = _box(b"ftyp", b"isom", struct.pack(">I", 0x200), b"isomiso6avc1mp41")
+    return ftyp + moov, "avc1.%02X%02X%02X" % (sps[1], sps[2], sps[3])
+
+
+def mp4_fragment(seq: int, start: int, duration: int, nals: list[bytes], key: bool) -> bytes:
+    """One frame as moof and mdat. start and duration are in 90 kHz ticks."""
+    data = b"".join(struct.pack(">I", len(n)) + n for n in nals)
+    flags = 0x02000000 if key else 0x01010000
+
+    def moof(offset):
+        trun = _full(b"trun", 0, 0x000701, struct.pack(">Ii", 1, offset), struct.pack(">III", duration, len(data), flags))
+        traf = _box(b"traf", _full(b"tfhd", 0, 0x020000, struct.pack(">I", 1)), _full(b"tfdt", 1, 0, struct.pack(">Q", start)), trun)
+        return _box(b"moof", _full(b"mfhd", 0, 0, struct.pack(">I", seq)), traf)
+    m = moof(0)
+    m = moof(len(m) + 8)
+    return m + _box(b"mdat", data)
+
+
+# --- RTSP over TCP ---
+
+class CamError(Exception):
+    pass
+
+
+class _Reader:
+    def __init__(self, sock):
+        self.s, self.buf = sock, b""
+
+    def _more(self):
+        chunk = self.s.recv(65536)
+        if not chunk:
+            raise ConnectionError("the camera closed the connection")
+        self.buf += chunk
+
+    def exact(self, n: int) -> bytes:
+        while len(self.buf) < n:
+            self._more()
+        out, self.buf = self.buf[:n], self.buf[n:]
+        return out
+
+    def until(self, mark: bytes) -> bytes:
+        while mark not in self.buf:
+            if len(self.buf) > 65536:
+                raise CamError("the camera's reply was too long")
+            self._more()
+        i = self.buf.index(mark) + len(mark)
+        out, self.buf = self.buf[:i], self.buf[i:]
+        return out
+
+
+class Camera:
+    """One camera: connects when the page asks for it, and lets go once the page stops asking."""
+
+    def __init__(self, cid: str, url: str, name: str):
+        self.id, self.name, self.url = cid, name, url
+        self.lock = threading.Lock()
+        self.wanted = 0.0
+        self.status = "Starting"
+        self.gen = 0
+        self.init = b""
+        self.mime = ""
+        self.frags: list[tuple[int, bytes]] = []   # (seq, fragment), kept from the last keyframe on
+        self.seq = 0
+        self.thread = None
+        self.stop = threading.Event()
+
+    def want(self):
+        self.wanted = time.monotonic()
+        if not (self.thread and self.thread.is_alive()):
+            self.stop.clear()
+            self.thread = threading.Thread(target=self.run, daemon=True, name="spoolstock-cam-" + self.id)
+            self.thread.start()
+
+    def idle(self) -> bool:
+        return time.monotonic() - self.wanted > CAM_IDLE
+
+    def take(self, gen: int, after: int) -> dict:
+        """What the page hasn't had yet: the header when it's new to this stream, then any fragments."""
+        with self.lock:
+            out = {"id": self.id, "status": self.status, "gen": self.gen, "mime": self.mime}
+            if not self.init:
+                return out
+            if gen != self.gen:
+                out["init"] = base64.b64encode(self.init).decode()
+                after = -1
+            first_key = self.frags[0][0] if self.frags else 0
+            if after < first_key - 1:
+                after = -1   # too far behind: start again from the last keyframe
+            new = [(s, f) for s, f in self.frags if s > after]
+            out["chunks"] = [base64.b64encode(f).decode() for _, f in new]
+            out["seq"] = new[-1][0] if new else after
+            return out
+
+    def run(self):
+        delay = 2
+        while not self.stop.is_set() and not self.idle():
+            try:
+                self.session()
+                delay = 2
+            except PermissionError as e:
+                self.status = "Orca blocked the connection. Press Connect on the Prints page and choose Yes."
+                _allowed.discard((parse_rtsp(self.url) or {}).get("host"))
+                log("camera.blocked", camera=self.name, error=str(e))
+                return
+            except CamError as e:
+                self.status = str(e)
+                log("camera.error", camera=self.name, error=str(e))
+                if self.stop.wait(15):
+                    break
+            except Exception as e:
+                self.status = f"Reconnecting ({type(e).__name__}: {e})"
+                log("camera.error", camera=self.name, error=f"{type(e).__name__}: {e}")
+                if self.stop.wait(delay):
+                    break
+                delay = min(delay * 2, 30)
+        if self.status in ("Live", "Starting", "Connecting"):
+            self.status = "Paused"
+        log("camera.stopped", camera=self.name)
+
+    # the RTSP conversation
+
+    def _request(self, s, rd, method: str, url: str, extra: dict | None = None) -> tuple[int, dict, bytes]:
+        self.cseq += 1
+        headers = {"CSeq": str(self.cseq), "User-Agent": "SpoolStock/" + VERSION, **(extra or {})}
+        if self.session_id:
+            headers["Session"] = self.session_id
+        if self.auth:
+            headers["Authorization"] = self._authorisation(method, url)
+        s.sendall((f"{method} {url} RTSP/1.0\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n").encode())
+        while True:
+            first = rd.exact(1)
+            if first == b"$":   # video already flowing ahead of the reply
+                rd.exact(1)
+                rd.exact(struct.unpack(">H", rd.exact(2))[0])
+                continue
+            head = (first + rd.until(b"\r\n\r\n")).decode("utf-8", "replace")
+            lines = head.split("\r\n")
+            code = int(lines[0].split()[1]) if len(lines[0].split()) > 1 else 0
+            hdrs: dict = {}
+            for line in lines[1:]:
+                k, _, v = line.partition(":")
+                if k:
+                    hdrs.setdefault(k.strip().lower(), []).append(v.strip())
+            body = rd.exact(int(hdrs.get("content-length", ["0"])[0] or 0))
+            if hdrs.get("cseq", [""])[0] in ("", str(self.cseq)):
+                return code, hdrs, body
+
+    def _authorisation(self, method: str, url: str) -> str:
+        kind, p = self.auth
+        u = parse_rtsp(self.url)
+        if kind == "basic":
+            return "Basic " + base64.b64encode(f"{u['user']}:{u['password']}".encode()).decode()
+        md5 = lambda x: hashlib.md5(x.encode()).hexdigest()
+        ha1, ha2 = md5(f"{u['user']}:{p.get('realm', '')}:{u['password']}"), md5(f"{method}:{url}")
+        head = f'Digest username="{u["user"]}", realm="{p.get("realm", "")}", nonce="{p.get("nonce", "")}", uri="{url}"'
+        if "auth" in [q.strip() for q in p.get("qop", "").split(",")]:
+            p["nc"] = p.get("nc", 0) + 1
+            nc, cnonce = f"{p['nc']:08x}", p.setdefault("cnonce", os.urandom(8).hex())
+            head += f', qop=auth, nc={nc}, cnonce="{cnonce}", response="{md5(f"{ha1}:{p["nonce"]}:{nc}:{cnonce}:auth:{ha2}")}"'
+        else:
+            head += f', response="{md5(f"{ha1}:{p.get("nonce", "")}:{ha2}")}"'
+        if p.get("algorithm"):
+            head += f', algorithm={p["algorithm"]}'
+        if p.get("opaque"):
+            head += f', opaque="{p["opaque"]}"'
+        return head
+
+    def session(self):
+        u = parse_rtsp(self.url)
+        if not u:
+            raise CamError("That isn't an RTSP link. It should start rtsp://")
+        self.status, self.cseq, self.session_id, self.auth = "Connecting", 0, "", None
+        with self.lock:
+            self.init, self.frags = b"", []   # a new connection starts a new stream for the page
+        with socket.create_connection((u["host"], u["port"]), timeout=10) as s:
+            s.settimeout(15)
+            rd = _Reader(s)
+            code, hdrs, body = self._request(s, rd, "DESCRIBE", u["url"], {"Accept": "application/sdp"})
+            if code == 401:
+                if not u["user"]:
+                    raise CamError("The camera wants a username and password in the link.")
+                chal = " ".join(hdrs.get("www-authenticate", []))
+                digest = next((h for h in hdrs.get("www-authenticate", []) if h.lower().startswith("digest")), "")
+                if digest:
+                    self.auth = ("digest", dict(re.findall(r'(\w+)="([^"]*)"', digest)))
+                elif "basic" in chal.lower():
+                    self.auth = ("basic", {})
+                code, hdrs, body = self._request(s, rd, "DESCRIBE", u["url"], {"Accept": "application/sdp"})
+                if code == 401:
+                    raise CamError("The camera didn't accept the username and password. Check the Camera Account in the Tapo app.")
+            if code == 404:
+                raise CamError("The camera has no stream at that link. Check the end of it, for example /stream2.")
+            if code != 200:
+                raise CamError(f"The camera refused the stream ({code}).")
+            sdp = body.decode("utf-8", "replace")
+            base = (hdrs.get("content-base") or [u["url"]])[0]
+            video = sdp.split("m=video", 1)[1].split("\nm=", 1)[0] if "m=video" in sdp else ""
+            if not video:
+                raise CamError("The camera didn't offer any video.")
+            codec = (re.search(r"a=rtpmap:\d+\s+([\w-]+)/", video) or [None, ""])[1].upper()
+            if codec != "H264":
+                raise CamError(f"The camera sends {codec or 'an unknown format'} video, and only H.264 can be shown here.")
+            control = (re.search(r"a=control:\s*(\S+)", video) or [None, ""])[1]
+            track = base if control in ("", "*") else control if control.lower().startswith("rtsp://") else base.rstrip("/") + "/" + control
+            self.sps = self.pps = b""
+            sprop = re.search(r"sprop-parameter-sets=([A-Za-z0-9+/=]+),([A-Za-z0-9+/=]+)", video)
+            if sprop:
+                try:
+                    self.sps, self.pps = base64.b64decode(sprop.group(1)), base64.b64decode(sprop.group(2))
+                except Exception:
+                    pass
+            code, hdrs, _ = self._request(s, rd, "SETUP", track, {"Transport": "RTP/AVP/TCP;unicast;interleaved=0-1"})
+            if code != 200:
+                raise CamError(f"The camera refused to send video over TCP ({code}).")
+            self.session_id = (hdrs.get("session") or [""])[0].split(";")[0]
+            chan = int((re.search(r"interleaved=(\d+)", (hdrs.get("transport") or [""])[0]) or [None, "0"])[1])
+            code, _, _ = self._request(s, rd, "PLAY", base, {"Range": "npt=0.000-"})
+            if code != 200:
+                raise CamError(f"The camera wouldn't start the stream ({code}).")
+            log("camera.connected", camera=self.name, host=u["host"])
+            self.status = "Waiting for a picture"
+            self.read_video(s, rd, chan, base)
+            try:
+                s.sendall((f"TEARDOWN {base} RTSP/1.0\r\nCSeq: {self.cseq + 1}\r\nSession: {self.session_id}\r\n\r\n").encode())
+            except OSError:
+                pass
+
+    def read_video(self, s, rd, chan: int, base: str):
+        nals: list[bytes] = []
+        fu = None
+        ts_now = None
+        pending = None   # the last frame, held until the next one gives its duration
+        t0 = None
+        last_ts = 0
+        unwrapped = 0
+        ping = time.monotonic()
+        while not self.stop.is_set() and not self.idle():
+            if time.monotonic() - ping > 25:
+                self.cseq += 1
+                s.sendall((f"GET_PARAMETER {base} RTSP/1.0\r\nCSeq: {self.cseq}\r\nSession: {self.session_id}\r\n"
+                           + (f"Authorization: {self._authorisation('GET_PARAMETER', base)}\r\n" if self.auth else "") + "\r\n").encode())
+                ping = time.monotonic()
+            first = rd.exact(1)
+            if first != b"$":   # a reply to the keep-alive
+                head = (first + rd.until(b"\r\n\r\n")).decode("utf-8", "replace")
+                n = re.search(r"content-length:\s*(\d+)", head, re.I)
+                rd.exact(int(n.group(1)) if n else 0)
+                continue
+            ch = rd.exact(1)[0]
+            pkt = rd.exact(struct.unpack(">H", rd.exact(2))[0])
+            if ch != chan or len(pkt) < 13:
+                continue
+            cc = pkt[0] & 0x0F
+            marker = pkt[1] & 0x80
+            ts = struct.unpack(">I", pkt[4:8])[0]
+            off = 12 + cc * 4
+            if pkt[0] & 0x10 and len(pkt) >= off + 4:   # header extension
+                off += 4 + struct.unpack(">H", pkt[off + 2:off + 4])[0] * 4
+            pay = pkt[off:len(pkt) - (pkt[-1] if pkt[0] & 0x20 else 0)]
+            if not pay:
+                continue
+            if ts_now is not None and ts != ts_now and nals:
+                pending = self._frame(nals, ts_now, pending)
+                nals = []
+            ts_now = ts
+            t = pay[0] & 0x1F
+            if 1 <= t <= 23:
+                nals.append(pay)
+            elif t == 24:   # STAP-A: several NALs in one packet
+                i = 1
+                while i + 2 <= len(pay):
+                    n = struct.unpack(">H", pay[i:i + 2])[0]
+                    nals.append(pay[i + 2:i + 2 + n])
+                    i += 2 + n
+            elif t == 28 and len(pay) > 2:   # FU-A: one NAL split over several packets
+                if pay[1] & 0x80:
+                    fu = bytearray([(pay[0] & 0xE0) | (pay[1] & 0x1F)]) + pay[2:]
+                elif fu is not None:
+                    fu += pay[2:]
+                if pay[1] & 0x40 and fu is not None:
+                    nals.append(bytes(fu))
+                    fu = None
+            if marker and nals:
+                pending = self._frame(nals, ts, pending)
+                nals = []
+                ts_now = None
+
+    def _frame(self, nals: list[bytes], ts: int, pending):
+        """Collect one frame. Emits the frame before it, now that its duration is known."""
+        key = False
+        body = []
+        for n in nals:
+            t = n[0] & 0x1F
+            if t == 7:
+                self.sps = n
+            elif t == 8:
+                self.pps = n
+            elif t != 9:
+                body.append(n)
+                key |= t == 5
+        if not body:
+            return pending
+        if pending:
+            p_ts, p_body, p_key = pending
+            self._emit(p_body, p_key, p_ts, (ts - p_ts) & 0xFFFFFFFF)
+        return (ts, body, key)
+
+    def _emit(self, body, key, ts, duration):
+        if duration <= 0 or duration > 90000 * 5:
+            duration = 6000
+        with self.lock:
+            if not self.init:
+                if not (key and self.sps and self.pps):
+                    return   # wait for the first keyframe
+                try:
+                    self.init, self.mime = mp4_init(self.sps, self.pps)
+                except Exception as e:
+                    raise CamError(f"Couldn't read the camera's video settings ({e}).")
+                self.mime = f'video/mp4; codecs="{self.mime}"'
+                self.gen += 1
+                self.frags, self.keys, self.base, self.ts_last = [], [], 0, ts
+                log("camera.video", camera=self.name, size=sps_size(self.sps), codec=self.mime)
+            self.base += (ts - self.ts_last) & 0xFFFFFFFF
+            self.ts_last = ts
+            self.seq += 1
+            frag = mp4_fragment(self.seq, self.base, duration, body, key)
+            if key:   # keep the last two keyframes' worth, so a page that's a little behind can catch up
+                self.keys = (self.keys + [self.seq])[-2:]
+                self.frags = [f for f in self.frags if f[0] >= self.keys[0]]
+            self.frags.append((self.seq, frag))
+            if len(self.frags) > CAM_KEEP:
+                del self.frags[: len(self.frags) - CAM_KEEP]
+            self.status = "Live"
+
+
+_cams: dict[str, Camera] = {}
+_cam_checked: dict[str, float] = {}
+
+
+def camera(cid: str) -> Camera | None:
+    c = next((c for c in load_cameras() if c.get("id") == cid), None)
+    if not c:
+        _cams.pop(cid, None)
+        return None
+    cam = _cams.get(cid)
+    if not cam or cam.url != c["url"]:
+        if cam:
+            cam.stop.set()
+        cam = _cams[cid] = Camera(cid, c["url"], c.get("name") or cid)
+    return cam
+
+
+def cameras_view() -> list[dict]:
+    return [{"id": c["id"], "name": c.get("name") or "", "printer": c.get("printer") or "",
+             "host": (parse_rtsp(c.get("url", "")) or {}).get("host", "")} for c in load_cameras()]
+
+
+def watch_cameras(want: list) -> dict:
+    """The page's request for video. Runs on Orca's main thread, so the first connection can be allowed."""
+    out = []
+    for w in want or []:
+        cam = camera(str(w.get("id") or ""))
+        if not cam:
+            continue
+        u = parse_rtsp(cam.url) or {}
+        host = u.get("host")
+        if host and host not in _allowed:
+            # Reach it once from here so Orca can ask permission. Only every 30 s, as an unreachable camera
+            # would otherwise hold up Orca on every request.
+            if time.monotonic() - _cam_checked.get(host, -60) < 30:
+                out.append({"id": cam.id, "status": cam.status if cam.status != "Starting" else "Checking the connection"})
+                continue
+            _cam_checked[host] = time.monotonic()
+            why = authorise(host, (u["port"],))
+            if why.startswith("Orca didn't allow"):
+                out.append({"id": cam.id, "status": "Orca didn't allow the connection to this camera. Press Connect on the Prints page and choose Yes."})
+                continue
+            _allowed.add(host)
+        cam.want()
+        out.append(cam.take(int(w.get("gen") or 0), int(w.get("seq") if w.get("seq") is not None else -1)))
+    return {"type": "cams", "cams": out}
+
+
 # ---------- the tab ----------
 
 def _spool_options(snap) -> list[dict]:
@@ -1390,7 +1927,8 @@ def _state(hint: str = "") -> dict:
             "cloud": CLOUD.status, "printers": rows, "pending": pending, "recent": recent, "outbox": outbox,
             "spools": _spool_options(snap), "log": str(LOG), "dark": orca_dark(),
             "stock": stock_view(snap) if CLOUD.signed_in else None,
-            "presets": presets_view(snap.get("orca")) if (CLOUD.signed_in and snap) else None}
+            "presets": presets_view(snap.get("orca")) if (CLOUD.signed_in and snap) else None,
+            "cameras": cameras_view()}
 
 
 PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><style>
@@ -1423,10 +1961,19 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}td{borde
 .tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:9px;border:1px solid var(--line);margin-left:4px}
 .tag.lowt{border-color:var(--warn);color:var(--warn)}
 .list div{padding:3px 0;border-top:1px solid var(--line)}.list div:first-child{border-top:0}
+.camgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;margin-bottom:10px}
+.cam{border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--card)}
+.camhead{display:flex;gap:8px;align-items:center;margin-bottom:6px}.camhead b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.camhead select,.camhead button{font-size:12px;padding:3px 6px}
+.vid{position:relative;background:#000;aspect-ratio:16/9;border-radius:6px;overflow:hidden}
+.vid video{width:100%;height:100%;object-fit:contain;display:block}
+.camst{position:absolute;left:0;right:0;bottom:0;padding:6px 8px;background:#000b;color:#fff;font-size:12px}
+.camjob{margin-top:5px}
+input.wide{width:330px}
 [hidden]{display:none!important}
 </style></head><body>
 <h1>Spool Stock</h1>
-<nav><button data-v="prints" aria-current="page">Prints<span id="nb"></span></button><button data-v="stock">Stock</button><button data-v="presets">Presets</button></nav>
+<nav><button data-v="prints" aria-current="page">Prints<span id="nb"></span></button><button data-v="stock">Stock</button><button data-v="presets">Presets</button><button data-v="cameras">Cameras</button></nav>
 <div id="hint" class="muted"></div>
 <section id="v-prints">
 <p class="muted">Takes each print's filament off the spools in the trays it used. <span id="ver"></span></p>
@@ -1445,6 +1992,13 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}td{borde
 <p id="stockinfo" class="muted"></p><div id="stock"></div>
 </section>
 <section id="v-presets" hidden><div id="presets"></div></section>
+<section id="v-cameras" hidden>
+<div id="camgrid" class="camgrid"></div><p id="camnone" class="muted">No cameras yet.</p>
+<div class="card"><b>Add a camera</b><div class="row" style="margin-top:6px">
+<input id="cname" placeholder="Name"><input id="curl" class="wide" placeholder="rtsp://name:password@192.168.1.50/stream2" autocomplete="off" spellcheck="false"><select id="cprinter"></select><button id="cadd">Add</button></div>
+<p class="muted">For a Tapo camera: in the Tapo app, open the camera's settings, then Advanced Settings, then Camera Account, and make a username and password. The link is rtsp://username:password@the camera's IP/stream2. stream2 is lighter and plenty for watching prints, stream1 is full quality. The link stays on this PC.</p>
+<p class="muted">Cameras only stream while this page is open.</p></div>
+</section>
 <script>
 var o=window.orca,last={},spools=[],view="prints",D=null;function send(m){o.postMessage(m)}
 function h(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
@@ -1452,7 +2006,40 @@ function sw(c){return '<span class="sw" style="background:'+h(c||"#0000")+'"></s
 function set(id,html,key){if(last[id]===key)return;last[id]=key;document.getElementById(id).innerHTML=html}
 function kept(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){}return null}
 function show(v){view=v;kept("ss.view",v);document.querySelectorAll("nav button").forEach(function(b){if(b.dataset.v===v)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")});
- ["prints","stock","presets"].forEach(function(x){document.getElementById("v-"+x).hidden=x!==v});if(D)paint()}
+ ["prints","stock","presets","cameras"].forEach(function(x){document.getElementById("v-"+x).hidden=x!==v});
+ if(v!=="cameras")Object.keys(CAMS).forEach(function(k){try{CAMS[k].video.pause()}catch(e){}});if(D)paint()}
+var CAMS={},camAsk=0;
+function b64(x){var s=atob(x),a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a}
+function camStatus(C,t){C.st.textContent=t||"";C.st.hidden=!t}
+function camReset(C,mime){C.q=[];C.sb=null;C.mime=mime;
+ if(!window.MediaSource||!MediaSource.isTypeSupported(mime)){C.bad="Orca's viewer can't play this camera's video ("+mime+").";return}
+ C.bad="";var ms=new MediaSource();C.ms=ms;C.video.src=URL.createObjectURL(ms);
+ ms.addEventListener("sourceopen",function(){if(C.ms!==ms)return;try{C.sb=ms.addSourceBuffer(mime);C.sb.addEventListener("updateend",function(){camLive(C);camPump(C)});camPump(C)}catch(e){C.bad="Couldn't start the video: "+e.message}},{once:true})}
+function camPump(C){var sb=C.sb;if(!sb||sb.updating||!C.q.length)return;try{sb.appendBuffer(C.q.shift())}catch(e){C.gen=0;C.seq=-1}}
+function camLive(C){var v=C.video,br=v.buffered,sb=C.sb;if(!br.length)return;var end=br.end(br.length-1);
+ if(end-v.currentTime>1.5||v.currentTime<br.start(br.length-1))v.currentTime=Math.max(br.start(br.length-1),end-0.25);
+ if(v.paused&&view==="cameras")v.play().catch(function(){});
+ if(sb&&!sb.updating&&v.currentTime-br.start(0)>30){try{sb.remove(br.start(0),v.currentTime-10)}catch(e){}}}
+function camTiles(){var list=D.cameras||[],grid=document.getElementById("camgrid"),names=D.printers.map(function(p){return p.name}).filter(Boolean);
+ document.getElementById("camnone").hidden=!!list.length;
+ var opts=function(sel){return '<option value="">No printer</option>'+names.concat(sel&&names.indexOf(sel)<0?[sel]:[]).map(function(n){return '<option'+(n===sel?" selected":"")+'>'+h(n)+'</option>'}).join("")};
+ set("cprinter",opts(document.getElementById("cprinter").value),JSON.stringify(names));
+ Object.keys(CAMS).forEach(function(id){if(!list.some(function(c){return c.id===id})){CAMS[id].el.remove();delete CAMS[id]}});
+ list.forEach(function(c){var C=CAMS[c.id];
+  if(!C){var el=document.createElement("div");el.className="cam";el.dataset.id=c.id;
+   el.innerHTML='<div class="camhead"><b></b><select class="campr"></select><button data-a="cam_remove">Remove</button></div><div class="vid"><video muted autoplay playsinline></video><div class="camst">Connecting</div></div><div class="muted camjob"></div>';
+   grid.appendChild(el);C=CAMS[c.id]={id:c.id,el:el,video:el.querySelector("video"),st:el.querySelector(".camst"),gen:0,seq:-1,q:[],bad:""};
+   el.querySelector(".campr").addEventListener("change",function(ev){send({type:"cam_edit",id:c.id,printer:ev.target.value})})}
+  C.el.querySelector("b").textContent=c.name;C.el.querySelector("b").title=c.name+" ("+c.host+")";
+  var key=JSON.stringify([c.printer,names]);if(C.pk!==key){C.pk=key;C.el.querySelector(".campr").innerHTML=opts(c.printer)}
+  var p=D.printers.filter(function(x){return x.name===c.printer})[0],j=p&&p.job;
+  C.el.querySelector(".camjob").textContent=!c.printer?"":!p?c.printer+": not added under Prints":j?c.printer+": printing "+j.name+(j.percent?", "+j.percent+"%":""):c.printer+": "+p.state})}
+function camPoll(){if(view!=="cameras"||!D||!(D.cameras||[]).length)return;if(camAsk&&Date.now()-camAsk<3000)return;camAsk=Date.now();
+ send({type:"cams",want:Object.keys(CAMS).map(function(k){var C=CAMS[k];return {id:k,gen:C.gen,seq:C.seq}})})}
+function camGot(d){camAsk=0;(d.cams||[]).forEach(function(r){var C=CAMS[r.id];if(!C)return;
+ if(r.init){C.gen=r.gen;C.seq=-1;camReset(C,r.mime);if(!C.bad)C.q.push(b64(r.init))}
+ if(r.chunks&&r.gen===C.gen&&!C.bad){r.chunks.forEach(function(x){C.q.push(b64(x))});if(r.seq!=null)C.seq=r.seq;if(C.q.length>200)C.q.splice(1,C.q.length-60)}
+ camPump(C);camStatus(C,C.bad||(r.status==="Live"&&C.video.buffered.length?"":r.status==="Live"?"Starting the picture":r.status))})}
 function fill(s){var c=s.cols.length?s.cols:["#9AA5AB"];if(c.length<2)return c[0];
  if(s.pattern==="gradient")return "linear-gradient(135deg,"+c.join(",")+")";
  var n=c.length;return "conic-gradient("+c.map(function(x,i){return x+" "+(i*360/n)+"deg "+((i+1)*360/n)+"deg"}).join(",")+")"}
@@ -1489,8 +2076,8 @@ function paintPresets(){var p=D.presets;
   +(p.moved?'<p class="muted">Moved '+p.moved+' older cop'+(p.moved===1?"y":"ies")+' from the Windows app to the old-presets folder, next to the log, so nothing shows twice. Restart Orca once to clear '+(p.moved===1?"it":"them")+' from the list.</p>':"")
   +'<h3>Your filaments <span class="muted">'+p.feed.length+'</span></h3><div class="card list">'+(p.feed.map(function(f){return '<div>'+h(f.label)+' <span class="muted">'+(f.own?"Orca's own profile":"on a generic profile, with your temperatures")+'</span></div>'}).join("")||'<div class="muted">No spools yet.</div>')+'</div>';
  set("presets",html,JSON.stringify(p))}
-function paint(){if(view==="stock")paintStock();else if(view==="presets")paintPresets()}
-o.onMessage(function(d){if(!d||d.type!=="state")return;D=d;spools=d.spools||[];
+function paint(){if(view==="stock")paintStock();else if(view==="presets")paintPresets();camTiles()}
+o.onMessage(function(d){if(d&&d.type==="cams"){camGot(d);return}if(!d||d.type!=="state")return;D=d;spools=d.spools||[];
 document.documentElement.dataset.theme=d.dark===true?"dark":d.dark===false?"light":"";
 document.getElementById("ver").textContent="Version "+d.version+".";
 document.getElementById("hint").textContent=d.hint||"";
@@ -1520,12 +2107,15 @@ paint();
 });
 document.querySelector("nav").addEventListener("click",function(ev){var b=ev.target.closest("[data-v]");if(b)show(b.dataset.v)});
 ["q","grp","lowonly"].forEach(function(id){var el=document.getElementById(id);el.addEventListener(el.type==="checkbox"||el.tagName==="SELECT"?"change":"input",function(){kept("ss."+id,el.type==="checkbox"?(el.checked?"1":""):el.value);if(D)paintStock()})});
-(function(){var g=kept("ss.grp");if(g)document.getElementById("grp").value=g;document.getElementById("lowonly").checked=kept("ss.lowonly")==="1";var v=kept("ss.view");if(v==="stock"||v==="presets")show(v)})();
+(function(){var g=kept("ss.grp");if(g)document.getElementById("grp").value=g;document.getElementById("lowonly").checked=kept("ss.lowonly")==="1";var v=kept("ss.view");if(v==="stock"||v==="presets"||v==="cameras")show(v)})();
+document.getElementById("cadd").onclick=function(){var u=document.getElementById("curl");send({type:"cam_add",name:document.getElementById("cname").value.trim(),url:u.value.trim(),printer:document.getElementById("cprinter").value});u.value="";document.getElementById("cname").value=""};
+setInterval(camPoll,300);
 document.body.addEventListener("click",function(ev){var b=ev.target.closest("[data-a]");if(!b)return;var a=b.dataset.a;
  if(a==="signin")send({type:"signin",code:document.getElementById("codein").value});
  else if(a==="signout")send({type:"signout"});
  else if(a==="connect")send({type:"connect"});
  else if(a==="remove")send({type:"remove",index:+b.dataset.i});
+ else if(a==="cam_remove"){if(b.dataset.sure){send({type:"cam_remove",id:b.closest(".cam").dataset.id})}else{b.dataset.sure="1";b.textContent="Remove it";setTimeout(function(){delete b.dataset.sure;b.textContent="Remove"},4000)}}
  else if(a==="refresh"||a==="presets_on"||a==="presets_now"||a==="presets_off"){if(a!=="refresh")last.presets=null;send({type:a})}
  else if(a==="confirm"||a==="skip"){var c=b.closest("[data-key]"),items=[];
   c.querySelectorAll("tr").forEach(function(tr){var s=tr.querySelector("select"),g=tr.querySelector("input.g");if(s)items.push({spool:s.value,g:parseFloat(g.value)||0})});
@@ -1579,6 +2169,8 @@ def handle(d: dict) -> dict:
     global _started
     t = (d or {}).get("type")
     hint = ""
+    if t == "cams":
+        return watch_cameras(d.get("want") or [])
     _flush_notifications()
     if t == "ready":
         if not _started:
@@ -1603,6 +2195,32 @@ def handle(d: dict) -> dict:
         hint = _fresh_snapshot()
     elif t in ("presets_on", "presets_now"):
         hint = _fresh_snapshot() or _presets(force=True)
+    elif t == "cam_add":
+        u = parse_rtsp(d.get("url") or "")
+        if not u:
+            hint = "That isn't an RTSP link. It should look like rtsp://name:password@192.168.1.50/stream2"
+        else:
+            items = load_cameras()
+            cid = "c" + os.urandom(3).hex()
+            items.append({"id": cid, "name": (d.get("name") or "").strip() or u["host"], "url": d["url"].strip(), "printer": d.get("printer") or ""})
+            _secrets.update({u["password"], d["url"].strip()})
+            save_cameras(items)
+            log("camera.added", name=items[-1]["name"], host=u["host"])
+    elif t == "cam_edit":
+        items = load_cameras()
+        for c in items:
+            if c["id"] == d.get("id"):
+                if "printer" in d:
+                    c["printer"] = d.get("printer") or ""
+                if d.get("name"):
+                    c["name"] = d["name"].strip()
+        save_cameras(items)
+    elif t == "cam_remove":
+        items = [c for c in load_cameras() if c.get("id") != d.get("id")]
+        save_cameras(items)
+        cam = _cams.pop(d.get("id"), None)
+        if cam:
+            cam.stop.set()
     elif t == "presets_off":
         try:
             remove_presets()
