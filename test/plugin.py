@@ -20,6 +20,7 @@ def wait(cond, secs=15):
 tmp = Path(tempfile.mkdtemp())
 os.environ["APPDATA"] = str(tmp)
 (tmp / "OrcaSlicer").mkdir()
+(tmp / "OrcaSlicer" / "OrcaSlicer.conf").write_text(json.dumps({"app": {"dark_color_mode": "0"}}) + "\n# MD5 checksum X\n")
 
 # ---- stand-in orca ----
 orca = types.ModuleType("orca")
@@ -34,6 +35,9 @@ class PagesBase:
     def __init__(self): self.sent = []
     def post_message(self, m): self.sent.append(m)
 orca.pages = types.SimpleNamespace(PagesPluginCapabilityBase=PagesBase)
+pushed = []
+def push_notification(text, level): pushed.append((text, level))
+orca.host = types.SimpleNamespace(ui=types.SimpleNamespace(WarningNotificationLevel="warning", push_notification=push_notification))
 sys.modules["orca"] = orca
 
 # ---- TLS for the fake printer ----
@@ -308,6 +312,22 @@ plug.handle({"type": "confirm", "key": pe["key"], "pct": 43, "items": [{"spool":
 ok(wait(lambda: doc_of(f"users/{UID}/spools/s0002")["remainG"] == 985), "confirmed at 43%: 8.6 g taken off")
 ok(not plug.STORE.pending and "8.6 g off S0002" in plug.STORE.recent[0]["text"], "tab says what was taken off")
 
+# ---- a spool without enough left is flagged as the job starts ----
+saved = DB[f"users/{UID}/spools/s0001"]
+put(f"users/{UID}/spools/s0001", {**doc_of(f"users/{UID}/spools/s0001"), "remainG": 12})
+plug.CLOUD.snap = None
+JOB["zip"], JOB["name"] = job_zip([(1, "PETG", "#2850E0", "20.00")]), "Big.gcode.3mf"
+to_printer.put({"print": {"command": "project_file", "subtask_name": "Big", "file": "Big.gcode.3mf", "param": "Metadata/plate_1.gcode",
+                          "ams_mapping": [0], "ams_mapping2": [{"ams_id": 0, "slot_id": 0}], "use_ams": True, "result": "success"}})
+ok(wait(lambda: plug.STORE.active.get(SERIAL, {}).get("warnings")), "job file read as soon as the job is sent, before printing starts")
+st = plug.handle({"type": "poll"})
+w = st["printers"][0]["job"]["warnings"]
+ok(len(w) == 1 and "needs 20 g from S0001" in w[0] and "about 12 g left" in w[0], "warns that the spool in the tray has less left than the print needs")
+ok(pushed and "Betsy" in pushed[-1][0] and "S0001" in pushed[-1][0] and pushed[-1][1] == "warning", "the warning pops up in Orca as a notification")
+ok("about 12 g left" in plug.STORE.recent[0]["text"], "and stays in the tab's recent list")
+DB[f"users/{UID}/spools/s0001"] = saved
+plug.CLOUD.snap = None
+
 # ---- Orca blocks the background thread: the tab sends it instead ----
 real = plug.urllib.request.urlopen
 def guarded(*a, **k):
@@ -340,6 +360,14 @@ to_printer.put(status(gcode_state="RUNNING", subtask_name="Hook", gcode_file="Ho
 to_printer.put(status(gcode_state="FINISH", mc_percent=100, subtask_name="Hook"))
 ok(wait(lambda: plug.handle({"type": "poll"}) and "Hook" in plug.STORE.recent[0]["text"]), "joined part way: one filament fed from one tray is matched and taken off")
 ok(doc_of(f"users/{UID}/spools/s0001")["remainG"] == 783, "4 g off the spool in that tray")
+
+# ---- Orca's theme ----
+plug._theme["at"] = 0
+ok(plug.handle({"type": "poll"})["dark"] is False, "light when Orca is in light mode")
+(tmp / "OrcaSlicer" / "OrcaSlicer.conf").write_text(json.dumps({"app": {"dark_color_mode": "1"}}) + "\n# MD5 checksum X\n")
+plug._theme["at"] = 0
+ok(plug.handle({"type": "poll"})["dark"] is True, "dark when Orca is in dark mode")
+ok('data-theme=dark' in html and "prefers-color-scheme:dark" in html, "tab has both colour schemes")
 
 # ---- privacy ----
 logtext = (tmp / "OrcaSlicer" / "spoolstock" / "spoolstock.log").read_text(encoding="utf-8")

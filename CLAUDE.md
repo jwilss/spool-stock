@@ -46,11 +46,11 @@ Pushing to `main` publishes the site through `.github/workflows/site.yml` (only 
 - `tray_now` is the global tray (AMS unit times 4 plus tray), 254 for external, 255 for none.
 - Grams per filament are only in the job's `.3mf` on the printer (`slice_info.config`, `used_g`), read over implicit FTPS on port 990. The AMS reports `remain` -1.
 - Orca refuses plugins opening its own temporary G-code, and its `PrintStateChanged` events only cover the printer selected in Orca.
+- `orca.host.ui.push_notification` exists (levels such as `WarningNotificationLevel`). The plugin calls it only from the tab's messages, on Orca's main thread, and logs which argument order worked (`notify.shown` in `spoolstock.log`). Dark mode comes from `dark_color_mode` in the `app` section of `OrcaSlicer.conf`.
 
 ## Next, agreed with Jack
 
-1. Low-filament warning when a job starts, if a matched spool has less left than the print needs.
-2. Orca's light and dark theme in the plugin tab.
-3. Low stock reorder button.
-4. Stock view inside the Orca tab: spool cards with colour, weight bar, filter and group.
-5. Live preset sync from the plugin with Orca open (FilamentHub's approach: presets in `user/<folder>/_local/<bundle>/filament` with `bundle_metadata.json`, then `orca.host.preset.bundles.reload_local`). Unproven on his Orca, so probe it first.
+Done: the low-filament warning and Orca's theme in the tab (plugin 1.1.0). Jack doesn't want a reorder or buy button.
+
+1. Stock view inside the Orca tab: spool cards with colour, weight bar, filter and group.
+2. Live preset sync from the plugin with Orca open (FilamentHub's approach: presets in `user/<folder>/_local/<bundle>/filament` with `bundle_metadata.json`, then `orca.host.preset.bundles.reload_local`). Unproven on his Orca, so probe it first.

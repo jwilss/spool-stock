@@ -7,7 +7,7 @@
 # name = "Spool Stock"
 # description = "Takes each print's filament off the right spools in Spool Stock, from the AMS trays and external spool your Bambu printers used."
 # author = "jwilss"
-# version = "1.0.0"
+# version = "1.1.0"
 # ///
 """Spool Stock for OrcaSlicer 2.5.
 
@@ -45,7 +45,7 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 MQTT_PORT, FTP_PORT = 8883, 990
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
 TOKEN_URL = "https://securetoken.googleapis.com/v1/token"
@@ -770,11 +770,17 @@ class Link:
             self.new_job(name=p.get("subtask_name") or "", file=p.get("file") or os.path.basename(str(p.get("url", ""))),
                          plate=int(m.group(1)) if m else 1, mapping=p.get("ams_mapping"), mapping2=p.get("ams_mapping2"),
                          use_ams=p.get("use_ams"))
-            self.fetching = False
+            job = STORE.active[self.serial]
+            self.fetching = True
+        # Read the grams straight away, so a spool that's too low is flagged before the print gets going
+        threading.Thread(target=self.fetch, args=(job, 3), daemon=True).start()
 
-    def fetch(self, job: dict) -> bool:
-        """Read the grams from the job file, up to 3 tries."""
+    def fetch(self, job: dict, delay: float = 0) -> bool:
+        """Read the grams from the job file, up to 3 tries, then check the spools have enough."""
+        self.fetching = True
         try:
+            if delay and self.stop.wait(delay):
+                return False
             for attempt in range(1, 4):
                 try:
                     fils = read_job_file(self.p["ip"], self.p["code"], job["file"], job["plate"])
@@ -782,6 +788,13 @@ class Link:
                         job["fils"] = fils
                         STORE.save()
                     log("job.grams", printer=self.name, job=job["name"], filaments=fils)
+                    try:
+                        check_low(job)
+                    except PermissionError:
+                        pass   # the tab tries again from Orca's main thread
+                    except Exception as e:
+                        job["checked_low"] = True
+                        log("low.error", error=f"{type(e).__name__}: {e}")
                     return True
                 except Exception as e:
                     log("job.file_error", printer=self.name, job=job["name"], attempt=attempt, error=f"{type(e).__name__}: {e}")
@@ -792,12 +805,70 @@ class Link:
             self.fetching = False
 
     def end(self, job: dict):
+        job["checked_low"] = True   # too late to warn
         until = time.monotonic() + 120
         while self.fetching and time.monotonic() < until:   # a read started during the print is still going
             time.sleep(0.5)
         if job.get("fils") is None:
             self.fetch(job)
         finish_job(job)
+
+
+_notify_q: list[str] = []
+
+
+def notify(text: str) -> None:
+    """Show a warning in Orca. Queued here and shown from the tab's next message, on Orca's main thread."""
+    _notify_q.append(text)
+
+
+def _flush_notifications() -> None:
+    ui = getattr(getattr(orca, "host", None), "ui", None)
+    push = getattr(ui, "push_notification", None)
+    level = getattr(ui, "WarningNotificationLevel", None)
+    while _notify_q:
+        text = _notify_q.pop(0)
+        if not callable(push):
+            continue
+        tries = [(text, level), (level, text), (text,)] if level is not None else [(text,)]
+        for args in tries:
+            try:
+                push(*args)
+                log("notify.shown", form=len(args) if args[0] is text else "level first")
+                break
+            except TypeError:
+                continue
+            except Exception as e:
+                log("notify.error", error=f"{type(e).__name__}: {e}")
+                break
+
+
+def check_low(job: dict) -> None:
+    """Warn when a spool in a tray the job uses has less left than the job needs (with 10% to spare)."""
+    if job.get("checked_low") or not job.get("fils") or not CLOUD.signed_in:
+        return
+    snap = CLOUD.snapshot(max_age=30)
+    printer = find_printer(snap, job["serial"], job["printer"])
+    fils, warnings = job["fils"], []
+    for i, f in enumerate(fils):
+        t = tray_of({**job, "fil_count": len(fils)}, f["id"], i)
+        sp = tray_to_spool(snap, printer, t[0], t[1]) if (t and printer) else None
+        left = (sp.get("remainG") if sp.get("remainG") is not None else sp.get("netG")) if sp else None
+        if not isinstance(left, (int, float)) or left >= f["g"] * 1.1:
+            continue
+        need = round(f["g"])
+        what = f"{sp['id'].upper()} ({' '.join(x for x in (sp.get('brand'), sp.get('material'), sp.get('colour')) if x)}) in {tray_name(t)}"
+        warnings.append(f"{job['name']} needs {need} g from {what}, which has about {round(left)} g left."
+                        if left < f["g"] else
+                        f"{job['name']} needs {need} g from {what}, which has about {round(left)} g left. That's only just enough.")
+    with STORE.lock:
+        job["checked_low"], job["warnings"] = True, warnings
+        for w in warnings:
+            STORE.note(f"{job['printer']}: {w}", job["key"])
+        STORE.save()
+    for w in warnings:
+        log("low.warning", printer=job["printer"], text=w)
+        notify(f"Spool Stock, {job['printer']}: {w}")
 
 
 def finish_job(job: dict):
@@ -1009,6 +1080,23 @@ def _spool_options(snap) -> list[dict]:
     return sorted(out, key=lambda x: x["id"])
 
 
+_theme = {"at": 0.0, "dark": None}
+
+
+def orca_dark():
+    """Whether Orca is in dark mode, from its settings file. None if it can't be read."""
+    if time.time() - _theme["at"] < 20:
+        return _theme["dark"]
+    _theme["at"] = time.time()
+    try:
+        text = (DATA.parent / "OrcaSlicer.conf").read_text(encoding="utf-8")
+        v = json.loads(text[: text.rfind("}") + 1]).get("app", {}).get("dark_color_mode")
+        _theme["dark"] = None if v is None else str(v).strip().lower() in ("1", "true")
+    except Exception:
+        _theme["dark"] = None
+    return _theme["dark"]
+
+
 def _state(hint: str = "") -> dict:
     snap = CLOUD.snap
     rows = []
@@ -1026,7 +1114,8 @@ def _state(hint: str = "") -> dict:
                 trays.append({"colour": f["colour"], "type": f["type"], "g": f["g"], "tray": tray_name(t), "spool": spool_label(sp) if sp else ""})
         rows.append({"name": p.get("name", ""), "ip": p.get("ip", ""), "serial": serial, "state": link.state if link else "not connected",
                      "linked": (ss or {}).get("name", ""), "job": {"name": job["name"], "percent": job.get("percent", 0), "state": job["state"],
-                                                                     "late": job.get("late"), "trays": trays} if job else None})
+                                                                     "late": job.get("late"), "trays": trays,
+                                                                     "warnings": job.get("warnings") or []} if job else None})
     with STORE.lock:
         pending = []
         for e in STORE.pending:
@@ -1041,22 +1130,24 @@ def _state(hint: str = "") -> dict:
         outbox = len(STORE.outbox)
     return {"type": "state", "version": VERSION, "hint": hint, "signedIn": CLOUD.signed_in, "account": CLOUD.acct.get("e", ""),
             "cloud": CLOUD.status, "printers": rows, "pending": pending, "recent": recent, "outbox": outbox,
-            "spools": _spool_options(snap), "log": str(LOG)}
+            "spools": _spool_options(snap), "log": str(LOG), "dark": orca_dark()}
 
 
 PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><style>
-:root{--fg:var(--orca-text-color,#1d1d1f);--bg:var(--orca-bg-color,#fff);--line:#8885;--muted:#8888;--go:#00875a}
+:root{color-scheme:light;--fg:#262e30;--bg:#fff;--card:#fff;--line:#d6d6d6;--go:#009688;--warn:#c76b00;--warnbg:#fff6e8}
+:root[data-theme=dark]{color-scheme:dark;--fg:#efeff0;--bg:#2d2d31;--card:#36363c;--line:#4c4c54;--warn:#e7a23c;--warnbg:#3b3122}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;--fg:#efeff0;--bg:#2d2d31;--card:#36363c;--line:#4c4c54;--warn:#e7a23c;--warnbg:#3b3122}}
 body{font:14px/1.45 system-ui,"Segoe UI",sans-serif;margin:0;padding:16px;color:var(--fg);background:var(--bg)}
 h1{font-size:20px;margin:0 0 2px}h2{font-size:15px;margin:20px 0 6px;text-transform:uppercase;letter-spacing:.04em;opacity:.75}
-.card{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:8px 0}
+.card{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:8px 0;background:var(--card)}
 .muted{opacity:.7;font-size:13px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-input,select,textarea{font:inherit;padding:5px 6px;border:1px solid var(--line);border-radius:5px;background:transparent;color:inherit}
+input,select,textarea{font:inherit;padding:5px 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:inherit}
 input{width:150px}input.pct{width:60px}select{max-width:100%}textarea{width:100%;box-sizing:border-box;height:60px}
 button{font:inherit;padding:6px 12px;border:1px solid var(--line);border-radius:5px;background:transparent;color:inherit;cursor:pointer}
 button.go{background:var(--go);border-color:var(--go);color:#fff}
 .sw{display:inline-block;width:14px;height:14px;border:1px solid #0006;border-radius:3px;vertical-align:-2px}
 table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}td{border-top:1px solid var(--line);padding:4px 6px;vertical-align:middle}
-.warn{border-color:#d97706}
+.warn{border-color:var(--warn)}.alert{background:var(--warnbg);border-left:3px solid var(--warn);padding:6px 8px;margin-top:6px;border-radius:4px}
 </style></head><body>
 <h1>Spool Stock</h1>
 <p class="muted">Takes each print's filament off the spools in the trays it used. <span id="ver"></span></p>
@@ -1075,6 +1166,7 @@ function h(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"
 function sw(c){return '<span class="sw" style="background:'+h(c||"#0000")+'"></span>'}
 function set(id,html,key){if(last[id]===key)return;last[id]=key;document.getElementById(id).innerHTML=html}
 o.onMessage(function(d){if(!d||d.type!=="state")return;spools=d.spools||[];
+document.documentElement.dataset.theme=d.dark===true?"dark":d.dark===false?"light":"";
 document.getElementById("ver").textContent="Version "+d.version+".";
 document.getElementById("hint").textContent=d.hint||"";
 set("acct",d.signedIn?'<div class="card">'+h(d.cloud)+(d.outbox?" "+d.outbox+" waiting to send.":"")+'<div class="row" style="margin-top:6px"><button data-a="signout">Sign out</button></div></div>'
@@ -1093,7 +1185,8 @@ set("pending",d.pending.map(function(e){
 set("printers",d.printers.map(function(p,i){var j=p.job;
  return '<div class="card"><b>'+h(p.name)+'</b> <span class="muted">'+h(p.ip)+(p.serial?" · "+h(p.serial):"")+'</span><br>'+h(p.state)
  +(p.linked?' · <span class="muted">Spool Stock printer: '+h(p.linked)+'</span>':(d.signedIn?'<br><span class="muted">Not found in Spool Stock. Add a printer there called '+h(p.name)+(p.serial?', or with serial '+h(p.serial):"")+'.</span>':""))
- +(j?'<br>Printing '+h(j.name)+(j.percent?" ("+j.percent+"%)":"")+(j.late?' <span class="muted">(joined part way, so the trays come from what it fed)</span>':"")
+ +(j&&j.warnings.length?j.warnings.map(function(w){return '<div class="alert">'+h(w)+'</div>'}).join(""):"")
+ +(j?(j.warnings.length?'':'<br>')+'Printing '+h(j.name)+(j.percent?" ("+j.percent+"%)":"")+(j.late?' <span class="muted">(joined part way, so the trays come from what it fed)</span>':"")
    +(j.trays.length?'<table>'+j.trays.map(function(t){return '<tr><td>'+sw(t.colour)+' '+h(t.type)+'</td><td>'+t.g+' g</td><td>'+h(t.tray)+'</td><td>'+(t.spool?h(t.spool):'<span class="muted">no spool matched</span>')+'</td></tr>'}).join("")+'</table>':'<br><span class="muted">Grams come from the job file once printing starts.</span>'):"")
  +'<div class="row" style="margin-top:6px"><button data-a="connect">Connect</button><button data-a="remove" data-i="'+i+'">Remove</button></div></div>'}).join("")||'<p class="muted">None yet.</p>',JSON.stringify(d.printers));
 set("recent",d.recent.map(function(r){return h(r.when)+": "+h(r.text)}).join("<br>")||"Nothing yet.",JSON.stringify(d.recent));
@@ -1117,6 +1210,7 @@ def handle(d: dict) -> dict:
     global _started
     t = (d or {}).get("type")
     hint = ""
+    _flush_notifications()
     if t == "ready":
         if not _started:
             _started = True
@@ -1130,6 +1224,9 @@ def handle(d: dict) -> dict:
         if CLOUD.ui_mode:
             try:
                 tick()
+                for job in list(STORE.active.values()):
+                    if job.get("fils") and not job.get("checked_low"):
+                        check_low(job)
             except PermissionError:
                 hint = "Orca is blocking Spool Stock. Press Connect on a printer and choose Yes."
     elif t == "signin":
