@@ -2,3 +2,5 @@ node_modules/
 dist/
 wrappers/android/android/
 test/out/
+/site/spool_stock.py
+__pycache__/

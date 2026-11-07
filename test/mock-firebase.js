@@ -20,7 +20,7 @@
   const fsApi={settings(){},enablePersistence:async()=>{},collection:colRef,doc:docRef};
   const users=()=>JSON.parse(localStorage.getItem('__fbUsers')||'{}');
   let cbs=[]; const sess=()=>localStorage.getItem('__fbSession');
-  const authApi={get currentUser(){const s=sess();return s?{uid:'u1',email:s}:null},
+  const authApi={get currentUser(){const s=sess();return s?{uid:'u1',email:s,refreshToken:'RT-'+s}:null},
     onAuthStateChanged(cb){cbs.push(cb);setTimeout(()=>cb(authApi.currentUser))},
     async createUserWithEmailAndPassword(e,p){ if(p.length<6) throw{code:'auth/weak-password'}; const u=users(); if(u[e]) throw{code:'auth/email-already-in-use'}; u[e]=p; localStorage.setItem('__fbUsers',JSON.stringify(u)); localStorage.setItem('__fbSession',e); cbs.forEach(c=>c(authApi.currentUser)) },
     async signInWithEmailAndPassword(e,p){ if(users()[e]!==p) throw{code:'auth/invalid-credential'}; localStorage.setItem('__fbSession',e); cbs.forEach(c=>c(authApi.currentUser)) },

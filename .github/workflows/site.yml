@@ -2,7 +2,7 @@ name: Publish site
 on:
   push:
     branches: [main]
-    paths: ["site/**", ".github/workflows/site.yml"]
+    paths: ["site/**", "orca-plugin/spoolstock/**", ".github/workflows/site.yml"]
   schedule:
     - cron: "17 4 * * 1"
   workflow_dispatch:
@@ -39,6 +39,8 @@ jobs:
           git clone --depth 1 --filter=blob:none --sparse https://github.com/OrcaSlicer/OrcaSlicer.git "$RUNNER_TEMP/orca"
           git -C "$RUNNER_TEMP/orca" sparse-checkout set resources/profiles/OrcaFilamentLibrary
           node tools/build-catalogue.mjs "$RUNNER_TEMP/spoolmandb" site/catalogue.json "$RUNNER_TEMP/ofd" "$RUNNER_TEMP/orca"
+      - name: Add the Orca plugin
+        run: cp orca-plugin/spoolstock/spool_stock.py site/spool_stock.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

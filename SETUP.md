@@ -62,6 +62,13 @@ Each storage gets one sticker, which goes in the queue on the Stickers page. To 
 
 Both apps open the website inside them, so site updates reach them without reinstalling.
 
+## Orca plugin (Bambu printers)
+
+1. Under **Setup > Printers**, add each printer with its serial number and what feeds it.
+2. Under **Setup > Orca plugin**, press **Download the plugin**, and follow [its steps](orca-plugin/spoolstock/README.md) to install it in OrcaSlicer 2.5 and sign it in.
+
+The printers need LAN mode on. Their IPs and access codes stay in the plugin on your PC.
+
 ## Using Spool Reader
 
 Spool Reader is the separate Claude artifact for photos. Publish `reader/spool-reader.html` as an artifact to get your own copy.
