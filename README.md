@@ -30,7 +30,7 @@ A filament inventory for home 3D printing, with printed QR stickers, phone scann
 ## Storage
 
 
-<img src="docs/storage.png" width="260" align="right" alt="Storage editor with a type picker, name, group, spaces and a preview">
+<img src="docs/storage.png" width="260" align="center" alt="Storage editor with a type picker, name, group, spaces and a preview">
 
 
 You start with a blank slate and add each place you keep filament. Choosing a type sets sensible defaults, and everything can be changed afterwards.
