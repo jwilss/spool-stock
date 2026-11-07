@@ -27,7 +27,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - Spool Reader keeps its own list and hands spools over as a `spool-stock-import` JSON file. Spool Stock hands its stock back as a `spool-stock-list` file.
 - Print settings come from your own saved settings first, then the catalogue, then a typical table per material. Drying starts from that table, as the catalogue has none, unless `catalogue-extra.json` gives a value. Your edits are remembered per filament.
 - The catalogue lists manufacturers and their product names. It's fetched once and kept for offline use. Saved names join the list for that manufacturer. A filament's other names (`a`, one or a list) are searchable too. Searches treat HS as high speed, HF as high flow, CF as carbon fibre and GF as glass fibre.
-- Catalogue lines that OrcaSlicer's filament library has a profile for carry its name (`o`), and the library's generic profiles are listed in `orca.generic`. Orca presets inherit from those, so Orca must have the library, which it ships with. The Windows app's `preload.js` and `orca.js` let the site write presets into `%APPDATA%\OrcaSlicer\user\<folder>\filament`, accepting only filament user presets, and only from the Spool Stock site.
+- Catalogue lines that OrcaSlicer's filament library has a profile for carry its name (`o`), and the library's generic profiles are listed in `orca.generic`. Orca presets inherit only from the generic ones, by choice. The brand links are kept in the catalogue in case that changes. The Windows app's `preload.js` and `orca.js` let the site write presets into `%APPDATA%\OrcaSlicer\user\<folder>\filament`, accepting only filament user presets, and only from the Spool Stock site.
 - `site.yml` rebuilds the catalogue from SpoolmanDB, the Open Filament Database and OrcaSlicer's filament library on every publish and once a week. If that fails, the committed copy is used.
 - The Open Filament Database (MIT) is merged in for every brand. Where a filament matches by name, its manufacturer ranges, drying, spool weight and colours fill in what SpoolmanDB has. Filaments and manufacturers SpoolmanDB lacks are added. Names are matched on their words, so CF and carbon fiber, or a missing "(NFC)", still match. That gives about 195 manufacturers and 2,200 filaments. `catalogue-extra.json` is applied last, so hand checked values win.
 - Logos are found once and stored per manufacturer in your account: Simple Icons for exact vector matches, Wikimedia Commons as choices, or your own upload. All are turned solid black on transparent. No API keys.
@@ -45,7 +45,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Storage built from scratch, with types, groups, spaces, limits and material warnings
 - [x] One storage with numbered spaces, swapping when full, and moving between spaces
 - [x] Reorder storages
-- [x] Orca presets for owned filaments, built on Orca's library profiles, as a zip to import or sent straight from the Windows app
+- [x] Orca presets for owned filaments, built on Orca's generic profiles, as a zip to import or sent straight from the Windows app
 - [x] Log a print from an Orca or Bambu Studio sliced file (.gcode.3mf) or G-code, matching filaments to spools, with a percentage for failed prints, a print list per spool and Undo
 - [x] Arrange the spools inside a storage: spaces for a unit or dryer, a set order for shelves and boxes
 - [x] Add several storages at once, and remove all of them to start again
