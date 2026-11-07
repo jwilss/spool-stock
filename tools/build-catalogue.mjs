@@ -1,12 +1,14 @@
 // Builds site/catalogue.json from a copy of SpoolmanDB (https://github.com/Donkie/SpoolmanDB).
-// Run: node tools/build-catalogue.mjs <path to SpoolmanDB> [output file] [path to Open Filament Database]
+// Run: node tools/build-catalogue.mjs <path to SpoolmanDB> [output file] [path to Open Filament Database] [path to OrcaSlicer]
+// With OrcaSlicer, each line that Orca's filament library has a profile for is linked to it (o), so Spool Stock can
+// make Orca presets that build on it, and the library's generic profiles are listed for everything else.
 // With the Open Filament Database, its manufacturer ranges, drying, spool weights and colours fill in
 // matching lines, and filaments or manufacturers SpoolmanDB lacks are added.
 // tools/catalogue-extra.json holds additions and corrections checked against manufacturers' own sites.
 import {readdir, readFile, writeFile} from "node:fs/promises";
 import path from "node:path";
 
-const [from, to = "site/catalogue.json", ofd] = process.argv.slice(2);
+const [from, to = "site/catalogue.json", ofd, orca] = process.argv.slice(2);
 if (!from) { console.error("Give the path to a copy of SpoolmanDB"); process.exit(1); }
 
 const tidy = s => s.replace(/[™®]/g, "").replace(/\s+/g, " ").trim();
@@ -145,7 +147,38 @@ for (const [brand, lines] of Object.entries(extra.change)) for (const [name, pat
   brands[brand]?.sort((a, b) => a.n.localeCompare(b.n));
 }
 
+// OrcaSlicer's filament library: link lines to the brand's own Orca profile
+const orcaInfo = {generic: []};
+const ORCA_BRANDS = {"bambu": "Bambu Lab", "addnorth": "add:north"};
+async function walk(dir) {
+  const out = [];
+  for (const e of await readdir(dir, {withFileTypes: true}).catch(() => [])) {
+    if (e.isDirectory()) out.push(...(await walk(path.join(dir, e.name))).map(f => path.join(e.name, f)));
+    else if (/ @System\.json$/.test(e.name)) out.push(e.name);
+  }
+  return out;
+}
+let linked = 0;
+if (orca) {
+  const lib = path.join(orca, "resources", "profiles", "OrcaFilamentLibrary", "filament");
+  for (const rel of await walk(lib)) {
+    const parts = rel.split(path.sep), name = parts.at(-1).replace(/\.json$/, "");
+    if (parts.length === 1) { if (name.startsWith("Generic ")) orcaInfo.generic.push(name); continue; }
+    const vendor = parts[0], brand = ORCA_BRANDS[brandKey(vendor)] ?? Object.keys(brands).find(b => brandKey(b) === brandKey(vendor));
+    if (!brand) continue;
+    let label = name.replace(/ @System$/, "").split(" ");
+    if (brandKey(label[0]) === brandKey(vendor) || brandKey(vendor).startsWith(brandKey(label[0]))) label = label.slice(1);
+    const w = words(label.join(" "));
+    for (const line of brands[brand]) {
+      if (line.o) continue;
+      if (same(w, keyOf(line))) { line.o = name; linked++; }
+    }
+  }
+  orcaInfo.generic.sort();
+  console.log(`OrcaSlicer: ${linked} filaments linked to Orca profiles, ${orcaInfo.generic.length} generic profiles`);
+}
+
 const licence = await readFile(path.join(from, "LICENSE"), "utf8");
 const count = Object.values(brands).reduce((a, l) => a + l.length, 0);
-await writeFile(to, JSON.stringify({source: "https://github.com/Donkie/SpoolmanDB", built: new Date().toISOString().slice(0, 10), notice: licence, also: ofd ? "https://github.com/OpenFilamentCollective/open-filament-database" : undefined, aliases: extra.aliases ?? {}, brands}));
+await writeFile(to, JSON.stringify({source: "https://github.com/Donkie/SpoolmanDB", built: new Date().toISOString().slice(0, 10), notice: licence, also: ofd ? "https://github.com/OpenFilamentCollective/open-filament-database" : undefined, aliases: extra.aliases ?? {}, orca: orcaInfo, brands}));
 console.log(`${Object.keys(brands).length} manufacturers, ${count} filaments`);

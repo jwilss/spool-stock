@@ -36,7 +36,9 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/Donkie/SpoolmanDB.git "$RUNNER_TEMP/spoolmandb"
           git clone --depth 1 https://github.com/OpenFilamentCollective/open-filament-database.git "$RUNNER_TEMP/ofd"
-          node tools/build-catalogue.mjs "$RUNNER_TEMP/spoolmandb" site/catalogue.json "$RUNNER_TEMP/ofd"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/OrcaSlicer/OrcaSlicer.git "$RUNNER_TEMP/orca"
+          git -C "$RUNNER_TEMP/orca" sparse-checkout set resources/profiles/OrcaFilamentLibrary
+          node tools/build-catalogue.mjs "$RUNNER_TEMP/spoolmandb" site/catalogue.json "$RUNNER_TEMP/ofd" "$RUNNER_TEMP/orca"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

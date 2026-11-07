@@ -221,6 +221,21 @@ await p.evaluate(id=>{location.hash=id},picks[0]);await p.waitForSelector('.spoo
  await p.fill('#f_brand','eSUN');await p.fill('#f_material','PETG');await p.waitForTimeout(60);ok(await p.inputValue('#f_dT')==='60','eSUN PETG dries at 60');
  await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('.racks');
 
+ // Orca presets for the filaments you own
+ await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=orcaZip]');ok(!(await p.$('[data-act=orcaSend]')),'Send to Orca only shows in the Windows app');
+ const [oz]=await Promise.all([p.waitForEvent('download'),p.click('[data-act=orcaZip]')]);await oz.saveAs(out+'/orca.zip');
+ const presets=JSON.parse(require('child_process').execSync(`python3 -I -c "import zipfile,json,sys;z=zipfile.ZipFile(sys.argv[1]);print(json.dumps({n:json.loads(z.read(n)) for n in z.namelist()}))" ${out}/orca.zip`).toString());
+ const cat=JSON.parse(fs.readFileSync(__dirname+'/../site/catalogue.json')),known=new Set([...cat.orca.generic,...Object.values(cat.brands).flat().map(l=>l.o).filter(Boolean)]);
+ const pv=Object.entries(presets);ok(pv.length>=5&&pv.every(([n,j])=>j.type==='filament'&&j.from==='User'&&j.name+'.json'===n&&j.filament_settings_id[0]===j.name&&/^\d+\.\d+\.\d+\.\d+$/.test(j.version)),'zip holds one valid Orca user preset per filament: '+pv.length);
+ ok(pv.every(([,j])=>known.has(j.inherits)),'every preset builds on a profile Orca has: '+[...new Set(pv.map(([,j])=>j.inherits))].join('; '));
+ const asa=pv.find(([n])=>/^Bambu Lab ASA \(/.test(n));ok(asa&&asa[1].inherits==='Bambu ASA @System'&&asa[1].nozzle_temperature,"Bambu ASA builds on Orca's own profile, with the sticker temperatures");
+ const sunlu=pv.find(([n])=>/^SUNLU PLA \(/i.test(n));ok(sunlu&&/Generic PLA|SUNLU/.test(sunlu[1].inherits),'SUNLU PLA builds on a PLA profile: '+(sunlu&&sunlu[1].inherits));
+ const gen=pv.find(([,j])=>j.inherits.startsWith('Generic')&&j.nozzle_temperature);ok(gen&&+gen[1].nozzle_temperature[0]>=+gen[1].nozzle_temperature_range_low[0]&&+gen[1].nozzle_temperature[0]<=+gen[1].nozzle_temperature_range_high[0]&&gen[1].textured_plate_temp,'generic presets carry the temperatures');
+ await p.evaluate(()=>{window.__sent=null;window.spoolStockDesktop={orca:{write:async f=>{window.__sent=f;return {written:f.length,dir:'C:/x'}}}};location.hash='stock'});await p.waitForSelector('.racks');
+ await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=orcaSend]');await p.click('[data-act=orcaSend]');await p.waitForFunction(()=>/Restart Orca/.test(document.querySelector('#toast').textContent));
+ ok((await p.evaluate(()=>window.__sent.length))===pv.length,'Send to Orca hands every preset to the Windows app');
+ await p.evaluate(()=>{delete window.spoolStockDesktop});
+
  // stock list for Spool Reader
  await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=listSave]');
  await p.screenshot({path:out+'/setup-phone.png',fullPage:true});
