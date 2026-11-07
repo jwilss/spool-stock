@@ -1,6 +1,7 @@
 // Keeps the app opening with no signal. Tries the network first so updates arrive,
-// and falls back to the saved copy when the network is missing or too slow.
-const CACHE = "spool-stock-v3";
+// and falls back to the saved copy when the network is missing or too slow. Its own files are always
+// checked with the server (a quick "has this changed" check), so a new version shows on the next open.
+const CACHE = "spool-stock-v4";
 const FILES = ["./", "index.html", "config.js", "catalogue.json", "manifest.webmanifest", "icon-192.png", "icon-512.png",
   "vendor/qrcode.js", "vendor/jsQR.js", "vendor/jspdf.umd.min.js",
   "vendor/firebase-app-compat.js", "vendor/firebase-auth-compat.js", "vendor/firebase-firestore-compat.js"];
@@ -13,7 +14,7 @@ self.addEventListener("fetch", e => {
   if (e.request.method !== "GET" || !(mine || font)) return;
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    const net = fetch(e.request).then(r => { if (r.ok || r.type === "opaque") cache.put(e.request, r.clone()); return r; });
+    const net = (mine ? fetch(u.href, {cache: "no-cache", credentials: "same-origin"}) : fetch(e.request)).then(r => { if (r.ok || r.type === "opaque") cache.put(e.request, r.clone()); return r; });
     const slow = new Promise(res => setTimeout(res, 2500));
     const first = await Promise.race([net.catch(() => null), slow]);
     if (first) return first;
