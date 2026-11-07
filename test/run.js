@@ -182,6 +182,20 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  await p.evaluate(()=>{location.hash='loc-unit-1'});await p.waitForSelector('[data-go="store-unit-1"]');ok((await p.textContent('#main')).includes('Feeds Betsy (AMS 2)'),'storage page says which printer it feeds');
  if(tray.b){await p.evaluate(id=>{location.hash=id},tray.b);await p.waitForSelector('.spoolhead');ok((await p.textContent('#main')).includes('Feeding Betsy, AMS 2 tray 3'),'spool page says which printer tray it feeds');}
 
+ // the Orca plugin: sign-in code, and Undo of a print it took off
+ await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=pluginCode]');
+ ok(await p.getAttribute('a[href="spool_stock.py"]','download')!==null,'Setup offers the plugin as a download from the site');
+ await p.evaluate(()=>{window.__copied='';navigator.clipboard.writeText=async t=>{window.__copied=t}});await p.click('[data-act=pluginCode]');await p.waitForFunction(()=>window.__copied);
+ const pc=await p.evaluate(()=>{const c=window.__copied;return {pre:c.slice(0,4),d:JSON.parse(atob(c.slice(4)))}});
+ ok(pc.pre==='SS1.'&&pc.d.p==='x'&&pc.d.u==='u1'&&pc.d.t==='RT-a@b.co'&&pc.d.e==='a@b.co','sign-in code carries the project, account and refresh token for the plugin');
+ const js=await p.evaluate(()=>{const s=liveSpools().find(s=>s.loc==='ams1-1');const at=1762545600000;const g0=s.remainG??s.netG;
+  col('spools').doc(s.id).update({remainG:g0-12,prints:[{at,name:'Bracket',g:12},...(s.prints||[])]});
+  col('jobs').doc('SER-1').set({at,printer:'Betsy',job:'Bracket',pct:100,items:[{spool:s.id,g:12}],source:'orca'});return {id:s.id,g0}});
+ await p.waitForSelector('[data-act=jobUndo]');ok((await p.textContent('#main')).includes('12 g off '+js.id.toUpperCase()),'Setup lists prints the plugin took off');
+ await p.click('[data-act=jobUndo]');await p.waitForTimeout(200);db=await dbOf(p);
+ ok(db[uid+'spools/'+js.id].remainG===js.g0&&!(db[uid+'spools/'+js.id].prints||[]).some(x=>x.name==='Bracket')&&db[uid+'jobs/SER-1'].undone===true,'Undo puts the grams back and removes the print from the spool');
+ ok(!(await p.$('[data-act=jobUndo]')),'an undone print has no Undo button');
+
  // logging a print from an Orca sliced file
  const F3=__dirname+'/fixtures/';
  await p.evaluate(()=>{location.hash='stock'});await p.waitForSelector('[data-go=log]');await p.click('[data-go=log]');await p.waitForSelector('label[for=pickPrint]');

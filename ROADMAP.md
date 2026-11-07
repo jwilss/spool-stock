@@ -13,13 +13,14 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - `.github/workflows/`: `site.yml` adds the Firebase key from the `FIREBASE_API_KEY` secret, refreshes the catalogue and publishes the site. `apps.yml` builds the APK and exe.
 - `firestore.rules`: keeps each account to its own data.
 - `docs/`: images for the README, made with `test/shots.js`. The stickers image is the only one it doesn't make.
-- `test/`: `run.js` for the app, `reader.js` for Spool Reader. Both use stand-ins for Firebase and Claude.
-- `orca-plugin/probe/`: a read-only OrcaSlicer 2.5 test plugin that logs what Orca and the printers report (events, slices, AMS trays, tray mapping, the job file).
+- `test/`: `run.js` for the app, `reader.js` for Spool Reader, `orca.js` for the Windows Orca bridge, `plugin.py` and `probe.py` for the Orca plugins. They use stand-ins for Firebase, Claude, Orca and the printers.
+- `orca-plugin/spoolstock/`: the OrcaSlicer 2.5 plugin that takes each print off the spools it used.
+- `orca-plugin/probe/`: the read-only test plugin used to find out what Orca and the printers report. Its README has what it found.
 - `SETUP.md`: first time setup.
 
 ## How it fits together
 
-- Data lives in Firestore under `users/<uid>/`: `spools`, `locations`, `brands`, `profiles`, `config/main`.
+- Data lives in Firestore under `users/<uid>/`: `spools`, `locations`, `brands`, `profiles`, `printers`, `jobs`, `config/main`.
 - Writes land in the phone's local copy first and sync when there's signal, so the app never waits on them.
 - Sticker QR codes hold the site address plus a code: `#s0012` for a spool, `#loc-top-shelf` for a storage.
 - The Scan page runs a live camera: scan a spool, then a storage. A phone's normal camera also works through the link.
@@ -30,6 +31,8 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - The catalogue lists manufacturers and their product names. It's fetched once and kept for offline use. Saved names join the list for that manufacturer. A filament's other names (`a`, one or a list) are searchable too. Searches treat HS as high speed, HF as high flow, CF as carbon fibre and GF as glass fibre.
 - Catalogue lines that OrcaSlicer's filament library has a profile for carry its name (`o`), and the library's generic profiles are listed in `orca.generic`. Owned filaments with an Orca profile use it as it is. The rest get a user preset that inherits a generic profile, with the app's temperatures. The Windows app's `preload.js` and `orca.js` let the site write those presets into `%APPDATA%\OrcaSlicer\user\<folder>\filament`, and set the `filaments` section of `OrcaSlicer.conf` to the exact Orca preset names the catalogue lists for your filaments (`orca.variants`, read from Orca's source, Bambu printer versions included, as newer Orca packs its profiles into one file per brand) (with a fresh MD5 checksum line) to every installed variant of your filaments, after backing it up to `OrcaSlicer.conf.spoolstock.bak`. It refuses while `orca-slicer.exe` is running, accepts only filament user presets, and only from the Spool Stock site.
 - Printers live in `printers`: `{name, serial, feeds: [{kind: "ams", unit: 1, loc}, {kind: "external", loc, space}]}`. `SpoolStock.trayToSpool(printer, unit, tray)` turns the printer's own numbering (AMS unit and tray from 0, or "external") into the spool in that space. Printer IPs and access codes never go to Firebase.
+- The Orca plugin (`spool_stock.py`, one Python file) keeps a status connection to each printer (MQTT on 8883, user `bblp` and the access code, subscribed to that printer's own topic, serial read from its certificate). The printer's `project_file` message gives `ams_mapping2` (`{ams_id, slot_id}` per filament, `ams_id` 255 for the external spool). Once printing is under way it reads the job's `.3mf` from the printer over implicit FTPS on 990 and takes `used_g` per filament from `slice_info.config`. The same trays-to-spool rules as `trayToSpool` find the spools. A finished print is written in one Firestore commit: each spool's `remainG` and `prints`, checked against the spool's last update, plus `jobs/<serial>-<ms>`, which must not exist yet, so nothing is taken off twice. A failed (`gcode_state` FAILED) or cancelled (`print_error` 50348044) print waits in the tab with the printer's `mc_percent`. The app's Undo puts the grams back and removes the matching print entry.
+- The plugin signs in with a code from Setup: `SS1.` and base64 JSON of the web API key, project, user ID and the browser's refresh token. It swaps that for ID tokens and uses Firestore's REST interface. Orca's audit permissions only prompt on its main thread, so the printers and Google's hosts are reached once from the tab first. If background calls are still refused, the tab's two-second poll does the sending. Its state (`jobs.json`) survives a restart of Orca mid-print.
 - `site.yml` rebuilds the catalogue from SpoolmanDB, the Open Filament Database and OrcaSlicer's filament library on every publish and once a week. If that fails, the committed copy is used.
 - The Open Filament Database (MIT) is merged in for every brand. Where a filament matches by name, its manufacturer ranges, drying, spool weight and colours fill in what SpoolmanDB has. Filaments and manufacturers SpoolmanDB lacks are added. Names are matched on their words, so CF and carbon fiber, or a missing "(NFC)", still match. That gives about 195 manufacturers and 2,200 filaments. `catalogue-extra.json` is applied last, so hand checked values win.
 - Logos are found once and stored per manufacturer in your account: Simple Icons for exact vector matches, Wikimedia Commons as choices, or your own upload. All are turned solid black on transparent. No API keys.
@@ -48,6 +51,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] One storage with numbered spaces, swapping when full, and moving between spaces
 - [x] Reorder storages
 - [x] Owned filaments in Orca: Orca's own profile where one matches, a generic-based preset with your temperatures where not, and Orca's filament list set to just your filaments from the Windows app, with backup and restore
+- [x] Orca plugin: finished prints taken off the spools in the trays they used, failed and cancelled ones confirmed in Orca's tab with how far they got, and Undo in the app
 - [x] Log a print from an Orca or Bambu Studio sliced file (.gcode.3mf) or G-code, matching filaments to spools, with a percentage for failed prints, a print list per spool and Undo
 - [x] Printers in the app, with what feeds each one (AMS units and the external spool mapped to storages and spaces)
 - [x] Arrange the spools inside a storage: spaces for a unit or dryer, a set order for shelves and boxes
@@ -71,6 +75,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [ ] Weekly catalogue refresh running in GitHub Actions
 - [x] Run the Orca probe plugin through a print on Alduin and Betsy, and send the log
 - [x] Probe 0.3.1 through a print on each printer: tray mapping, job file and grams all confirmed
+- [ ] Orca plugin on the real printers: a finished print on each, and a cancelled one
 - [ ] Log a print with a real Orca export from Alduin and Betsy
 - [ ] Import the Orca presets zip into Orca, and Send to Orca from the rebuilt Windows app, including the filament list
 - [ ] Camera inside the APK
@@ -82,7 +87,6 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 
 ## Next
 
-- [ ] Spool Stock Orca plugin: take each print's grams off the spools in the trays it used, when it finishes
 - [ ] Restore from a JSON backup
 - [ ] Low stock shopping list
 - [ ] Add drying settings per filament, and fill catalogue gaps by sending additions to SpoolmanDB
@@ -93,6 +97,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 
 - [ ] Names for spaces in a storage, such as Left and Right
 - [ ] Firebase App Check to cut down junk requests
-- [ ] Filament used per print, from printer history if a safe route exists
+- [ ] Show prints waiting in Orca's tab in the app too
+- [ ] Install the plugin from the Windows app
 - [ ] Thermal label printer output
 - [ ] NFC tags as a one tap alternative to QR

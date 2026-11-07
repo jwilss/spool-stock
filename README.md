@@ -25,7 +25,8 @@ A filament inventory for home 3D printing, with printed QR stickers, phone scann
 - **Your own names too:** anything that isn't listed can be typed in, and it joins that manufacturer's list with your settings.
 - **Works offline:** changes save on the device and sync when you're back online.
 - **Low stock at a glance:** weigh a spool and it works out what's left.
-- **Log prints from Orca:** drop a sliced file on the app and it takes what each filament used off the right spools.
+- **Prints come off by themselves:** the Orca plugin takes each print's filament off the spools in the trays it used when it ends. Failed and cancelled prints wait for you to check.
+- **Log prints by hand:** drop a sliced file on the app and it takes what each filament used off the right spools.
 - **Your filaments in Orca:** Orca's own profile where it has one, a preset with your temperatures where it doesn't, and Orca's list cut down to just your filaments.
 
 ## Storage
@@ -80,7 +81,17 @@ Everything prints in black except the colour box, so the only colour on the stic
 
 Stickers download as an A4 PDF, and the app remembers where you got to on a part-used sheet. Logos are found or uploaded once, turned black on transparent, and stored in your account.
 
-## Logging prints
+## The Orca plugin
+
+For Bambu printers in LAN mode, with OrcaSlicer 2.5. It watches each printer, and when a print ends, takes what each filament used off the spool in the tray it came from.
+
+- **Finished prints** come off straight away. **Setup > Orca plugin** lists them, each with **Undo**.
+- **Failed or cancelled prints** wait in Orca's Spool Stock tab, with how far the printer got filled in, for you to check and confirm.
+- The tray comes from the printer and the grams from the job file on it, so it works however the print was sent.
+
+Download it and copy its sign-in code from **Setup > Orca plugin**. [orca-plugin/spoolstock](orca-plugin/spoolstock/README.md) has the steps. Printer IPs and access codes stay on your PC.
+
+## Logging prints by hand
 
 In Orca, use **Export plate sliced file**, then drop the file on Spool Stock (or press **Log a print** and choose it). Plain G-code works too. It reads the grams each filament used and suggests which spool each came from: same material first, then spools in a unit, holder or dryer, then the nearest colour. Check them, lower the percentage for a failed or cancelled print, and confirm. Each spool keeps a list of its prints, and there's an Undo.
 
@@ -118,6 +129,8 @@ flowchart LR
     C[QR sticker] -->|phone camera| B
     B <-->|sync| D[(Firebase)]
     B --> E[A4 sticker PDF]
+    F[Bambu printers] -->|trays and grams| G[Orca plugin]
+    G -->|takes prints off| D
     E --> C
 ```
 
@@ -141,11 +154,12 @@ site/        the app
 reader/      Spool Reader
 tools/       builds the filament catalogue
 wrappers/    Android and Windows shells
+orca-plugin/ the OrcaSlicer plugin, and the probe used to build it
 docs/        images for this page
 test/        end-to-end tests
 ```
 
-Run the tests with `node test/run.js`, `node test/reader.js`, `node test/orca.js` and `python3 test/probe.py`.
+Run the tests with `node test/run.js`, `node test/reader.js`, `node test/orca.js`, `python3 test/plugin.py` and `python3 test/probe.py`.
 
 ## Good to know
 
