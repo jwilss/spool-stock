@@ -10,6 +10,17 @@ Takes each print's filament off the right spools in Spool Stock, for Bambu print
 4. When the print **finishes**, the grams come off those spools straight away. Each spool gets the print in its list, and **Setup > Orca plugin** in the app lists it with an **Undo** button.
 5. When a print **fails or is cancelled**, it waits under **Needs you** in Orca's Spool Stock tab. It shows how far the printer got, with that percentage filled in, and the spool it used. Change anything that's wrong, then press **Take it off**, or **Skip**.
 
+## Stock and presets
+
+The tab has three views: **Prints** (the printers, prints waiting for you and recent results), **Stock** and **Presets**.
+
+- **Stock** shows every spool that isn't used up: its colour, a bar for what's left, and its storage and space. Search by code, brand, material, colour or storage, show only low spools (150 g or less, as in the app), and group by storage, material or brand. A spool a printer feeds from has that printer's name on it. It refreshes about once a minute, or press **Refresh**.
+- **Presets** adds a **Spool Stock** group to Orca's filament list, with one preset for each filament you own. Ones Orca already has a profile for build on it unchanged. The rest build on Orca's closest generic profile with the temperatures from your stickers, the same as **Setup > Orca presets** in the app. Press **Add them to Orca** once. After that the group follows your stock: Spool Stock sends the list whenever your filaments change, and the plugin picks it up within a minute or two, or straight away with **Update now**. **Remove them from Orca** takes the group out again.
+
+The presets live in Orca's own folder as a local preset bundle, `user\<your preset folder>\_local\spool-stock\`. Orca 2.5 builds that can reload a bundle while open show the change straight away. Older ones need a restart, and the tab says so. Copies of the same presets sent before by the Windows app are moved to `spoolstock\old-presets\`, so nothing shows twice.
+
+## Low spool warnings
+
 As soon as a job is sent, the plugin also checks each spool it will use. If one has less left than the print needs, or only just enough, Orca shows a warning and the tab shows it on that printer, so you can swap the spool before it runs out.
 
 A finished print also waits under **Needs you** if a tray has no spool in Spool Stock, or the printer isn't set up there, so you can pick the spool yourself.

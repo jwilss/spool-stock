@@ -5,9 +5,9 @@
 # [tool.orcaslicer.plugin]
 # id = "spool-stock"
 # name = "Spool Stock"
-# description = "Takes each print's filament off the right spools in Spool Stock, from the AMS trays and external spool your Bambu printers used."
+# description = "Takes each print's filament off the right spools in Spool Stock, shows your stock, and keeps a Spool Stock group of your filaments in Orca's filament list."
 # author = "jwilss"
-# version = "1.1.0"
+# version = "1.2.0"
 # ///
 """Spool Stock for OrcaSlicer 2.5.
 
@@ -17,6 +17,9 @@ per filament, and when the print ends takes them off the spools that Spool Stock
 
 A finished print is taken off straight away, with Undo in the app. A failed or cancelled print waits in
 the Spool Stock tab with how far it got, for you to confirm.
+
+The tab also shows your stock, and can keep a Spool Stock group in Orca's filament list: one preset for each
+filament you own, written as a local preset bundle and reloaded while Orca is open.
 
 The only thing sent to a printer is Bambu's standard request for its status. Printer IPs and access
 codes stay in this plugin's folder on this PC and are never sent to Spool Stock or written to the log.
@@ -45,7 +48,7 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 MQTT_PORT, FTP_PORT = 8883, 990
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
 TOKEN_URL = "https://securetoken.googleapis.com/v1/token"
@@ -73,6 +76,7 @@ LOG = DATA / "spoolstock.log"
 PRINTERS = DATA / "printers.json"
 ACCOUNT = DATA / "account.json"
 JOBS = DATA / "jobs.json"
+PRESET_STATE = DATA / "presets.json"
 _log_lock = threading.Lock()
 _secrets: set[str] = set()
 
@@ -349,7 +353,8 @@ class Cloud:
         with self.lock:
             if self.snap is not None and time.time() - self.snap_at < max_age:
                 return self.snap
-            snap = {"printers": self.docs("printers"), "locs": self.docs("locations"), "spools": self.docs("spools")}
+            snap = {"printers": self.docs("printers"), "locs": self.docs("locations"), "spools": self.docs("spools"),
+                    "orca": self.get("config/orca")[0]}
             self.snap, self.snap_at = snap, time.time()
             self.status = "Signed in" + (f" as {self.acct.get('e')}" if self.acct.get("e") else "")
             return snap
@@ -1070,6 +1075,259 @@ def disconnect_all() -> None:
     _links.clear()
 
 
+# ---------- your stock, for the Stock view in the tab ----------
+
+LOW_G = 150   # the same as the app's low stock mark
+HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _left(s: dict):
+    v = s.get("remainG") if s.get("remainG") is not None else s.get("netG")
+    return v if isinstance(v, (int, float)) else None
+
+
+def stock_view(snap) -> dict | None:
+    """Every spool not used up, with where it is, in the order the app shows storages."""
+    if not snap:
+        return None
+    locs = snap["locs"]
+    order = sorted(locs.values(), key=lambda l: (l.get("order") if isinstance(l.get("order"), (int, float)) else 1e9, l.get("name") or "", l["id"]))
+    rank = {l["id"]: i for i, l in enumerate(order)}
+    fed: dict = {}   # storage id -> [(printer name, space or None)]
+    for p in snap["printers"].values():
+        for f in p.get("feeds") or []:
+            if f.get("loc"):
+                fed.setdefault(f["loc"], []).append((p.get("name") or "", int(f.get("space") or 1) if f.get("kind") == "external" and _spaced(locs.get(f["loc"])) else None))
+    places: dict = {}
+    for l in order:
+        for i, s in enumerate(_seated(snap, l) if _spaced(l) else _loose(snap, l)):
+            if s:
+                places[s["id"]] = (rank[l["id"]], i, (i + 1) if _spaced(l) else None)
+    out = []
+    for s in snap["spools"].values():
+        if s.get("status") == "used":
+            continue
+        l = locs.get(s.get("loc"))
+        r, i, space = places.get(s["id"], (len(order), 0, None))
+        cols = [c for c in (s.get("colours") or []) if isinstance(c, str) and HEX.match(c)] or ([s["hex"]] if HEX.match(str(s.get("hex") or "")) else [])
+        left, net = _left(s), s.get("netG") if isinstance(s.get("netG"), (int, float)) else None
+        printer = ""
+        if l:
+            for name, sp in fed.get(l["id"], []):
+                if sp is None or sp == space:
+                    printer = name
+        out.append({"id": s["id"], "code": s["id"].upper(), "brand": s.get("brand") or "", "material": s.get("material") or "",
+                    "colour": s.get("colour") or "", "finish": s.get("finish") or "", "cols": cols,
+                    "pattern": s.get("pattern") if len(cols) > 1 and s.get("pattern") in ("split", "gradient") else "solid",
+                    "left": round(left) if left is not None else None, "net": round(net) if net else None,
+                    "low": left is not None and left <= LOW_G,
+                    "where": (l.get("name") or "") + (f", space {space}" if space else "") if l else "Not in a storage",
+                    "group": (l.get("group") or "") if l else "", "locRank": r, "pos": i, "printer": printer})
+    out.sort(key=lambda x: (x["locRank"], x["pos"], x["id"]))
+    return {"spools": out, "at": time.strftime("%H:%M", time.localtime(CLOUD.snap_at)) if CLOUD.snap_at else ""}
+
+
+# ---------- presets: a Spool Stock group in Orca's filament list ----------
+#
+# The app keeps a list of the filaments you own in config/orca, each with its preset and the Orca profiles it
+# can build on. The plugin writes them as a local preset bundle in user/<folder>/_local/spool-stock/, which
+# Orca shows as its own group in the filament list, and asks Orca to reload that bundle so they appear without
+# a restart. Older Orca builds without the reload need a restart instead.
+
+BUNDLE_ID, BUNDLE_NAME = "spool-stock", "Spool Stock"
+_SAFE_NAME = re.compile(r'^[^\\/:*?"<>|\x00-\x1f]{1,150}$')
+_SAFE_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_KEEP_OUT = ("compatible_printers", "compatible_prints", "compatible_printers_condition", "filament_start_gcode", "filament_end_gcode")
+
+
+def _preset_state() -> dict:
+    return _read_json(PRESET_STATE, {})
+
+
+def _save_preset_state(d: dict) -> None:
+    _write_json(PRESET_STATE, d)
+
+
+def orca_dir() -> Path:
+    return DATA.parent
+
+
+def preset_folder() -> str:
+    """Orca's active user preset folder: from a user preset's file where Orca shows one, then Orca's settings."""
+    folder = ""
+    try:
+        bundle = orca.host.preset_bundle()
+        for coll in (bundle.filaments, bundle.prints, bundle.printers):
+            for i in range(coll.size()):
+                pr = coll.preset(i)
+                if pr.is_user():
+                    parts = os.path.normpath(str(pr.file or "")).replace("\\", "/").split("/")
+                    if "user" in parts and parts.index("user") + 1 < len(parts) - 1:
+                        folder = parts[parts.index("user") + 1]
+                        break
+            if folder:
+                break
+    except Exception:
+        pass
+    if not folder:
+        try:
+            text = (orca_dir() / "OrcaSlicer.conf").read_text(encoding="utf-8")
+            folder = str(json.loads(text[: text.rfind("}") + 1]).get("app", {}).get("preset_folder") or "")
+        except Exception:
+            folder = ""
+    return folder if re.fullmatch(r"[\w.-]+", folder or "") and folder not in (".", "..") else "default"
+
+
+def _finder():
+    """A function telling whether Orca has a filament preset by that name, or None if Orca won't say."""
+    try:
+        fil = orca.host.preset_bundle().filaments
+        find = getattr(fil, "find_preset", None)
+        if callable(find):
+            return lambda name: find(name) is not None
+        names = set(fil.preset_names())
+        return lambda name: name in names
+    except Exception:
+        return None
+
+
+def build_presets(items: list, has=None) -> tuple[dict, list]:
+    """Turn the app's list into {file name: preset}. Returns them and the labels of any that can't be built."""
+    out, skipped = {}, []
+    for it in items or []:
+        try:
+            p = json.loads(it.get("text") or "")
+        except Exception:
+            p = None
+        name = (it.get("name") or "").strip()
+        if not isinstance(p, dict) or not _SAFE_NAME.match(name) or name.startswith(".") or p.get("name") != name:
+            skipped.append(it.get("label") or name or "?")
+            continue
+        parents = [x for x in (it.get("parents") or []) if isinstance(x, str) and x]
+        parent = next((x for x in parents if has(x)), None) if has else (parents[0] if parents else None)
+        if not parent:
+            skipped.append(it.get("label") or name)
+            continue
+        preset = {"type": "filament", "name": name, "from": "User", "instantiation": "true", "inherits": parent,
+                  "version": str(p.get("version") or "2.4.0.0"), "filament_settings_id": [name]}
+        for k, v in p.items():
+            if k in preset or k in _KEEP_OUT or k.startswith("printhost") or not _SAFE_KEY.match(k):
+                continue
+            if isinstance(v, list) and all(isinstance(x, str) and len(x) <= 200 for x in v) and len(v) <= 16:
+                preset[k] = v
+            elif isinstance(v, str) and len(v) <= 200:
+                preset[k] = v
+        out[name + ".json"] = preset
+    return out, skipped
+
+
+def _write_text_if_changed(path: Path, text: str) -> bool:
+    try:
+        if path.read_text(encoding="utf-8") == text:
+            return False
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name("." + path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+    return True
+
+
+def reload_bundle() -> tuple[str, str]:
+    """Ask Orca to reload the Spool Stock bundle. Returns ("live" or "restart" or "error", detail)."""
+    bundles = getattr(getattr(getattr(orca, "host", None), "preset", None), "bundles", None)
+    reload_local = getattr(bundles, "reload_local", None)
+    if not callable(reload_local):
+        return "restart", "this Orca can't reload presets while open"
+    listed = None
+    list_ids = getattr(bundles, "list_ids", None)
+    if callable(list_ids):
+        try:
+            listed = list(list_ids())
+        except Exception as e:
+            log("presets.list_error", error=f"{type(e).__name__}: {e}")
+    try:
+        reload_local(BUNDLE_ID)
+        return "live", f"bundles {listed}" if listed is not None else ""
+    except Exception as e:
+        return "error", f"{type(e).__name__}: {e}" + (f" (bundles {listed})" if listed is not None else "")
+
+
+def sync_presets(feed: dict | None) -> dict:
+    """Write the presets into Orca's Spool Stock bundle and reload it. Runs on Orca's main thread."""
+    state = _preset_state()
+    items = (feed or {}).get("items") or []
+    folder = preset_folder()
+    base = orca_dir() / "user" / folder / "_local" / BUNDLE_ID
+    fdir = base / "filament"
+    presets, skipped = build_presets(items, _finder())
+    meta = {"id": BUNDLE_ID, "name": BUNDLE_NAME, "version": VERSION, "description": "The filaments you own in Spool Stock", "author": "Spool Stock"}
+    changed = _write_text_if_changed(base / "bundle_metadata.json", json.dumps(meta, indent=4))
+    for file, preset in presets.items():
+        changed |= _write_text_if_changed(fdir / file, json.dumps(preset, indent=4))
+    removed = 0
+    if fdir.is_dir():
+        for f in fdir.iterdir():
+            if f.suffix in (".json", ".info") and f.with_suffix(".json").name not in presets:
+                try:
+                    f.unlink()
+                    removed += f.suffix == ".json"
+                    changed = True
+                except OSError as e:
+                    log("presets.remove_error", file=f.name, error=str(e))
+    # Copies of the same presets sent before by the Windows app would show twice, so move them aside
+    moved = 0
+    old_dir = orca_dir() / "user" / folder / "filament"
+    for file in presets:
+        old = old_dir / file
+        try:
+            j = json.loads(old.read_text(encoding="utf-8")) if old.is_file() else None
+        except Exception:
+            j = None
+        if isinstance(j, dict) and j.get("from") == "User" and j.get("name") == file[:-5] and file.endswith(" (Spool Stock).json"):
+            keep = DATA / "old-presets" / file
+            keep.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                old.replace(keep)
+                info = old.with_suffix(".info")
+                if info.exists():
+                    info.replace(keep.with_suffix(".info"))
+                moved += 1
+            except OSError as e:
+                log("presets.move_error", file=file, error=str(e))
+    how, detail = ("live", "nothing changed") if not changed and state.get("how") == "live" else reload_bundle()
+    state.update({"on": True, "sig": (feed or {}).get("sig", ""), "folder": folder, "count": len(presets), "skipped": skipped,
+                  "how": how, "detail": detail, "at": time.time(), "moved": moved + int(state.get("moved") or 0) if moved else state.get("moved", 0)})
+    _save_preset_state(state)
+    log("presets.sync", folder=folder, presets=len(presets), removed=removed, skipped=skipped, moved_old=moved, reload=how, detail=detail)
+    return state
+
+
+def presets_view(feed: dict | None) -> dict:
+    st = _preset_state()
+    items = (feed or {}).get("items") or []
+    return {"on": bool(st.get("on")), "feed": [{"label": it.get("label") or it.get("name"), "own": bool(it.get("own")), "name": it.get("name")} for it in items],
+            "have": feed is not None, "count": st.get("count", 0), "skipped": st.get("skipped") or [], "how": st.get("how", ""),
+            "detail": st.get("detail", ""), "when": time.strftime("%d %b %H:%M", time.localtime(st["at"])) if st.get("at") else "",
+            "behind": bool(st.get("on")) and feed is not None and feed.get("sig") != st.get("sig"), "moved": st.get("moved", 0)}
+
+
+def remove_presets() -> None:
+    """Turn the group off: remove the bundle and reload so it leaves Orca's list."""
+    st = _preset_state()
+    base = orca_dir() / "user" / (st.get("folder") or preset_folder()) / "_local" / BUNDLE_ID
+    for f in (base / "filament").glob("*") if (base / "filament").is_dir() else []:
+        try:
+            f.unlink()
+        except OSError:
+            pass
+    how, detail = reload_bundle()
+    st.update({"on": False, "sig": "", "count": 0, "how": how, "detail": detail, "at": time.time()})
+    _save_preset_state(st)
+    log("presets.off", reload=how, detail=detail)
+
+
 # ---------- the tab ----------
 
 def _spool_options(snap) -> list[dict]:
@@ -1130,28 +1388,48 @@ def _state(hint: str = "") -> dict:
         outbox = len(STORE.outbox)
     return {"type": "state", "version": VERSION, "hint": hint, "signedIn": CLOUD.signed_in, "account": CLOUD.acct.get("e", ""),
             "cloud": CLOUD.status, "printers": rows, "pending": pending, "recent": recent, "outbox": outbox,
-            "spools": _spool_options(snap), "log": str(LOG), "dark": orca_dark()}
+            "spools": _spool_options(snap), "log": str(LOG), "dark": orca_dark(),
+            "stock": stock_view(snap) if CLOUD.signed_in else None,
+            "presets": presets_view(snap.get("orca")) if (CLOUD.signed_in and snap) else None}
 
 
 PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><style>
-:root{color-scheme:light;--fg:#262e30;--bg:#fff;--card:#fff;--line:#d6d6d6;--go:#009688;--warn:#c76b00;--warnbg:#fff6e8}
-:root[data-theme=dark]{color-scheme:dark;--fg:#efeff0;--bg:#2d2d31;--card:#36363c;--line:#4c4c54;--warn:#e7a23c;--warnbg:#3b3122}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;--fg:#efeff0;--bg:#2d2d31;--card:#36363c;--line:#4c4c54;--warn:#e7a23c;--warnbg:#3b3122}}
+:root{color-scheme:light;--fg:#262e30;--bg:#fff;--card:#fff;--line:#d6d6d6;--go:#009688;--warn:#c76b00;--warnbg:#fff6e8;--track:#ececec}
+:root[data-theme=dark]{color-scheme:dark;--fg:#efeff0;--bg:#2d2d31;--card:#36363c;--line:#4c4c54;--warn:#e7a23c;--warnbg:#3b3122;--track:#47474e}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;--fg:#efeff0;--bg:#2d2d31;--card:#36363c;--line:#4c4c54;--warn:#e7a23c;--warnbg:#3b3122;--track:#47474e}}
 body{font:14px/1.45 system-ui,"Segoe UI",sans-serif;margin:0;padding:16px;color:var(--fg);background:var(--bg)}
-h1{font-size:20px;margin:0 0 2px}h2{font-size:15px;margin:20px 0 6px;text-transform:uppercase;letter-spacing:.04em;opacity:.75}
+h1{font-size:20px;margin:0 0 8px}h2{font-size:15px;margin:20px 0 6px;text-transform:uppercase;letter-spacing:.04em;opacity:.75}
+h3{font-size:14px;margin:16px 0 4px;display:flex;gap:8px;align-items:baseline}h3 .muted{font-weight:normal}
+nav{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:10px}
+nav button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:6px 12px;opacity:.75}
+nav button[aria-current]{border-bottom-color:var(--go);opacity:1;font-weight:600}
 .card{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:8px 0;background:var(--card)}
 .muted{opacity:.7;font-size:13px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 input,select,textarea{font:inherit;padding:5px 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:inherit}
 input{width:150px}input.pct{width:60px}select{max-width:100%}textarea{width:100%;box-sizing:border-box;height:60px}
+input[type=checkbox]{width:auto}input[type=search]{width:200px}
 button{font:inherit;padding:6px 12px;border:1px solid var(--line);border-radius:5px;background:transparent;color:inherit;cursor:pointer}
 button.go{background:var(--go);border-color:var(--go);color:#fff}
 .sw{display:inline-block;width:14px;height:14px;border:1px solid #0006;border-radius:3px;vertical-align:-2px}
 table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}td{border-top:1px solid var(--line);padding:4px 6px;vertical-align:middle}
 .warn{border-color:var(--warn)}.alert{background:var(--warnbg);border-left:3px solid var(--warn);padding:6px 8px;margin-top:6px;border-radius:4px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
+.sp{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--card)}
+.sp.low{border-color:var(--warn)}
+.disc{width:34px;height:34px;border-radius:50%;border:1px solid #0005;box-sizing:border-box;position:relative}
+.disc::after{content:"";position:absolute;inset:11px;border-radius:50%;background:var(--card);border:1px solid #0003}
+.sp b{font-variant-numeric:tabular-nums}.sp .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{height:6px;border-radius:3px;background:var(--track);overflow:hidden;margin:5px 0 2px}.bar i{display:block;height:100%;border-radius:3px}
+.tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:9px;border:1px solid var(--line);margin-left:4px}
+.tag.lowt{border-color:var(--warn);color:var(--warn)}
+.list div{padding:3px 0;border-top:1px solid var(--line)}.list div:first-child{border-top:0}
+[hidden]{display:none!important}
 </style></head><body>
 <h1>Spool Stock</h1>
-<p class="muted">Takes each print's filament off the spools in the trays it used. <span id="ver"></span></p>
+<nav><button data-v="prints" aria-current="page">Prints<span id="nb"></span></button><button data-v="stock">Stock</button><button data-v="presets">Presets</button></nav>
 <div id="hint" class="muted"></div>
+<section id="v-prints">
+<p class="muted">Takes each print's filament off the spools in the trays it used. <span id="ver"></span></p>
 <h2>Account</h2><div id="acct"></div>
 <div id="pendwrap"><h2>Needs you</h2><div id="pending"></div></div>
 <h2>Printers</h2><div id="printers"></div>
@@ -1160,15 +1438,63 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}td{borde
 <button id="add">Add</button></div><p class="muted">On the printer: Settings, then Network, for the IP address and access code. LAN mode must be on.</p></div>
 <h2>Recent</h2><div id="recent" class="card muted"></div>
 <p><button id="openlog">Open the log folder</button></p>
+</section>
+<section id="v-stock" hidden>
+<div class="row"><input id="q" type="search" placeholder="Find a spool"><select id="grp"><option value="loc">By storage</option><option value="mat">By material</option><option value="brand">By brand</option><option value="none">One list</option></select>
+<label class="row" style="gap:4px"><input type="checkbox" id="lowonly">Low only</label><button data-a="refresh">Refresh</button></div>
+<p id="stockinfo" class="muted"></p><div id="stock"></div>
+</section>
+<section id="v-presets" hidden><div id="presets"></div></section>
 <script>
-var o=window.orca,last={},spools=[];function send(m){o.postMessage(m)}
+var o=window.orca,last={},spools=[],view="prints",D=null;function send(m){o.postMessage(m)}
 function h(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function sw(c){return '<span class="sw" style="background:'+h(c||"#0000")+'"></span>'}
 function set(id,html,key){if(last[id]===key)return;last[id]=key;document.getElementById(id).innerHTML=html}
-o.onMessage(function(d){if(!d||d.type!=="state")return;spools=d.spools||[];
+function kept(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){}return null}
+function show(v){view=v;kept("ss.view",v);document.querySelectorAll("nav button").forEach(function(b){if(b.dataset.v===v)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")});
+ ["prints","stock","presets"].forEach(function(x){document.getElementById("v-"+x).hidden=x!==v});if(D)paint()}
+function fill(s){var c=s.cols.length?s.cols:["#9AA5AB"];if(c.length<2)return c[0];
+ if(s.pattern==="gradient")return "linear-gradient(135deg,"+c.join(",")+")";
+ var n=c.length;return "conic-gradient("+c.map(function(x,i){return x+" "+(i*360/n)+"deg "+((i+1)*360/n)+"deg"}).join(",")+")"}
+function barCol(s){return s.cols.length?(s.pattern==="solid"?s.cols[0]:"linear-gradient(90deg,"+s.cols.join(",")+")"):"#9AA5AB"}
+function card(s){var pc=s.net&&s.left!=null?Math.max(0,Math.min(100,Math.round(s.left*100/s.net))):100;
+ return '<div class="sp'+(s.low?" low":"")+'" title="'+h(s.code+" "+s.brand+" "+s.material+" "+s.colour)+'"><span class="disc" style="background:'+h(fill(s))+'"></span><div style="min-width:0">'
+ +'<div class="name"><b>'+h(s.code)+'</b> '+h([s.brand,s.material].filter(Boolean).join(" "))+'</div>'
+ +'<div class="muted name">'+h([s.colour,s.where].filter(Boolean).join(", "))+'</div>'
+ +'<div class="bar"><i style="width:'+pc+'%;background:'+h(barCol(s))+'"></i></div>'
+ +'<div class="muted">'+(s.left!=null?s.left+" g left"+(s.net?" of "+s.net+" g":""):"Weight not known")+(s.low?'<span class="tag lowt">Low</span>':"")+(s.printer?'<span class="tag" title="'+h(s.printer)+' feeds from it">'+h(s.printer)+'</span>':"")+'</div></div></div>'}
+function paintStock(){var st=D.stock;
+ if(!D.signedIn){set("stock",'<p class="muted">Sign in on the Prints page to see your stock here.</p>',"out");set("stockinfo","","");return}
+ if(!st){set("stock",'<p class="muted">Loading your stock.</p>',"wait");return}
+ var q=document.getElementById("q").value.trim().toLowerCase(),g=document.getElementById("grp").value,lo=document.getElementById("lowonly").checked;
+ var words=q.split(/\s+/).filter(Boolean),list=st.spools.filter(function(s){if(lo&&!s.low)return false;var hay=(s.code+" "+s.brand+" "+s.material+" "+s.colour+" "+s.finish+" "+s.where+" "+s.group+" "+s.printer).toLowerCase();return words.every(function(w){return hay.indexOf(w)>=0})});
+ var kg=list.reduce(function(a,s){return a+(s.left||0)},0)/1000,low=list.filter(function(s){return s.low}).length;
+ set("stockinfo",list.length+" spool"+(list.length===1?"":"s")+", "+kg.toFixed(1)+" kg"+(low?", "+low+" low":"")+(st.at?". Updated "+h(st.at)+".":""),[list.length,kg,low,st.at].join());
+ var groups=[],at={};list.forEach(function(s){var k=g==="loc"?(s.group?s.group+": ":"")+s.where.replace(/, space \d+$/,""):g==="mat"?(s.material||"Unknown material"):g==="brand"?(s.brand||"Unknown brand"):"";
+  if(!(k in at)){at[k]=groups.length;groups.push({k:k,s:[]})}groups[at[k]].s.push(s)});
+ if(g==="mat"||g==="brand")groups.sort(function(a,b){return a.k.localeCompare(b.k)});
+ var html=list.length?groups.map(function(gr){var t=gr.s.reduce(function(a,s){return a+(s.left||0)},0);
+  return (gr.k?'<h3>'+h(gr.k)+' <span class="muted">'+gr.s.length+(gr.s.length===1?" spool, ":" spools, ")+(t>=1000?(t/1000).toFixed(1)+" kg":Math.round(t)+" g")+'</span></h3>':"")+'<div class="grid">'+gr.s.map(card).join("")+'</div>'}).join("")
+  :'<p class="muted">'+(st.spools.length?"Nothing matches.":"No spools yet. Add them in Spool Stock.")+'</p>';
+ set("stock",html,JSON.stringify([st.spools,q,g,lo]))}
+function paintPresets(){var p=D.presets;
+ if(!D.signedIn){set("presets",'<p class="muted">Sign in on the Prints page first.</p>',"out");return}
+ var intro='<p>Adds a Spool Stock group to Orca\'s filament list, with one preset for each filament you own. Ones Orca already has a profile for use it unchanged. The rest build on Orca\'s closest generic profile, with the temperatures from your stickers. The group updates by itself as your stock changes.</p>';
+ if(!p){set("presets",intro+'<p class="muted">Loading your stock.</p>',"wait");return}
+ if(!p.have){set("presets",intro+'<p class="muted">Open Spool Stock on your phone or PC once, so it can send your filament list here.</p>',"none");return}
+ var st=p.on?(p.behind?"Updating.":p.how==="live"?"In Orca's filament list under Spool Stock. Updated "+h(p.when)+".":p.how==="restart"?"Saved. Restart Orca to see them, as this version of Orca can't add them while it's open.":"Saved, but Orca didn't load them ("+h(p.detail)+"). Restart Orca to see them."):"";
+ var html=intro+(p.on?'<div class="card'+(p.how==="error"?" warn":"")+'">'+st+'<div class="row" style="margin-top:6px"><button data-a="presets_now">Update now</button><button data-a="presets_off">Remove them from Orca</button></div></div>'
+  :'<div class="row"><button class="go" data-a="presets_on">Add them to Orca</button></div>')
+  +(p.skipped.length?'<div class="alert">Couldn\'t add '+h(p.skipped.join(", "))+', as Orca has none of the profiles they build on.</div>':"")
+  +(p.moved?'<p class="muted">Moved '+p.moved+' older cop'+(p.moved===1?"y":"ies")+' from the Windows app to the old-presets folder, next to the log, so nothing shows twice. Restart Orca once to clear '+(p.moved===1?"it":"them")+' from the list.</p>':"")
+  +'<h3>Your filaments <span class="muted">'+p.feed.length+'</span></h3><div class="card list">'+(p.feed.map(function(f){return '<div>'+h(f.label)+' <span class="muted">'+(f.own?"Orca's own profile":"on a generic profile, with your temperatures")+'</span></div>'}).join("")||'<div class="muted">No spools yet.</div>')+'</div>';
+ set("presets",html,JSON.stringify(p))}
+function paint(){if(view==="stock")paintStock();else if(view==="presets")paintPresets()}
+o.onMessage(function(d){if(!d||d.type!=="state")return;D=d;spools=d.spools||[];
 document.documentElement.dataset.theme=d.dark===true?"dark":d.dark===false?"light":"";
 document.getElementById("ver").textContent="Version "+d.version+".";
 document.getElementById("hint").textContent=d.hint||"";
+document.getElementById("nb").textContent=d.pending.length?" ("+d.pending.length+")":"";
 set("acct",d.signedIn?'<div class="card">'+h(d.cloud)+(d.outbox?" "+d.outbox+" waiting to send.":"")+'<div class="row" style="margin-top:6px"><button data-a="signout">Sign out</button></div></div>'
  :'<div class="card'+(d.cloud&&d.cloud!=="Not signed in"?" warn":"")+'"><p>'+h(d.cloud)+'</p><p class="muted">In Spool Stock, open Setup, then Orca plugin, and press Copy sign-in code. Paste it here.</p><textarea id="codein"></textarea><div class="row"><button class="go" data-a="signin">Sign in</button></div></div>',
  JSON.stringify([d.signedIn,d.cloud,d.outbox]));
@@ -1190,12 +1516,17 @@ set("printers",d.printers.map(function(p,i){var j=p.job;
    +(j.trays.length?'<table>'+j.trays.map(function(t){return '<tr><td>'+sw(t.colour)+' '+h(t.type)+'</td><td>'+t.g+' g</td><td>'+h(t.tray)+'</td><td>'+(t.spool?h(t.spool):'<span class="muted">no spool matched</span>')+'</td></tr>'}).join("")+'</table>':'<br><span class="muted">Grams come from the job file once printing starts.</span>'):"")
  +'<div class="row" style="margin-top:6px"><button data-a="connect">Connect</button><button data-a="remove" data-i="'+i+'">Remove</button></div></div>'}).join("")||'<p class="muted">None yet.</p>',JSON.stringify(d.printers));
 set("recent",d.recent.map(function(r){return h(r.when)+": "+h(r.text)}).join("<br>")||"Nothing yet.",JSON.stringify(d.recent));
+paint();
 });
+document.querySelector("nav").addEventListener("click",function(ev){var b=ev.target.closest("[data-v]");if(b)show(b.dataset.v)});
+["q","grp","lowonly"].forEach(function(id){var el=document.getElementById(id);el.addEventListener(el.type==="checkbox"||el.tagName==="SELECT"?"change":"input",function(){kept("ss."+id,el.type==="checkbox"?(el.checked?"1":""):el.value);if(D)paintStock()})});
+(function(){var g=kept("ss.grp");if(g)document.getElementById("grp").value=g;document.getElementById("lowonly").checked=kept("ss.lowonly")==="1";var v=kept("ss.view");if(v==="stock"||v==="presets")show(v)})();
 document.body.addEventListener("click",function(ev){var b=ev.target.closest("[data-a]");if(!b)return;var a=b.dataset.a;
  if(a==="signin")send({type:"signin",code:document.getElementById("codein").value});
  else if(a==="signout")send({type:"signout"});
  else if(a==="connect")send({type:"connect"});
  else if(a==="remove")send({type:"remove",index:+b.dataset.i});
+ else if(a==="refresh"||a==="presets_on"||a==="presets_now"||a==="presets_off"){if(a!=="refresh")last.presets=null;send({type:a})}
  else if(a==="confirm"||a==="skip"){var c=b.closest("[data-key]"),items=[];
   c.querySelectorAll("tr").forEach(function(tr){var s=tr.querySelector("select"),g=tr.querySelector("input.g");if(s)items.push({spool:s.value,g:parseFloat(g.value)||0})});
   send({type:a,key:c.dataset.key,pct:parseFloat(c.querySelector("input.pct").value)||0,items:items});last.pending=null}});
@@ -1203,6 +1534,44 @@ document.getElementById("add").onclick=function(){send({type:"add",name:document
 document.getElementById("openlog").onclick=function(){send({type:"openlog"})};
 send({type:"ready"});setInterval(function(){send({type:"poll"})},2000);
 </script></body></html>"""
+
+
+_preset_try = {"at": 0.0}
+
+
+def _fresh_snapshot() -> str:
+    """Reload stock straight away, from the tab. Returns a hint if it couldn't."""
+    if not CLOUD.signed_in:
+        return "Sign in first."
+    try:
+        CLOUD.snapshot(max_age=0)
+        return ""
+    except PermissionError:
+        CLOUD.ui_mode = True
+        return "Orca blocked the connection to Spool Stock. Press Connect on a printer and choose Yes."
+    except Exception as e:
+        log("cloud.error", error=f"{type(e).__name__}: {e}")
+        return f"Couldn't reach Spool Stock: {e}"
+
+
+def _presets(force: bool = False) -> str:
+    """Bring Orca's Spool Stock group up to date when it's on and the app's list has changed."""
+    snap = CLOUD.snap
+    feed = snap.get("orca") if snap else None
+    st = _preset_state()
+    if not (force or (st.get("on") and feed is not None and feed.get("sig") != st.get("sig"))):
+        return ""
+    if not force and time.time() - _preset_try["at"] < 60:
+        return ""
+    _preset_try["at"] = time.time()
+    if feed is None:
+        return "Open Spool Stock on your phone or PC once, so it can send your filament list here."
+    try:
+        r = sync_presets(feed)
+    except Exception as e:
+        log("presets.error", trace=traceback.format_exc())
+        return f"Couldn't write the presets: {type(e).__name__}: {e}"
+    return {"live": "", "restart": "Saved. Restart Orca to see them.", "error": "Saved, but Orca didn't load them. Restart Orca to see them."}[r["how"]] if force else ""
 
 
 def handle(d: dict) -> dict:
@@ -1229,6 +1598,17 @@ def handle(d: dict) -> dict:
                         check_low(job)
             except PermissionError:
                 hint = "Orca is blocking Spool Stock. Press Connect on a printer and choose Yes."
+        hint = _presets() or hint
+    elif t == "refresh":
+        hint = _fresh_snapshot()
+    elif t in ("presets_on", "presets_now"):
+        hint = _fresh_snapshot() or _presets(force=True)
+    elif t == "presets_off":
+        try:
+            remove_presets()
+        except Exception as e:
+            log("presets.error", trace=traceback.format_exc())
+            hint = f"Couldn't remove them: {e}"
     elif t == "signin":
         try:
             CLOUD.sign_in(d.get("code", ""))
