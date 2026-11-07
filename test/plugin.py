@@ -37,7 +37,24 @@ class PagesBase:
 orca.pages = types.SimpleNamespace(PagesPluginCapabilityBase=PagesBase)
 pushed = []
 def push_notification(text, level): pushed.append((text, level))
-orca.host = types.SimpleNamespace(ui=types.SimpleNamespace(WarningNotificationLevel="warning", push_notification=push_notification))
+class FakePreset:
+    def __init__(self, name, file="", user=False): self.name, self.file, self._user = name, file, user
+    def is_user(self): return self._user
+class FakeColl:
+    def __init__(self, presets): self.presets = presets
+    def size(self): return len(self.presets)
+    def preset(self, i): return self.presets[i]
+    def find_preset(self, name): return next((p for p in self.presets if p.name == name), None)
+SYSTEM = ["Generic PLA @System", "Generic PETG @System", "Generic PETG HF @System", "Bambu ASA @BBL X1C"]
+FIL = FakeColl([FakePreset(n) for n in SYSTEM] + [FakePreset("My PLA", str(tmp / "OrcaSlicer" / "user" / "4242" / "filament" / "My PLA.json"), True)])
+fake_bundle = types.SimpleNamespace(filaments=FIL, prints=FakeColl([]), printers=FakeColl([]))
+reloads = []
+def reload_local(bundle_id):
+    if not (tmp / "OrcaSlicer" / "user" / "4242" / "_local" / bundle_id / "bundle_metadata.json").exists(): raise RuntimeError("Local bundle metadata is missing")
+    reloads.append(bundle_id)
+bundles_api = types.SimpleNamespace(reload_local=reload_local, list_ids=lambda: ["spool-stock"])
+orca.host = types.SimpleNamespace(ui=types.SimpleNamespace(WarningNotificationLevel="warning", push_notification=push_notification),
+                                  preset_bundle=lambda: fake_bundle, preset=types.SimpleNamespace(bundles=bundles_api))
 sys.modules["orca"] = orca
 
 # ---- TLS for the fake printer ----
@@ -368,6 +385,72 @@ ok(plug.handle({"type": "poll"})["dark"] is False, "light when Orca is in light 
 plug._theme["at"] = 0
 ok(plug.handle({"type": "poll"})["dark"] is True, "dark when Orca is in dark mode")
 ok('data-theme=dark' in html and "prefers-color-scheme:dark" in html, "tab has both colour schemes")
+
+# ---- the Stock view ----
+st = plug.handle({"type": "refresh"})
+sv = st["stock"]["spools"]
+ok([x["id"] for x in sv] == ["s0001", "s0002", "s0005", "s0004", "s0006"], "stock lists every spool not used up, in storage and space order: " + ",".join(x["id"] for x in sv))
+by = {x["id"]: x for x in sv}
+ok(by["s0001"]["where"] == "AMS 1, space 1" and by["s0005"]["where"] == "Rack" and by["s0006"]["where"] == "Space Pi, space 1", "says which storage and space each is in")
+ok(by["s0001"]["printer"] == "Betsy" and by["s0005"]["printer"] == "Betsy" and by["s0006"]["printer"] == "Alduin", "marks spools a printer feeds from")
+ok(by["s0002"]["left"] == 985 and by["s0002"]["net"] == 1000 and by["s0002"]["low"] is False, "weight left and full weight for the bar")
+put(f"users/{UID}/spools/s0007", {"remainG": 90, "netG": 1000, "brand": "eSUN", "material": "PLA+", "colours": ["#ff0000", "#00ff00"], "pattern": "split"})
+st = plug.handle({"type": "refresh"})
+s7 = next(x for x in st["stock"]["spools"] if x["id"] == "s0007")
+ok(s7["low"] and s7["where"] == "Not in a storage" and s7["cols"] == ["#ff0000", "#00ff00"] and s7["pattern"] == "split" and st["stock"]["spools"][-1]["id"] == "s0007",
+   "a low spool with no storage comes last, with its split colours")
+
+# ---- presets: a Spool Stock group in Orca's filament list ----
+def item(name, label, own, parents, extra=None):
+    p = {"type": "filament", "name": name, "from": "User", "instantiation": "true", "inherits": parents[0], "version": "2.4.0.0", "filament_settings_id": [name], "filament_vendor": [label.split()[0]], **(extra or {})}
+    return {"name": name, "label": label, "own": own, "parents": parents, "text": json.dumps(p)}
+feed = [item("Bambu ASA (Spool Stock)", "Bambu ASA", True, ["Bambu ASA @System", "Bambu ASA @BBL X1C"]),
+        item("Sunlu PETG (Spool Stock)", "Sunlu PETG", False, ["Generic PETG @System", "Generic PLA @System"], {"nozzle_temperature": ["240"], "compatible_printers": ["X"], "printhost_apikey": "k"}),
+        item("Odd PEEK (Spool Stock)", "Odd PEEK", False, ["Generic PEEK @System"]),
+        item("../evil", "Evil", False, ["Generic PLA @System"])]
+ok(plug.handle({"type": "poll"})["presets"]["have"] is False, "no list from the app yet: says to open Spool Stock once")
+put(f"users/{UID}/config/orca", {"v": 1, "sig": "a1", "at": 1, "items": feed})
+old = tmp / "OrcaSlicer" / "user" / "4242" / "filament" / "Sunlu PETG (Spool Stock).json"
+old.parent.mkdir(parents=True, exist_ok=True)
+old.write_text(json.dumps({"type": "filament", "name": "Sunlu PETG (Spool Stock)", "from": "User", "inherits": "Generic PETG @System", "filament_settings_id": ["Sunlu PETG (Spool Stock)"]}))
+mine = tmp / "OrcaSlicer" / "user" / "4242" / "filament" / "My PLA.json"; mine.write_text(json.dumps({"type": "filament", "name": "My PLA", "from": "User"}))
+st = plug.handle({"type": "refresh"})
+ok(st["presets"]["have"] and not st["presets"]["on"] and not reloads, "the list arrives but nothing is written until you turn it on")
+st = plug.handle({"type": "presets_on"})
+bdir = tmp / "OrcaSlicer" / "user" / "4242" / "_local" / "spool-stock"
+files = sorted(f.name for f in (bdir / "filament").iterdir())
+ok(json.loads((bdir / "bundle_metadata.json").read_text())["id"] == "spool-stock", "writes a local bundle in Orca's active user folder, found from a user preset")
+ok(files == ["Bambu ASA (Spool Stock).json", "Sunlu PETG (Spool Stock).json"], "one preset per filament: " + ", ".join(files))
+asa, petg = (json.loads((bdir / "filament" / f).read_text()) for f in files)
+ok(asa["inherits"] == "Bambu ASA @BBL X1C" and set(asa) == {"type", "name", "from", "instantiation", "inherits", "version", "filament_settings_id", "filament_vendor"},
+   "Orca's own profile used unchanged, picking a version this Orca has")
+ok(petg["inherits"] == "Generic PETG @System" and petg["nozzle_temperature"] == ["240"] and "compatible_printers" not in petg and "printhost_apikey" not in petg,
+   "a generic based preset keeps the temperatures and nothing that would limit or reach a printer")
+ok(reloads == ["spool-stock"] and st["presets"]["on"] and st["presets"]["how"] == "live", "Orca reloads the group straight away")
+ok(st["presets"]["skipped"] == ["Odd PEEK", "Evil"], "says which couldn't be added: " + ", ".join(st["presets"]["skipped"]))
+ok(not old.exists() and (tmp / "OrcaSlicer" / "spoolstock" / "old-presets" / old.name).exists() and mine.exists() and st["presets"]["moved"] == 1,
+   "the Windows app's copy is moved aside so it doesn't show twice, and your own presets are left alone")
+reloads.clear()
+plug.handle({"type": "presets_now"})
+ok(reloads == [], "nothing changed, so no reload")
+put(f"users/{UID}/config/orca", {"v": 1, "sig": "a2", "at": 2, "items": feed[:1]})
+plug.CLOUD.snapshot(max_age=0); plug._preset_try["at"] = 0
+st = plug.handle({"type": "poll"})
+ok(sorted(f.name for f in (bdir / "filament").iterdir()) == ["Bambu ASA (Spool Stock).json"] and reloads == ["spool-stock"], "updates by itself when your filaments change")
+ok(st["presets"]["behind"] is False and st["presets"]["count"] == 1, "and shows it's up to date")
+bundles_api.reload_local = None
+put(f"users/{UID}/config/orca", {"v": 1, "sig": "a3", "at": 3, "items": feed[:2]})
+st = plug.handle({"type": "presets_now"})
+ok(st["presets"]["how"] == "restart" and "Restart Orca" in st["hint"], "an Orca without the live reload is told to restart")
+logtext = (tmp / "OrcaSlicer" / "spoolstock" / "spoolstock.log").read_text(encoding="utf-8")
+ok('"presets.sync"' in logtext and '"reload": "restart"' in logtext, "the log says how each update went")
+bundles_api.reload_local = reload_local
+st = plug.handle({"type": "presets_off"})
+ok(not list((bdir / "filament").iterdir()) and reloads[-1] == "spool-stock" and not st["presets"]["on"], "turning it off empties the group and reloads")
+(tmp / "tab-state.json").write_text(json.dumps(plug.handle({"type": "presets_now"})))
+(tmp / "tab.html").write_text(html)
+r = subprocess.run(["node", str(Path(__file__).resolve().parent / "plugin-tab.js"), str(tmp / "tab.html"), str(tmp / "tab-state.json")] + ([os.environ["TAB_SHOTS"]] if os.environ.get("TAB_SHOTS") else []), capture_output=True, text=True)
+print(r.stdout.strip()); ok(r.returncode == 0, "the tab's Stock and Presets views work in a browser" + (": " + r.stderr[-300:] if r.returncode else ""))
 
 # ---- privacy ----
 logtext = (tmp / "OrcaSlicer" / "spoolstock" / "spoolstock.log").read_text(encoding="utf-8")

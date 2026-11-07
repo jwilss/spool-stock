@@ -275,6 +275,18 @@ await p.evaluate(id=>{location.hash=id},picks[0]);await p.waitForSelector('.spoo
  await p.evaluate(()=>{window.spoolStockDesktop.orca.version=undefined;window.__sent=null});await p.click('[data-act=orcaSend]');await p.waitForFunction(()=>/update the Windows app/.test(document.querySelector('#toast').textContent));ok((await p.evaluate(()=>window.__sent.o.show))===undefined,'an older Windows app only gets the presets, so it can\'t empty Orca\'s list');
  await p.click('[data-act=orcaRestore]');await p.waitForFunction(()=>/back to how it was/.test(document.querySelector('#toast').textContent));ok(true,'restore is offered');
  await p.evaluate(()=>{delete window.spoolStockDesktop});
+ // the list the Orca plugin builds its Spool Stock group from
+ const orcaDoc=async(not)=>{for(let i=0;i<50;i++){const d=(await dbOf(p))[uid+'config/orca'];if(d&&d.sig!==not)return d;await p.waitForTimeout(100)}return (await dbOf(p))[uid+'config/orca']};
+ const feed=await orcaDoc();
+ ok(feed&&feed.v===1&&feed.sig&&feed.items.filter(x=>!x.own).length===pv.length&&feed.items.some(x=>x.own),'the app keeps a list of your filaments for the Orca plugin: '+(feed&&feed.items.length));
+ const fasa=feed&&feed.items.find(x=>x.own&&/ASA/.test(x.label));
+ ok(fasa&&fasa.parents[0]==='Bambu ASA @System'&&fasa.parents.some(n=>/@BBL /.test(n))&&JSON.parse(fasa.text).inherits==='Bambu ASA @System','a filament Orca has builds on its own profile, with its printer versions as fallbacks');
+ ok(feed&&feed.items.filter(x=>!x.own).every(x=>{const j=JSON.parse(x.text);return j.name===x.name&&known.has(x.parents[0])&&x.parents.includes('Generic PLA @System')&&JSON.stringify(presets[x.name+'.json'])===JSON.stringify(j)}),'the rest match the downloadable presets, with Generic PLA as the last fallback');
+ await p.evaluate(()=>{col('spools').doc('zz01').set({brand:'Polymaker',material:'PolyTerra PLA',colour:'Black',hex:'#111111',netG:1000,remainG:1000,status:'active',loc:null})});
+ const feed2=await orcaDoc(feed.sig);
+ ok(feed2.sig!==feed.sig&&feed2.items.some(x=>/PolyTerra/.test(x.name)),'the list updates when you add a new filament');
+ await p.evaluate(()=>{col('spools').doc('zz01').delete()});
+ ok(!(await orcaDoc(feed2.sig)).items.some(x=>/PolyTerra/.test(x.name)),'and when you no longer have one');
 
  // stock list for Spool Reader
  await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=listSave]');

@@ -21,11 +21,11 @@ Run them before pushing. All should pass.
 node test/run.js        # the app, in Chromium with a stand-in Firebase (needs playwright)
 node test/reader.js     # Spool Reader
 node test/orca.js       # the Windows app's Orca preset bridge
-python3 test/plugin.py  # the Orca plugin, against a fake printer, printer file server and Firestore
+python3 test/plugin.py  # the Orca plugin, against a fake printer, printer file server and Firestore (runs test/plugin-tab.js too)
 python3 test/probe.py   # the probe plugin
 ```
 
-`test/shots.js` remakes the README images in `docs/`.
+`test/shots.js` remakes the README images in `docs/`. The camera step in `test/run.js` needs `test/out/feed.mjpeg` (gitignored): a few seconds of the S0002 sticker then the AMS1 1 storage sticker, cut from `test/out/stickers.pdf` after a first run and joined with ffmpeg.
 
 ## Publishing
 
@@ -50,7 +50,6 @@ Pushing to `main` publishes the site through `.github/workflows/site.yml` (only 
 
 ## Next, agreed with Jack
 
-Done: the low-filament warning and Orca's theme in the tab (plugin 1.1.0). Jack doesn't want a reorder or buy button.
+Done: the low-filament warning and Orca's theme (1.1.0), then the Stock view and live preset sync in the tab (1.2.0). Jack doesn't want a reorder or buy button.
 
-1. Stock view inside the Orca tab: spool cards with colour, weight bar, filter and group.
-2. Live preset sync from the plugin with Orca open (FilamentHub's approach: presets in `user/<folder>/_local/<bundle>/filament` with `bundle_metadata.json`, then `orca.host.preset.bundles.reload_local`). Unproven on his Orca, so probe it first.
+Waiting on Jack: plugin 1.2.0 on his real Orca. The preset sync follows Orca's own `sandboxes/orca_reload_local_bundle_demo.py`, but whether his 2.5 build has `orca.host.preset.bundles.reload_local` is unconfirmed. `presets.sync` in `spoolstock.log` gives `reload` as `live`, `restart` (the call isn't there) or `error` with the detail. If it's `restart`, the presets still load on the next start.

@@ -88,6 +88,8 @@ For Bambu printers in LAN mode, with OrcaSlicer 2.5. It watches each printer, an
 - **Finished prints** come off straight away. **Setup > Orca plugin** lists them, each with **Undo**.
 - **Failed or cancelled prints** wait in Orca's Spool Stock tab, with how far the printer got filled in, for you to check and confirm.
 - The tray comes from the printer and the grams from the job file on it, so it works however the print was sent.
+- **Stock** in its tab shows every spool with its colour, a bar for what's left and where it is, with search, a low only switch, and grouping by storage, material or brand. Spools a printer feeds from are marked with its name.
+- **Presets** in its tab keeps a Spool Stock group in Orca's filament list, with one preset for each filament you own. It's built the same way as below, and updates by itself while Orca is open.
 
 Download it and copy its sign-in code from **Setup > Orca plugin**. [orca-plugin/spoolstock](orca-plugin/spoolstock/README.md) has the steps. Printer IPs and access codes stay on your PC.
 
@@ -97,7 +99,7 @@ In Orca, use **Export plate sliced file**, then drop the file on Spool Stock (or
 
 ## Orca presets
 
-**Setup > Orca presets** gets every filament you own into OrcaSlicer.
+**Setup > Orca presets** gets every filament you own into OrcaSlicer. With the Orca plugin, turn on **Presets** in its tab instead and they arrive by themselves, as their own Spool Stock group in the filament list.
 
 - **Orca already has it** (Bambu PLA Matte, eSUN PETG, SUNLU PLA+ and so on): Orca's own profile is used as it is.
 - **Orca doesn't:** a preset is made on Orca's closest generic profile, such as Generic PETG HF or Generic PLA Silk, with the nozzle and bed temperatures on your stickers. These show as "Brand Filament (Spool Stock)".
