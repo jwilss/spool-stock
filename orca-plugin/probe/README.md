@@ -22,10 +22,11 @@ From a two-colour PETG print on a P1S fed by two AMS units, then PETG from the A
 - **Proof it happened:** `tray_now` moves 0, then 255 while changing, then 1, then 255 at the end.
 - **Grams:** not in the printer's reports. The AMS shows `remain` as -1 even for Bambu RFID spools, so the grams come from the sliced file.
 - **Orca's events:** `PrintJobStarted` and `PrintJobFinished` mean the upload, not the print, and carry the printer's serial in `device_id`. `PrintStateChanged` gives PREPARE, RUNNING, PAUSE, FINISH and IDLE with the serial in `name`, but only for the printer selected in Orca. `GCodeExportFinished` gives the path of the G-code Orca just wrote.
-- **Job file:** every attempt timed out. The cause was the probe, not the printer: Bambu's file server starts encryption before it says hello, and the probe waited for the hello first. 0.3.1 fixes that, waits until layer 1, and tries again at the end.
+- **Job file:** 0.2 and 0.3.0 timed out because Bambu's file server starts encryption before it says hello, and the probe waited for the hello first. 0.3.1 fixed that and it now takes about 3 seconds. The file sits in the printer's top folder under the job's name, and is overwritten by the next job with the same name. Its `slice_info.config` gives each filament's type, colour, Bambu filament code and grams (`used_g`), so this is where the grams come from.
+- **External spool:** a job from the external spool sends `ams_mapping` `[-1]`, `ams_mapping2` `{ams_id: 255}` and `use_ams` false.
 - **Two printers at once:** both reports came through side by side with no trouble. Orca's own print states follow only the printer selected in Orca, switching when you send to the other one.
 - **Which slice was sent:** Orca reuses one temporary G-code path and overwrites it on every slice, so the slice that was sent is the last one exported before `PrintJobStarted`, and it has to be read straight away.
-- **The slicing step** never ran, so 0.3.0 reads the G-code from the export event instead.
+- **Orca's G-code:** the slicing step never ran, and opening the exported G-code from the export event was refused by Orca's permission check. Not needed, as the job file on the printer has the grams.
 
 ## Use
 

@@ -70,7 +70,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [ ] Older account's slots folded into one storage on the real data
 - [ ] Weekly catalogue refresh running in GitHub Actions
 - [x] Run the Orca probe plugin through a print on Alduin and Betsy, and send the log
-- [ ] Probe 0.3.0 through one more print, to check the G-code read and the job file fetch
+- [x] Probe 0.3.1 through a print on each printer: tray mapping, job file and grams all confirmed
 - [ ] Log a print with a real Orca export from Alduin and Betsy
 - [ ] Import the Orca presets zip into Orca, and Send to Orca from the rebuilt Windows app, including the filament list
 - [ ] Camera inside the APK
