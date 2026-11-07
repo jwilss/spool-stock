@@ -7,7 +7,7 @@
 # name = "Spool Stock Probe"
 # description = "Read-only test for Spool Stock: logs what Orca and your Bambu printers report about AMS slots, slicing and prints."
 # author = "jwilss"
-# version = "0.1.0"
+# version = "0.2.0"
 # ///
 """Spool Stock Probe.
 
@@ -44,7 +44,7 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock Probe"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 MQTT_PORT, FTP_PORT = 8883, 990
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
 LOG_MAX = 8 * 1024 * 1024
@@ -304,9 +304,15 @@ class Link:
             try:
                 self.session()
                 delay = 3
-            except PermissionError as e:
-                self.state = "refused: " + str(e)
+            except AuthError as e:
+                self.state = "access code not accepted. Remove and add it again."
                 log("printer.refused", printer=self.p.get("name"), error=str(e))
+                return
+            except PermissionError as e:
+                self.state = "Orca blocked the connection. Press Connect."
+                _allowed.discard(self.p.get("ip"))
+                log("printer.blocked", printer=self.p.get("name"), error=str(e))
+                self.stop.set()
                 return
             except Exception as e:
                 self.state = f"retrying ({type(e).__name__}: {e})"
@@ -327,7 +333,7 @@ class Link:
             if not ack or ack[0] >> 4 != 2:
                 raise ConnectionError("no answer to the login")
             if ack[1][1] in (4, 5):
-                raise PermissionError("access code not accepted")
+                raise AuthError("access code not accepted")
             if ack[1][1] != 0:
                 raise ConnectionError(f"login refused ({ack[1][1]})")
             s.sendall(_pkt(0x82, struct.pack("!H", 1) + _mstr(f"device/{self.serial or '+'}/report") + b"\x00"))
@@ -453,13 +459,54 @@ class Link:
 
 
 _links: dict[str, Link] = {}
+_allowed: set[str] = set()
 
 
-def connect_all() -> None:
+class AuthError(Exception):
+    pass
+
+
+def authorise(ip: str) -> str:
+    """Reach the printer once from Orca's main thread.
+
+    Orca only shows its "allow this plugin to connect?" prompt for network calls made on its main
+    (UI) thread. The same call from a background thread is refused without asking. So each printer
+    is touched here first, on both of the ports used later, and the background link reuses the grant.
+    Returns "" when allowed, or what went wrong.
+    """
+    problems = []
+    for port in (MQTT_PORT, FTP_PORT):
+        try:
+            socket.getaddrinfo(ip, port, 0, socket.SOCK_STREAM)
+            with socket.create_connection((ip, port), timeout=4):
+                pass
+        except PermissionError as e:
+            log("permission.denied", ip=ip, port=port, error=str(e))
+            return "Orca didn't allow the connection. Press Connect and choose Yes."
+        except OSError as e:
+            problems.append(f"port {port}: {e}")
+    log("permission.checked", ip=ip, problems=problems)
+    if any(f"port {MQTT_PORT}" in x for x in problems):
+        return f"Couldn't reach the printer ({problems[0]}). Check the IP, and that the printer is on."
+    _allowed.add(ip)
+    return ""
+
+
+def connect_all(on_ui_thread: bool = False) -> list[str]:
+    """Start a link for each saved printer. Call from the UI thread so Orca can ask permission."""
+    notes = []
     for p in load_printers():
         key = p.get("name") or p.get("ip")
-        if p.get("ip") and p.get("code") and key not in _links:
+        if not (p.get("ip") and p.get("code")) or (key in _links and not _links[key].stop.is_set()):
+            continue
+        if on_ui_thread and p["ip"] not in _allowed:
+            why = authorise(p["ip"])
+            if why:
+                notes.append(f"{key}: {why}")
+                continue
+        if p["ip"] in _allowed:
             _links[key] = Link(p)
+    return notes
 
 
 def disconnect_all() -> None:
@@ -511,10 +558,11 @@ o.onMessage(function(d){if(!d||d.type!=="state")return;
 document.getElementById("log").textContent=d.log;
 document.getElementById("hint").textContent=d.hint||"";
 if(d.suggest&&!document.getElementById("ip").value)document.getElementById("ip").value=d.suggest;
-document.getElementById("printers").innerHTML=d.printers.map(function(p,i){return '<div class="card"><b>'+p.name+'</b> '+p.ip+' <span class="muted">'+(p.serial||"serial not known yet")+'</span><br>Status: '+p.state+' <button data-rm="'+i+'">Remove</button></div>'}).join("")||'<p class="muted">None yet.</p>';
+document.getElementById("printers").innerHTML=d.printers.map(function(p,i){return '<div class="card"><b>'+p.name+'</b> '+p.ip+' <span class="muted">'+(p.serial||"serial not known yet")+'</span><br>Status: '+p.state+' <button data-connect="1">Connect</button><button data-rm="'+i+'">Remove</button></div>'}).join("")||'<p class="muted">None yet.</p>';
 document.getElementById("live").innerHTML=d.live.map(function(l){var s=l.summary||{};return '<div class="card"><b>'+l.name+'</b>: '+(s.state||"?")+(s.percent!=null?" "+s.percent+"%":"")+(s.job?" · "+s.job:"")+'<br>Feeding from tray: '+s.tray_now+'<table><tr><th>AMS</th><th>Tray</th><th>Type</th><th>Colour</th><th>Remain</th><th>RFID</th></tr>'+(s.trays||[]).map(function(t){return '<tr><td>'+t.ams+'</td><td>'+t.tray+'</td><td>'+(t.type||"")+'</td><td><span class="sw" style="background:#'+(t.colour||"0000").slice(0,6)+'"></span> '+(t.colour||"")+'</td><td>'+t.remain+'</td><td>'+(t.rfid?"yes":"")+'</td></tr>'}).join("")+'</table>'+(s.external?'External spool: '+(s.external.type||"")+' '+(s.external.colour||""):'')+'<br><span class="muted">Mapping fields: '+JSON.stringify(s.mapping_fields||{})+'</span></div>'}).join("")||'<p class="muted">Not connected.</p>';
 document.getElementById("recent").textContent=d.recent.slice().reverse().join("\\n");
-document.querySelectorAll("[data-rm]").forEach(function(b){b.onclick=function(){send({type:"remove",index:+b.dataset.rm})}})});
+document.querySelectorAll("[data-rm]").forEach(function(b){b.onclick=function(){send({type:"remove",index:+b.dataset.rm})}});
+document.querySelectorAll("[data-connect]").forEach(function(b){b.onclick=function(){send({type:"connect"})}})});
 document.getElementById("add").onclick=function(){send({type:"add",name:document.getElementById("n").value.trim(),ip:document.getElementById("ip").value.trim(),serial:document.getElementById("sn").value.trim(),code:document.getElementById("code").value.trim()});document.getElementById("code").value=""};
 document.getElementById("snap").onclick=function(){send({type:"snapshot"})};
 document.getElementById("openlog").onclick=function(){send({type:"openlog"})};
@@ -543,12 +591,21 @@ def _suggest_ip() -> str:
 
 
 def _ask_permissions():
+    """Declare threads, and the saved printers' addresses, so Orca can ask once when it loads."""
     req = getattr(orca, "request_permissions", None)
-    if callable(req):
+    if not callable(req):
+        return
+    try:
+        req(threading=True)
+    except Exception as e:
+        log("permissions.request_failed", kind="threading", error=f"{type(e).__name__}: {e}")
+    ips = [p["ip"] for p in load_printers() if p.get("ip")]
+    if ips:
         try:
-            req(threading=True)
+            req(network=ips)
+            log("permissions.declared", network=ips)
         except Exception as e:
-            log("permissions.request_failed", error=f"{type(e).__name__}: {e}")
+            log("permissions.request_failed", kind="network", error=f"{type(e).__name__}: {e}")
 
 
 Pages = getattr(getattr(orca, "pages", None), "PagesPluginCapabilityBase", None)
@@ -579,7 +636,6 @@ if Pages is not None:
                 log("orca.api", names=survey_api())
                 log("orca.printer", info=orca_printer_info())
                 log("orca.conf", hints=orca_conf_hints())
-                connect_all()
             return PAGE
 
         def on_message(self, arg0):
@@ -587,7 +643,11 @@ if Pages is not None:
                 d = json.loads(arg0) if isinstance(arg0, str) else arg0
                 t = (d or {}).get("type")
                 if t == "ready":
-                    self.post_message(_state(suggest=_suggest_ip()))
+                    notes = connect_all(on_ui_thread=True)
+                    self.post_message(_state(suggest=_suggest_ip(), hint=" ".join(notes)))
+                elif t == "connect":
+                    notes = connect_all(on_ui_thread=True)
+                    self.post_message(_state(hint=" ".join(notes) or "Connecting."))
                 elif t == "poll":
                     self.post_message(_state())
                 elif t == "add":
@@ -599,8 +659,8 @@ if Pages is not None:
                     _secrets.add(d["code"])
                     save_printers(items)
                     log("printer.added", name=d.get("name"), ip=d["ip"], serial_given=bool(d.get("serial")))
-                    connect_all()
-                    self.post_message(_state(hint="Added. Orca may ask to allow the connection; choose Yes."))
+                    notes = connect_all(on_ui_thread=True)
+                    self.post_message(_state(hint=" ".join(notes) or "Added and connecting."))
                 elif t == "remove":
                     items = load_printers()
                     i = int(d.get("index", -1))
