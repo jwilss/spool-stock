@@ -585,7 +585,7 @@ ok([c["id"] for c in plug.cameras_view()] == [cid] and wid not in plug._cams, "r
 camfile = tmp / "OrcaSlicer" / "spoolstock" / "cameras.json"
 ok(oct(os.stat(camfile).st_mode)[-3:] in ("600", "666"), "camera links are kept in a private file")
 
-(tmp / "tab-state.json").write_text(json.dumps({**plug.handle({"type": "presets_now"}), "cameras": [{"id": "c1", "name": "Betsy cam", "printer": "Betsy", "host": "127.0.0.1"}]}))
+(tmp / "tab-state.json").write_text(json.dumps({**plug.handle({"type": "presets_now"}), "cameras": [{"id": "c1", "name": "Betsy cam", "printer": "Betsy", "host": "127.0.0.1"}, {"id": "c2", "name": "Alduin cam", "printer": "Alduin", "host": "127.0.0.2"}]}))
 (tmp / "tab.html").write_text(html)
 r = subprocess.run(["node", str(Path(__file__).resolve().parent / "plugin-tab.js"), str(tmp / "tab.html"), str(tmp / "tab-state.json")] + ([str(tmp / "cam-replies.json")] if (tmp / "cam-replies.json").exists() else [""]) + ([os.environ["TAB_SHOTS"]] if os.environ.get("TAB_SHOTS") else []), capture_output=True, text=True)
 print(r.stdout.strip()); ok(r.returncode == 0, "the tab's Stock and Presets views work in a browser" + (": " + r.stderr[-300:] if r.returncode else ""))

@@ -62,6 +62,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Stock view in the Orca plugin's tab: spool cards with colour, weight bar and storage, with search, low only, and grouping by storage, material or brand
 - [x] Live preset sync: the plugin keeps a Spool Stock group in Orca's filament list from the app's list of owned filaments, reloaded while Orca is open
 - [x] Cameras in the Orca plugin's tab: Tapo and other RTSP cameras, relayed by the plugin itself, each linked to a printer
+- [x] Cameras fill the tab (1.3.2): the tiles pick the column count that gives the biggest picture without scrolling, and Add a camera folds away
 - [x] Every spool is 1 kg: the form asks for filament left out of 1000 g, and existing spools with another full weight were set to 1000 g
 - [x] Printers switched off overnight no longer freeze Orca (1.3.1): the permission check never waits, and the plugin keeps trying in the background and reconnects by itself
 - [x] Log a print from an Orca or Bambu Studio sliced file (.gcode.3mf) or G-code, matching filaments to spools, with a percentage for failed prints, a print list per spool and Undo

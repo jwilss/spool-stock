@@ -61,7 +61,8 @@ const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) failed 
       ok(await p.isVisible("#v-presets") && await p.inputValue("#grp") === "mat", "remembers the view and grouping");
       if (camReplies.length) {
         await p.click("nav [data-v=cameras]");
-        ok(await p.$$eval("#camgrid .cam", e => e.length) === 1 && /Betsy/.test(await p.textContent("#camgrid .camjob")), "Cameras shows a tile per camera, with its printer");
+        ok(await p.$$eval("#camgrid .cam", e => e.length) === 2 && /Betsy/.test(await p.textContent("#camgrid .camjob")), "Cameras shows a tile per camera, with its printer");
+        ok(!(await p.$eval("#camadd", e => e.open)) && await p.isVisible("#camadd summary") && !(await p.isVisible("#curl")), "Add a camera is folded away while there are cameras");
         let played = null;
         try {
           await p.waitForFunction(() => { const v = document.querySelector("#camgrid video"); return v && v.currentTime > 0.5 && v.videoWidth > 0; }, null, {timeout: 15000});
@@ -70,9 +71,24 @@ const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) failed 
         ok(played && played.w === 320 && played.h === 240 && played.t > 0.5, "the camera's video plays in the tab: " + JSON.stringify(played));
         ok(await p.$eval("#camgrid .camst", e => e.hidden), "the status bar clears once the picture is up");
         ok((await p.evaluate(() => window.__sent.filter(m => m.type === "cams").length)) >= 3, "asks for more video while the page is open");
+        const boxes = async () => { await p.waitForTimeout(250); return p.evaluate(() => ({vh: innerHeight, vw: document.documentElement.clientWidth, scroll: document.documentElement.scrollHeight,
+          add: document.querySelector("#camadd").getBoundingClientRect().bottom,
+          t: [...document.querySelectorAll("#camgrid .cam")].map(e => { const r = e.getBoundingClientRect(), v = e.querySelector(".vid").getBoundingClientRect(); return {x: r.left, y: Math.round(r.top), w: r.width, b: r.bottom, r: r.right, vw: v.width, vh: v.height}; })})); };
+        const fits = b => b.t.every(t => t.b <= b.vh && t.r <= b.vw && t.x >= 0) && b.add <= b.vh && b.scroll <= b.vh + 1;
+        let b = await boxes();
+        ok(fits(b) && b.t[0].x === b.t[1].x && b.t[1].y > b.t[0].y, `narrow and tall tab: the two stack and both fit, with Add a camera below (${Math.round(b.t[0].vw)}x${Math.round(b.t[0].vh)} each)` + (fits(b) ? "" : " " + JSON.stringify(b)));
+        ok(Math.abs(b.t[0].vw / b.t[0].vh - 320 / 240) < 0.02, "pictures are the camera's own shape: " + (b.t[0].vw / b.t[0].vh).toFixed(2));
+        await p.setViewportSize({width: 1600, height: 800}); b = await boxes();
+        ok(fits(b) && b.t[0].y === b.t[1].y && b.t[0].w > 600, `wide tab: side by side and both fit (${Math.round(b.t[0].vw)}x${Math.round(b.t[0].vh)} each)` + (fits(b) ? "" : " " + JSON.stringify(b)));
+        if (shots) await p.screenshot({path: path.join(shots, "tab-cameras-wide.png")});
+        await p.setViewportSize({width: 1100, height: 480}); b = await boxes();
+        ok(fits(b), `short tab: they shrink to fit (${Math.round(b.t[0].vw)}x${Math.round(b.t[0].vh)} each)` + (fits(b) ? "" : " " + JSON.stringify(b)));
+        await p.setViewportSize({width: 760, height: 900});
+        await p.click("#camadd summary");
+        ok(await p.isVisible("#curl"), "Add a camera opens when clicked");
         await p.fill("#cname", "Alduin cam"); await p.fill("#curl", "rtsp://printer cam:pw@192.168.1.51/stream2"); await p.click("#cadd");
         const add = await p.evaluate(() => window.__sent.find(m => m.type === "cam_add"));
-        ok(add && add.name === "Alduin cam" && add.url.endsWith("/stream2") && (await p.inputValue("#curl")) === "", "Add sends the camera and clears the link box");
+        ok(add && add.name === "Alduin cam" && add.url.endsWith("/stream2") && (await p.inputValue("#curl")) === "" && !(await p.$eval("#camadd", e => e.open)), "Add sends the camera, clears the link box and folds away again");
         await p.click("#camgrid [data-a=cam_remove]");
         ok(!(await p.evaluate(() => window.__sent.some(m => m.type === "cam_remove"))) && /Remove it/.test(await p.textContent("#camgrid [data-a=cam_remove]")), "Remove asks again before it removes");
         await p.click("#camgrid [data-a=cam_remove]");

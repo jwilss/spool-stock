@@ -7,7 +7,7 @@
 # name = "Spool Stock"
 # description = "Takes each print's filament off the right spools in Spool Stock, shows your stock and cameras, and keeps a Spool Stock group of your filaments in Orca's filament list."
 # author = "jwilss"
-# version = "1.3.1"
+# version = "1.3.2"
 # ///
 """Spool Stock for OrcaSlicer 2.5.
 
@@ -52,7 +52,7 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock"
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 MQTT_PORT, FTP_PORT = 8883, 990
 RETRY_MAX = 60   # seconds between tries at most, for a printer or camera that's switched off
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
@@ -2064,14 +2064,17 @@ table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}td{borde
 .tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:9px;border:1px solid var(--line);margin-left:4px}
 .tag.lowt{border-color:var(--warn);color:var(--warn)}
 .list div{padding:3px 0;border-top:1px solid var(--line)}.list div:first-child{border-top:0}
-.camgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;margin-bottom:10px}
+.camgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;margin-bottom:10px;justify-content:center}
 .cam{border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--card)}
 .camhead{display:flex;gap:8px;align-items:center;margin-bottom:6px}.camhead b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .camhead select,.camhead button{font-size:12px;padding:3px 6px}
-.vid{position:relative;background:#000;aspect-ratio:16/9;border-radius:6px;overflow:hidden}
+.vid{position:relative;background:#000;aspect-ratio:var(--ar,16/9);border-radius:6px;overflow:hidden}
 .vid video{width:100%;height:100%;object-fit:contain;display:block}
 .camst{position:absolute;left:0;right:0;bottom:0;padding:6px 8px;background:#000b;color:#fff;font-size:12px}
-.camjob{margin-top:5px}
+.camjob{margin-top:5px;min-height:1.45em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+details.card{padding:0}details.card>summary{padding:10px 12px;cursor:pointer;font-weight:600;list-style:none;display:flex;align-items:center;gap:8px}
+details.card>summary::-webkit-details-marker{display:none}details.card>summary::before{content:"+";display:inline-block;width:1em;text-align:center;font-weight:700}
+details.card[open]>summary::before{content:"\2212"}details.card>.inner{padding:0 12px 10px}
 input.wide{width:330px}
 [hidden]{display:none!important}
 </style></head><body>
@@ -2097,10 +2100,10 @@ input.wide{width:330px}
 <section id="v-presets" hidden><div id="presets"></div></section>
 <section id="v-cameras" hidden>
 <div id="camgrid" class="camgrid"></div><p id="camnone" class="muted">No cameras yet.</p>
-<div class="card"><b>Add a camera</b><div class="row" style="margin-top:6px">
+<details class="card" id="camadd"><summary>Add a camera</summary><div class="inner"><div class="row">
 <input id="cname" placeholder="Name"><input id="curl" class="wide" placeholder="rtsp://name:password@192.168.1.50/stream2" autocomplete="off" spellcheck="false"><select id="cprinter"></select><button id="cadd">Add</button></div>
 <p class="muted">For a Tapo camera: in the Tapo app, open the camera's settings, then Advanced Settings, then Camera Account, and make a username and password. The link is rtsp://username:password@the camera's IP/stream2. stream2 is lighter and plenty for watching prints, stream1 is full quality. The link stays on this PC.</p>
-<p class="muted">Cameras only stream while this page is open.</p></div>
+<p class="muted">Cameras only stream while this page is open.</p></div></details>
 </section>
 <script>
 var o=window.orca,last={},spools=[],view="prints",D=null;function send(m){o.postMessage(m)}
@@ -2110,7 +2113,7 @@ function set(id,html,key){if(last[id]===key)return;last[id]=key;document.getElem
 function kept(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){}return null}
 function show(v){view=v;kept("ss.view",v);document.querySelectorAll("nav button").forEach(function(b){if(b.dataset.v===v)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")});
  ["prints","stock","presets","cameras"].forEach(function(x){document.getElementById("v-"+x).hidden=x!==v});
- if(v!=="cameras")Object.keys(CAMS).forEach(function(k){try{CAMS[k].video.pause()}catch(e){}});if(D)paint()}
+ if(v!=="cameras")Object.keys(CAMS).forEach(function(k){try{CAMS[k].video.pause()}catch(e){}});if(D)paint();if(v==="cameras")camFitSoon()}
 var CAMS={},camAsk=0;
 function b64(x){var s=atob(x),a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a}
 function camStatus(C,t){C.st.textContent=t||"";C.st.hidden=!t}
@@ -2123,8 +2126,26 @@ function camLive(C){var v=C.video,br=v.buffered,sb=C.sb;if(!br.length)return;var
  if(end-v.currentTime>1.5||v.currentTime<br.start(br.length-1))v.currentTime=Math.max(br.start(br.length-1),end-0.25);
  if(v.paused&&view==="cameras")v.play().catch(function(){});
  if(sb&&!sb.updating&&v.currentTime-br.start(0)>30){try{sb.remove(br.start(0),v.currentTime-10)}catch(e){}}}
+/* Size the camera tiles so they all fit the tab without scrolling: try each number of columns, and keep the one
+   that gives the biggest picture at the camera's own shape. */
+var camFitKey="";
+function camFit(){var grid=document.getElementById("camgrid"),tiles=grid.children,n=tiles.length;
+ if(view!=="cameras"||!n||!grid.clientWidth)return;
+ var t=tiles[0],v=t.querySelector(".vid"),chromeH=t.offsetHeight-v.offsetHeight,chromeW=t.offsetWidth-v.offsetWidth,gap=10;
+ // everything on the page that isn't the cameras (heading, tabs, the folded Add a camera, margins), as it is now
+ var add=document.getElementById("camadd"),open=add.open?add.offsetHeight-add.querySelector("summary").offsetHeight:0;
+ var rest=document.body.offsetHeight-grid.offsetHeight-open,H=Math.max(200,window.innerHeight-rest-1),W=grid.clientWidth;
+ var ar=0;Object.keys(CAMS).forEach(function(k){var x=CAMS[k].video;if(!ar&&x.videoWidth&&x.videoHeight)ar=x.videoWidth/x.videoHeight});ar=ar||16/9;
+ var best=0,cols=1;
+ for(var c=1;c<=n;c++){var r=Math.ceil(n/c),w=Math.min((W-gap*(c-1))/c,((H-gap*(r-1))/r-chromeH)*ar+chromeW);if(w>best+1){best=w;cols=c}}
+ best=Math.max(160,Math.floor(best));
+ var key=[cols,best,ar.toFixed(3)].join();if(key===camFitKey)return;camFitKey=key;
+ grid.style.setProperty("--ar",ar);grid.style.gridTemplateColumns="repeat("+cols+","+best+"px)"}
+function camFitSoon(){camFitKey="";requestAnimationFrame(camFit)}
 function camTiles(){var list=D.cameras||[],grid=document.getElementById("camgrid"),names=D.printers.map(function(p){return p.name}).filter(Boolean);
  document.getElementById("camnone").hidden=!!list.length;
+ var add=document.getElementById("camadd");if(!list.length&&!add.dataset.auto){add.open=true;add.dataset.auto="1"}if(list.length&&add.dataset.auto==="1"){add.open=false;add.dataset.auto="2"}
+ var count=grid.children.length;
  var opts=function(sel){return '<option value="">No printer</option>'+names.concat(sel&&names.indexOf(sel)<0?[sel]:[]).map(function(n){return '<option'+(n===sel?" selected":"")+'>'+h(n)+'</option>'}).join("")};
  set("cprinter",opts(document.getElementById("cprinter").value),JSON.stringify(names));
  Object.keys(CAMS).forEach(function(id){if(!list.some(function(c){return c.id===id})){CAMS[id].el.remove();delete CAMS[id]}});
@@ -2132,11 +2153,13 @@ function camTiles(){var list=D.cameras||[],grid=document.getElementById("camgrid
   if(!C){var el=document.createElement("div");el.className="cam";el.dataset.id=c.id;
    el.innerHTML='<div class="camhead"><b></b><select class="campr"></select><button data-a="cam_remove">Remove</button></div><div class="vid"><video muted autoplay playsinline></video><div class="camst">Connecting</div></div><div class="muted camjob"></div>';
    grid.appendChild(el);C=CAMS[c.id]={id:c.id,el:el,video:el.querySelector("video"),st:el.querySelector(".camst"),gen:0,seq:-1,q:[],bad:""};
+   C.video.addEventListener("loadedmetadata",camFitSoon);
    el.querySelector(".campr").addEventListener("change",function(ev){send({type:"cam_edit",id:c.id,printer:ev.target.value})})}
   C.el.querySelector("b").textContent=c.name;C.el.querySelector("b").title=c.name+" ("+c.host+")";
   var key=JSON.stringify([c.printer,names]);if(C.pk!==key){C.pk=key;C.el.querySelector(".campr").innerHTML=opts(c.printer)}
   var p=D.printers.filter(function(x){return x.name===c.printer})[0],j=p&&p.job;
-  C.el.querySelector(".camjob").textContent=!c.printer?"":!p?c.printer+": not added under Prints":j?c.printer+": printing "+j.name+(j.percent?", "+j.percent+"%":""):c.printer+": "+p.state})}
+  C.el.querySelector(".camjob").textContent=!c.printer?"":!p?c.printer+": not added under Prints":j?c.printer+": printing "+j.name+(j.percent?", "+j.percent+"%":""):c.printer+": "+p.state});
+ if(grid.children.length!==count)camFitSoon();else camFit()}
 function camPoll(){if(view!=="cameras"||!D||!(D.cameras||[]).length)return;if(camAsk&&Date.now()-camAsk<3000)return;camAsk=Date.now();
  send({type:"cams",want:Object.keys(CAMS).map(function(k){var C=CAMS[k];return {id:k,gen:C.gen,seq:C.seq}})})}
 function camGot(d){camAsk=0;(d.cams||[]).forEach(function(r){var C=CAMS[r.id];if(!C)return;
@@ -2211,7 +2234,8 @@ paint();
 document.querySelector("nav").addEventListener("click",function(ev){var b=ev.target.closest("[data-v]");if(b)show(b.dataset.v)});
 ["q","grp","lowonly"].forEach(function(id){var el=document.getElementById(id);el.addEventListener(el.type==="checkbox"||el.tagName==="SELECT"?"change":"input",function(){kept("ss."+id,el.type==="checkbox"?(el.checked?"1":""):el.value);if(D)paintStock()})});
 (function(){var g=kept("ss.grp");if(g)document.getElementById("grp").value=g;document.getElementById("lowonly").checked=kept("ss.lowonly")==="1";var v=kept("ss.view");if(v==="stock"||v==="presets"||v==="cameras")show(v)})();
-document.getElementById("cadd").onclick=function(){var u=document.getElementById("curl");send({type:"cam_add",name:document.getElementById("cname").value.trim(),url:u.value.trim(),printer:document.getElementById("cprinter").value});u.value="";document.getElementById("cname").value=""};
+document.getElementById("cadd").onclick=function(){var u=document.getElementById("curl");if(!u.value.trim()){u.focus();return}send({type:"cam_add",name:document.getElementById("cname").value.trim(),url:u.value.trim(),printer:document.getElementById("cprinter").value});u.value="";document.getElementById("cname").value="";document.getElementById("camadd").open=false};
+document.getElementById("camadd").addEventListener("toggle",camFitSoon);window.addEventListener("resize",camFitSoon);
 setInterval(camPoll,300);
 document.body.addEventListener("click",function(ev){var b=ev.target.closest("[data-a]");if(!b)return;var a=b.dataset.a;
  if(a==="signin")send({type:"signin",code:document.getElementById("codein").value});
