@@ -361,7 +361,9 @@ function warnHit(sp,l){
 }
 function newLocId(name){ const base=slug(name).slice(0,24).replace(/-$/,"")||"storage"; let id=base, n=2; while(S.locs[id]||id==="new") id=base+"-"+n++; return id; }
 const placer = id => { const l=S.locs[id], open=spaced(l)?freeSpaces(l):null; return ()=>{ if(!id) return {loc:null,slot:null}; if(!open) return {loc:id,slot:null}; const slot=open.shift(); return slot?{loc:id,slot}:{loc:null,slot:null}; }; };
-const newSpool = (body,now,spot) => ({...body,...spot,remainG:body.netG,status:"active",labelled:false,addedAt:now,history:spot.loc?[{at:now,from:null,to:spot.loc}]:[]});
+/* Every spool is a 1 kg spool: netG is always FULL_G, and what a spool has on it is remainG */
+const leftOf = v => { const n=num(v); return n==null?FULL_G:clamp(Math.round(n),0,FULL_G); };
+const newSpool = (body,now,spot) => ({...body,...spot,netG:FULL_G,remainG:leftOf(body.remainG),status:"active",labelled:false,addedAt:now,history:spot.loc?[{at:now,from:null,to:spot.loc}]:[]});
 const hexOK = h => /^#[0-9a-f]{6}$/i.test(h||"") ? h : "#9AA5AB";
 const colourList = s => { const c=Array.isArray(s.colours)?s.colours.filter(x=>/^#[0-9a-f]{6}$/i.test(x)):[]; return c.length?c:[hexOK(s.hex)]; };
 const patternOf = s => colourList(s).length>1&&(s.pattern==="split"||s.pattern==="gradient")?s.pattern:"solid";
@@ -625,7 +627,19 @@ function upgradeStorages(seen){
   saveConfig({layout:2});
 }
 let dataTimer=null;
+/* Spools saved with any other full weight (from before every spool was 1 kg, or an older copy of the app) are
+   set to 1 kg, keeping what they have on them. Runs whenever the live data changes, and only writes what's off. */
+function kiloSpools(){
+  if(!S.live) return;
+  for(const sp of Object.values(S.spools)){
+    if(sp.netG===FULL_G&&(sp.remainG==null||sp.remainG<=FULL_G)) continue;
+    const remainG=Math.min(FULL_G,Math.round(sp.remainG??sp.netG??FULL_G));
+    S.spools[sp.id]={...sp,netG:FULL_G,remainG};
+    col("spools").doc(sp.id).update({netG:FULL_G,remainG});
+  }
+}
 function dataChanged(){
+  kiloSpools();
   orcaFeedSync();
   clearTimeout(dataTimer);
   dataTimer=setTimeout(()=>{
@@ -971,12 +985,12 @@ const Scanner={
 };
 
 /* form */
-function blankDraft(){ return {brand:"",material:"",colour:"",hex:"#111111",colours:["#111111"],pattern:"solid",finish:"",netG:1000,dia:1.75,tareG:"",loc:"",qty:1,nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,src:"none",touched:false}; }
+function blankDraft(){ return {brand:"",material:"",colour:"",hex:"#111111",colours:["#111111"],pattern:"solid",finish:"",left:1000,dia:1.75,tareG:"",loc:"",qty:1,nMin:null,nMax:null,bMin:null,bMax:null,dT:null,dH:null,src:"none",touched:false}; }
 function newDraft(){ F=blankDraft(); F.editId=null; }
 function editDraft(id){
   if(F&&F.editId===id) return;
   const s=S.spools[id]; F=blankDraft(); if(!s) return;
-  Object.assign(F,{editId:id,brand:s.brand,material:s.material,colour:s.colour||"",hex:colourList(s)[0],colours:[...colourList(s)],pattern:patternOf(s),finish:s.finish||"",netG:s.netG,dia:s.dia||1.75,tareG:s.tareG||"",loc:s.loc||"",nMin:s.nMin,nMax:s.nMax,bMin:s.bMin,bMax:s.bMax,dT:s.dT,dH:s.dH,src:"saved",touched:true});
+  Object.assign(F,{editId:id,brand:s.brand,material:s.material,colour:s.colour||"",hex:colourList(s)[0],colours:[...colourList(s)],pattern:patternOf(s),finish:s.finish||"",left:Math.min(FULL_G,s.remainG??s.netG??FULL_G),dia:s.dia||1.75,tareG:s.tareG||"",loc:s.loc||"",nMin:s.nMin,nMax:s.nMax,bMin:s.bMin,bMax:s.bMax,dT:s.dT,dH:s.dH,src:"saved",touched:true});
 }
 function colourRow(){
   const multi=F.pattern!=="solid", n=multi?F.colours.length:1;
@@ -1007,7 +1021,7 @@ function vForm(){
       <div class="swatches" id="colourRow">${colourRow()}</div>
       <div class="swatches">${COLOURS.map(c=>`<button type="button" class="sw" style="background:${c}" data-act="hex" data-v="${c}" aria-label="Use colour ${c}"></button>`).join("")}</div>
       <div class="g2">
-        <label class="field"><span>Filament weight (g)</span><input type="number" inputmode="numeric" id="f_netG" value="${esc(F.netG)}"></label>
+        <label class="field"><span>Filament left (g, of 1000)</span><input type="number" inputmode="numeric" min="0" max="1000" id="f_left" value="${esc(F.left)}"></label>
         <label class="field"><span>Empty spool (g)</span><input type="number" inputmode="numeric" id="f_tareG" value="${esc(F.tareG)}"></label>
       </div>
       <div class="g2">
@@ -1031,7 +1045,7 @@ function vForm(){
     <div class="card"><h3>Sticker</h3><div id="preview"></div><div id="logoHint"></div></div>
   </div>`;
 }
-const fields=["brand","material","colour","finish","hex","pattern","netG","tareG","loc","qty","dia","nMin","nMax","bMin","bMax","dT","dH"];
+const fields=["brand","material","colour","finish","hex","pattern","left","tareG","loc","qty","dia","nMin","nMax","bMin","bMax","dT","dH"];
 function readForm(){ for(const k of fields){ const el=$("#f_"+k); if(el) F[k]=el.value; } F.colours[0]=F.hex; }
 function writePrint(){ for(const k of ["nMin","nMax","bMin","bMax","dT","dH"]){ const el=$("#f_"+k); if(el) el.value=F[k]??""; } }
 function draftSpool(){ return {id:F.editId||nextIds(1).ids[0],brand:F.brand,material:F.material,colour:F.colour,hex:F.colours[0],colours:F.pattern==="solid"?[F.colours[0]]:F.colours,pattern:F.pattern,nMin:num(F.nMin),nMax:num(F.nMax),bMin:num(F.bMin),bMax:num(F.bMax),dT:num(F.dT),dH:num(F.dH)}; }
@@ -1104,7 +1118,7 @@ async function submitForm(){
   const btn=$("#saveSpool"); if(btn) btn.disabled=true;
   const now=Date.now(), brand=F.brand.trim(), material=F.material.trim();
   const list=F.pattern==="solid"?[F.colours[0]]:F.colours;
-  const body={brand,material,colour:F.colour.trim(),hex:list[0],colours:list,pattern:list.length>1?F.pattern:"solid",finish:F.finish,netG:num(F.netG)||1000,tareG:num(F.tareG),dia:num(F.dia)||1.75,
+  const body={brand,material,colour:F.colour.trim(),hex:list[0],colours:list,pattern:list.length>1?F.pattern:"solid",finish:F.finish,netG:FULL_G,remainG:leftOf(F.left),tareG:num(F.tareG),dia:num(F.dia)||1.75,
     nMin:num(F.nMin),nMax:num(F.nMax),bMin:num(F.bMin),bMax:num(F.bMax),dT:num(F.dT),dH:num(F.dH)};
   try{
     const bId=slug(brand), oldB=S.brands[bId];
@@ -1114,9 +1128,8 @@ async function submitForm(){
     if(F.editId){
       first=F.editId;
       const old=S.spools[F.editId];
-      const rem=(old.remainG!=null&&old.remainG>body.netG)?body.netG:old.remainG;
       const spot=(F.loc||null)===(old.loc||null)?{loc:old.loc||null,slot:old.slot??null}:placer(F.loc||null)();
-      await col("spools").doc(F.editId).update({...body,...spot,remainG:rem,labelled:false});
+      await col("spools").doc(F.editId).update({...body,...spot,labelled:false});
     } else {
       const n=clamp(parseInt(F.qty)||1,1,20), {ids,last}=nextIds(n); first=ids[0];
       const spot=placer(F.loc||null);
@@ -1356,7 +1369,7 @@ async function runImport(){
   for(const r of rows){
     const base=lookup(r.brand,r.material), v=k=>num(r[k])??base[k];
     const cols=colourList(r), pat=patternOf(r);
-    const body={brand:r.brand,material:r.material,colour:r.colour||"",hex:cols[0],colours:cols,pattern:pat,finish:FINISH.includes(r.finish)?r.finish:"",netG:num(r.netG)||1000,tareG:num(r.tareG),dia:num(r.dia)||1.75,nMin:v("nMin"),nMax:v("nMax"),bMin:v("bMin"),bMax:v("bMax"),dT:v("dT"),dH:v("dH")};
+    const body={brand:r.brand,material:r.material,colour:r.colour||"",hex:cols[0],colours:cols,pattern:pat,finish:FINISH.includes(r.finish)?r.finish:"",netG:FULL_G,remainG:leftOf(r.remainG??r.netG),tareG:num(r.tareG),dia:num(r.dia)||1.75,nMin:v("nMin"),nMax:v("nMax"),bMin:v("bMin"),bMax:v("bMax"),dT:v("dT"),dH:v("dH")};
     const bId=slug(r.brand);
     if(!S.brands[bId]&&!Imp.logos[r.brand]) col("brands").doc(bId).set({name:r.brand,tareG:body.tareG||null});
     col("profiles").doc(profileId(r.brand,r.material)).set({brand:r.brand,material:r.material,nMin:body.nMin,nMax:body.nMax,bMin:body.bMin,bMax:body.bMax,dT:body.dT,dH:body.dH});
@@ -1830,7 +1843,7 @@ const actions={
     const s=S.spools[S.param], sc=num($("#scaleG").value); let v=num($("#remG").value);
     if(sc!=null){ if(!s.tareG){ toast("Set the empty spool weight first, using Edit."); return; } v=Math.max(0,sc-s.tareG); }
     if(v==null) return;
-    try{ await col("spools").doc(s.id).update({remainG:Math.round(v)}); toast("Weight saved."); document.activeElement?.blur(); render(); }catch(e){ fail(e,"That weight didn't save"); }
+    try{ await col("spools").doc(s.id).update({remainG:Math.min(FULL_G,Math.round(v))}); toast("Weight saved."); document.activeElement?.blur(); render(); }catch(e){ fail(e,"That weight didn't save"); }
   },
   async usedUp(){
     const s=S.spools[S.param], used=s.status==="used";
@@ -1861,7 +1874,6 @@ const actions={
   pickLine(el){
     const l=Picks.lines[+el.dataset.v]; if(!l) return;
     F.material=l.n; $("#f_material").value=l.n; F.touched=false; hidePicks(); document.activeElement?.blur();
-    if(l.w){ F.netG=l.w; $("#f_netG").value=l.w; }
     if(l.s!=null){ F.tareG=l.s; $("#f_tareG").value=l.s; }
     if(l.f){ F.finish=l.f; $("#f_finish").value=l.f; }
     refreshLookup();

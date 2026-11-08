@@ -288,6 +288,17 @@ await p.evaluate(id=>{location.hash=id},picks[0]);await p.waitForSelector('.spoo
  ok(feed2.sig!==feed.sig&&feed2.items.some(x=>/PolyTerra/.test(x.name)),'the list updates when you add a new filament');
  await p.evaluate(()=>{col('spools').doc('zz01').delete()});
  ok(!(await orcaDoc(feed2.sig)).items.some(x=>/PolyTerra/.test(x.name)),'and when you no longer have one');
+ // every spool is a 1 kg spool
+ await p.evaluate(()=>{col('spools').doc('kg01').set({brand:'Sunlu',material:'PLA',colour:'Red',hex:'#ff0000',netG:550,remainG:550,status:'active',loc:null});col('spools').doc('kg02').set({brand:'Sunlu',material:'PLA',colour:'Blue',hex:'#0000ff',netG:250,status:'active',loc:null});col('spools').doc('kg03').set({brand:'Sunlu',material:'PLA',colour:'Green',hex:'#00ff00',netG:1000,remainG:1200,status:'active',loc:null})});
+ let kg;for(let i=0;i<30;i++){kg=await dbOf(p);if(kg[uid+'spools/kg01'].netG===1000&&kg[uid+'spools/kg02'].netG===1000&&kg[uid+'spools/kg03'].remainG===1000)break;await p.waitForTimeout(100)}
+ ok(['kg01','kg02','kg03'].map(k=>kg[uid+'spools/'+k].netG+'/'+kg[uid+'spools/'+k].remainG).join()==='1000/550,1000/250,1000/1000','spools saved with another full weight become 1 kg, keeping what was on them: '+['kg01','kg02','kg03'].map(k=>kg[uid+'spools/'+k].remainG+' of '+kg[uid+'spools/'+k].netG).join(', '));
+ ok(Object.entries(kg).filter(([k])=>k.startsWith(uid+'spools/')).every(([,v])=>v.netG===1000),'every spool in the stock is out of 1000 g');
+ await p.evaluate(()=>{location.hash='add'});await p.waitForSelector('#f_left');
+ ok(await p.inputValue('#f_left')==='1000'&&!(await p.$('#f_netG'))&&/of 1000/.test(await p.textContent('label:has(#f_left)')),'adding a spool asks how much is left, out of 1000 g');
+ await p.fill('#f_brand','Sunlu');await p.fill('#f_material','PLA');await p.fill('#f_left','400');await p.click('#saveSpool');await p.waitForTimeout(300);
+ kg=await dbOf(p);const added=Object.entries(kg).filter(([k,v])=>k.startsWith(uid+'spools/')&&v.remainG===400&&v.brand==='Sunlu').map(([,v])=>v);
+ ok(added.length===1&&added[0].netG===1000,'a part used spool is saved as 400 g left of 1000 g');
+ await p.evaluate(()=>{for(const k of ['kg01','kg02','kg03'])col('spools').doc(k).delete()});
 
  // stock list for Spool Reader
  await p.evaluate(()=>{location.hash='setup'});await p.waitForSelector('[data-act=listSave]');

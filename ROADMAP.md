@@ -26,6 +26,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - Sticker QR codes hold the site address plus a code: `#s0012` for a spool, `#loc-top-shelf` for a storage.
 - The Scan page runs a live camera: scan a spool, then a storage. A phone's normal camera also works through the link.
 - A storage is one record with one sticker. `kind` picks the defaults from `STORE_TYPES`. `spaces` and `capacity` say whether spools sit in numbered spaces or loose, `group` keeps storages together, and `warn` lists materials to flag.
+- Every spool is a 1 kg spool: `netG` is always 1000, and what's on it is `remainG`. Adding or editing a spool asks for the filament left, out of 1000 g, and imports from Spool Reader take its weight as what's left. Any spool saved with another full weight is set to 1000 g whenever the app loads, keeping what was on it (`kiloSpools`).
 - A spool in a storage with spaces also has a `slot`. In a loose storage it has a `pos`, which sets its order, and a moved-in spool goes to the end. Older accounts with one record per slot are folded into one storage once, on first load.
 - Spool Reader keeps its own list and hands spools over as a `spool-stock-import` JSON file. Spool Stock hands its stock back as a `spool-stock-list` file.
 - Print settings come from your own saved settings first, then the catalogue, then a typical table per material. Drying starts from that table, as the catalogue has none, unless `catalogue-extra.json` gives a value. Your edits are remembered per filament.
@@ -61,6 +62,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Stock view in the Orca plugin's tab: spool cards with colour, weight bar and storage, with search, low only, and grouping by storage, material or brand
 - [x] Live preset sync: the plugin keeps a Spool Stock group in Orca's filament list from the app's list of owned filaments, reloaded while Orca is open
 - [x] Cameras in the Orca plugin's tab: Tapo and other RTSP cameras, relayed by the plugin itself, each linked to a printer
+- [x] Every spool is 1 kg: the form asks for filament left out of 1000 g, and existing spools with another full weight were set to 1000 g
 - [x] Printers switched off overnight no longer freeze Orca (1.3.1): the permission check never waits, and the plugin keeps trying in the background and reconnects by itself
 - [x] Log a print from an Orca or Bambu Studio sliced file (.gcode.3mf) or G-code, matching filaments to spools, with a percentage for failed prints, a print list per spool and Undo
 - [x] Printers in the app, with what feeds each one (AMS units and the external spool mapped to storages and spaces)
