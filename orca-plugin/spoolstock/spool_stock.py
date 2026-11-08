@@ -7,7 +7,7 @@
 # name = "Spool Stock"
 # description = "Takes each print's filament off the right spools in Spool Stock, shows your stock and cameras, and keeps a Spool Stock group of your filaments in Orca's filament list."
 # author = "jwilss"
-# version = "1.3.0"
+# version = "1.3.1"
 # ///
 """Spool Stock for OrcaSlicer 2.5.
 
@@ -27,12 +27,14 @@ codes stay in this plugin's folder on this PC and are never sent to Spool Stock 
 """
 
 import base64
+import errno
 import ftplib
 import hashlib
 import io
 import json
 import os
 import re
+import select
 import socket
 import ssl
 import struct
@@ -50,8 +52,9 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock"
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 MQTT_PORT, FTP_PORT = 8883, 990
+RETRY_MAX = 60   # seconds between tries at most, for a printer or camera that's switched off
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
 TOKEN_URL = "https://securetoken.googleapis.com/v1/token"
 FIRESTORE_URL = "https://firestore.googleapis.com/v1"
@@ -497,7 +500,7 @@ def _insecure_ctx() -> ssl.SSLContext:
 
 def read_job_file(ip: str, code: str, file: str, plate: int) -> list[dict]:
     """The filaments of one plate from the job's .3mf on the printer: id, type, colour, grams."""
-    ftp = Ftps(context=_insecure_ctx(), timeout=30)
+    ftp = Ftps(context=_insecure_ctx(), timeout=15)
     ftp.connect(ip, FTP_PORT)
     try:
         ftp.login("bblp", code)
@@ -561,11 +564,14 @@ def _pkt(first: int, body: bytes) -> bytes:
 
 
 def _recv_exact(sock, n: int) -> bytes:
-    buf = b""
+    buf, waits = b"", 0
     while len(buf) < n:
         try:
             chunk = sock.recv(n - len(buf))
         except socket.timeout:
+            waits += 1
+            if waits >= 6:   # half a packet and then nothing for 30 s: the printer has gone
+                raise TimeoutError("the printer stopped part way through a message")
             continue
         if not chunk:
             raise ConnectionError("printer closed the connection")
@@ -628,7 +634,20 @@ class Link:
         self.stop = threading.Event()
         self.last_state = None
         self.fetching = False
-        threading.Thread(target=self.run, daemon=True, name="spoolstock-" + printer.get("name", "printer")).start()
+        self.sock = None
+        self.last_err = ""
+        self.thread = threading.Thread(target=self.run, daemon=True, name="spoolstock-" + printer.get("name", "printer"))
+        self.thread.start()
+
+    def close(self):
+        """Stop now: closing the socket ends a connection attempt or a read straight away."""
+        self.stop.set()
+        s = self.sock
+        if s is not None:
+            try:
+                s.close()
+            except OSError:
+                pass
 
     @property
     def name(self) -> str:
@@ -651,14 +670,24 @@ class Link:
                 self.stop.set()
                 return
             except Exception as e:
-                self.state = f"reconnecting ({type(e).__name__}: {e})"
-                log("printer.error", printer=self.name, error=f"{type(e).__name__}: {e}")
+                if self.stop.is_set():
+                    return
+                if offline(e):
+                    self.state = f"not answering, it may be switched off. Trying again every {min(delay * 2, RETRY_MAX)} s."
+                else:
+                    self.state = f"reconnecting ({type(e).__name__}: {e})"
+                err = f"{type(e).__name__}: {e}"
+                if err != self.last_err:   # once per kind of failure, so a night switched off doesn't fill the log
+                    log("printer.error", printer=self.name, error=err)
+                    self.last_err = err
                 self.stop.wait(delay)
-                delay = min(delay * 2, 60)
+                delay = min(delay * 2, RETRY_MAX)
 
     def session(self):
         ip, code = self.p["ip"], self.p["code"]
-        with socket.create_connection((ip, MQTT_PORT), timeout=10) as raw, _insecure_ctx().wrap_socket(raw, server_hostname=ip) as s:
+        raw = open_socket(ip, MQTT_PORT, 5, self)
+        with raw, _insecure_ctx().wrap_socket(raw, server_hostname=ip) as s:
+            self.sock = s
             s.settimeout(5)
             if not self.serial:
                 self.serial = serial_from_cert(s.getpeercert(binary_form=True) or b"")
@@ -682,10 +711,17 @@ class Link:
             s.sendall(_pkt(0x82, struct.pack("!H", 1) + _mstr(f"device/{self.serial}/report") + b"\x00"))
             s.sendall(_pkt(0x30, _mstr(f"device/{self.serial}/request") + PUSHALL.encode()))
             self.state = "connected"
+            if self.last_err:
+                log("printer.back", printer=self.name)
+            self.last_err = ""
             log("printer.connected", printer=self.name, serial=self.serial)
-            ping = time.monotonic()
+            ping = heard = time.monotonic()
             while not self.stop.is_set():
                 pk = _read_packet(s)
+                if pk:
+                    heard = time.monotonic()
+                elif time.monotonic() - heard > 90:
+                    raise TimeoutError("the printer stopped answering")
                 if pk and pk[0] >> 4 == 3:
                     b = pk[1]
                     n = struct.unpack("!H", b[:2])[0]
@@ -1030,23 +1066,72 @@ _started = False
 
 
 def authorise(host: str, ports: tuple) -> str:
-    """Reach a host once from Orca's main thread. Orca only asks "allow this plugin to connect?" for
-    calls made there, and the background threads then reuse the grant. Returns "" when allowed."""
-    problems = []
+    """Start a connection to a host once from Orca's main thread. Orca only asks "allow this plugin to connect?"
+    for calls made there, and the background threads then reuse the grant. Orca checks as a connection starts,
+    so this never waits for an answer: a printer or camera that's switched off can't hold Orca up.
+    Returns "" when allowed, even if nothing answers yet. The background threads keep trying."""
     for port in ports:
         try:
-            socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
-            with socket.create_connection((host, port), timeout=4):
-                pass
+            if re.fullmatch(r"[\d.]+|[0-9a-fA-F:]+", host):
+                addrs = [(socket.AF_INET6 if ":" in host else socket.AF_INET, (host, port))]
+            else:
+                addrs = [(a[0], a[4]) for a in socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)][:1]
+            for fam, addr in addrs:
+                s = socket.socket(fam, socket.SOCK_STREAM)
+                try:
+                    s.setblocking(False)
+                    s.connect(addr)
+                except (BlockingIOError, InterruptedError):
+                    pass   # under way, so Orca allowed it
+                finally:
+                    s.close()
         except PermissionError as e:
             log("permission.denied", host=host, port=port, error=str(e))
             return "Orca didn't allow the connection. Press Connect and choose Yes."
-        except OSError as e:
-            problems.append(f"port {port}: {e}")
-    if problems and len(problems) == len(ports):
-        return f"Couldn't reach {host} ({problems[0]})."
+        except OSError:
+            pass   # allowed, just not there right now (switched off, or no network)
     _allowed.add(host)
     return ""
+
+
+_PENDING = {errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY, 10035, 10036, 10037}
+
+
+def open_socket(host: str, port: int, timeout: float, holder) -> socket.socket:
+    """Connect in short waits that check holder.stop, so closing Orca never waits on a printer or camera that's
+    switched off. The socket is kept on holder.sock so a stop can also close it."""
+    err = None
+    for fam, kind, proto, _, addr in socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM):
+        s = socket.socket(fam, kind, proto)
+        holder.sock = s
+        try:
+            s.setblocking(False)
+            code = s.connect_ex(addr)
+            until = time.monotonic() + timeout
+            while code in _PENDING:
+                if holder.stop.is_set():
+                    raise ConnectionError("stopped")
+                _, w, x = select.select([], [s], [s], 0.25)
+                if w or x:
+                    code = s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                    break
+                if time.monotonic() > until:
+                    raise TimeoutError(f"no answer from {host}")
+            if code:
+                raise OSError(code, os.strerror(code) if code < 10000 else f"socket error {code}")
+            s.setblocking(True)
+            s.settimeout(timeout)
+            return s
+        except OSError as e:
+            err = e
+            s.close()
+    raise err or OSError(f"couldn't find {host}")
+
+
+def offline(e: Exception) -> bool:
+    """A connection that failed because the device is off or out of reach, rather than refusing us."""
+    return isinstance(e, (TimeoutError, socket.timeout, ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError)) or \
+        (isinstance(e, OSError) and not isinstance(e, (ssl.SSLError, PermissionError)) and getattr(e, "errno", None) is not None)
 
 
 def connect_all() -> list[str]:
@@ -1073,10 +1158,10 @@ def connect_all() -> list[str]:
 
 def disconnect_all() -> None:
     for link in _links.values():
-        link.stop.set()
+        link.close()
     _links.clear()
     for cam in list(_cams.values()):
-        cam.stop.set()
+        cam.close()
     _cams.clear()
 
 
@@ -1547,6 +1632,17 @@ class Camera:
         self.seq = 0
         self.thread = None
         self.stop = threading.Event()
+        self.sock = None
+        self.last_err = ""
+
+    def close(self):
+        self.stop.set()
+        s = self.sock
+        if s is not None:
+            try:
+                s.close()
+            except OSError:
+                pass
 
     def want(self):
         self.wanted = time.monotonic()
@@ -1592,8 +1688,14 @@ class Camera:
                 if self.stop.wait(15):
                     break
             except Exception as e:
-                self.status = f"Reconnecting ({type(e).__name__}: {e})"
-                log("camera.error", camera=self.name, error=f"{type(e).__name__}: {e}")
+                if self.stop.is_set():
+                    break
+                self.status = ("Not answering, it may be switched off. Trying again." if offline(e)
+                               else f"Reconnecting ({type(e).__name__}: {e})")
+                err = f"{type(e).__name__}: {e}"
+                if err != self.last_err:
+                    log("camera.error", camera=self.name, error=err)
+                    self.last_err = err
                 if self.stop.wait(delay):
                     break
                 delay = min(delay * 2, 30)
@@ -1656,7 +1758,7 @@ class Camera:
         self.status, self.cseq, self.session_id, self.auth = "Connecting", 0, "", None
         with self.lock:
             self.init, self.frags = b"", []   # a new connection starts a new stream for the page
-        with socket.create_connection((u["host"], u["port"]), timeout=10) as s:
+        with open_socket(u["host"], u["port"], 5, self) as s:
             s.settimeout(15)
             rd = _Reader(s)
             code, hdrs, body = self._request(s, rd, "DESCRIBE", u["url"], {"Accept": "application/sdp"})
@@ -1702,6 +1804,7 @@ class Camera:
             if code != 200:
                 raise CamError(f"The camera wouldn't start the stream ({code}).")
             log("camera.connected", camera=self.name, host=u["host"])
+            self.last_err = ""
             self.status = "Waiting for a picture"
             self.read_video(s, rd, chan, base)
             try:
@@ -1829,7 +1932,7 @@ def camera(cid: str) -> Camera | None:
     cam = _cams.get(cid)
     if not cam or cam.url != c["url"]:
         if cam:
-            cam.stop.set()
+            cam.close()
         cam = _cams[cid] = Camera(cid, c["url"], c.get("name") or cid)
     return cam
 
@@ -2220,7 +2323,7 @@ def handle(d: dict) -> dict:
         save_cameras(items)
         cam = _cams.pop(d.get("id"), None)
         if cam:
-            cam.stop.set()
+            cam.close()
     elif t == "presets_off":
         try:
             remove_presets()
@@ -2259,7 +2362,7 @@ def handle(d: dict) -> dict:
             save_printers(items)
             link = _links.pop(gone.get("name") or gone.get("ip"), None)
             if link:
-                link.stop.set()
+                link.close()
     elif t in ("confirm", "skip"):
         with STORE.lock:
             entry = next((e for e in STORE.pending if e["key"] == d.get("key")), None)
