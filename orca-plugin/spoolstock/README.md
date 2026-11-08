@@ -55,6 +55,10 @@ The tab shows each printer's Spool Stock match, and while printing, which spool 
 - Camera links and passwords stay in `cameras.json` in the same folder.
 - The log, `spoolstock.log`, never contains access codes, camera passwords or the sign-in.
 
+## Printers switched off
+
+If a printer is off, the tab says it may be switched off and the plugin keeps trying quietly in the background, up to once a minute. When you switch it back on it connects by itself. There's no need to press **Connect**. Orca is never held up waiting for a printer or camera that's off.
+
 ## If Orca blocks the connection
 
 Orca asks permission before a plugin connects to anything. If you said No, press **Connect** on a printer in the tab and choose **Yes**. If Orca only allows the connection to Spool Stock from the tab itself, the plugin notices and sends from there instead. Keep Orca open, as it does now when printing.

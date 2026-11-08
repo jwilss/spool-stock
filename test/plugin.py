@@ -590,6 +590,45 @@ ok(oct(os.stat(camfile).st_mode)[-3:] in ("600", "666"), "camera links are kept 
 r = subprocess.run(["node", str(Path(__file__).resolve().parent / "plugin-tab.js"), str(tmp / "tab.html"), str(tmp / "tab-state.json")] + ([str(tmp / "cam-replies.json")] if (tmp / "cam-replies.json").exists() else [""]) + ([os.environ["TAB_SHOTS"]] if os.environ.get("TAB_SHOTS") else []), capture_output=True, text=True)
 print(r.stdout.strip()); ok(r.returncode == 0, "the tab's Stock and Presets views work in a browser" + (": " + r.stderr[-300:] if r.returncode else ""))
 
+# ---- printers switched off for the night ----
+def blackhole(ip, port):
+    """A port that never answers, like a printer that's switched off: a full queue, so new connections hang."""
+    l = socket.socket(); l.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); l.bind((ip, port)); l.listen(0)
+    fill = []
+    for _ in range(8):
+        c = socket.socket(); c.setblocking(False)
+        try: c.connect((ip, port))
+        except BlockingIOError: pass
+        fill.append(c)
+    return l, fill
+holes = [blackhole("127.0.0.4", plug.MQTT_PORT), blackhole("127.0.0.4", plug.FTP_PORT)]
+pr_ = socket.socket(); pr_.settimeout(1.5)
+try: pr_.connect(("127.0.0.4", plug.MQTT_PORT)); hangs = False
+except socket.timeout: hangs = True
+except OSError: hangs = False
+pr_.close()
+plug.disconnect_all(); plug._allowed.clear()
+items = plug.load_printers() + [{"name": "Off", "ip": "127.0.0.4", "serial": "", "code": "SECRET99"}, {"name": "Night", "ip": "127.0.0.3", "serial": "", "code": "SECRET99"}]
+plug.save_printers(items)
+t0 = time.time(); plug.handle({"type": "ready"}); took = time.time() - t0
+ok(took < 0.5, f"opening the tab with printers switched off doesn't hold Orca up: {took:.2f} s (the test address {'hangs like a switched off printer' if hangs else 'refuses'})")
+t0 = time.time(); plug.handle({"type": "connect"}); took = time.time() - t0
+ok(took < 0.5 and "Off" in plug._links and "Night" in plug._links, f"nor does Connect ({took:.2f} s), and both keep trying in the background")
+row = lambda n: next(p for p in plug.handle({"type": "poll"})["printers"] if p["name"] == n)
+ok(wait(lambda: "switched off" in row("Night")["state"], 10) and wait(lambda: "switched off" in row("Off")["state"], 12), "a printer that's off says so: " + row("Off")["state"])
+night = socket.socket(); night.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); night.bind(("127.0.0.3", plug.MQTT_PORT)); night.listen(5)
+threading.Thread(target=lambda: mqtt_conn(night.accept()[0]), daemon=True).start()
+ok(wait(lambda: row("Night")["state"] == "connected", 25), "connects by itself when the printer is switched back on, with no Connect press")
+logtext = (tmp / "OrcaSlicer" / "spoolstock" / "spoolstock.log").read_text(encoding="utf-8")
+errs = [l for l in logtext.splitlines() if '"printer.error"' in l and '"Off"' in l]
+ok(1 <= len(errs) <= 2 and '"printer.back"' in logtext, f"a night switched off doesn't fill the log ({len(errs)} lines for the printer that stayed off)")
+off = plug._links["Off"]
+t0 = time.time(); plug.disconnect_all(); off.thread.join(3)
+ok(not off.thread.is_alive(), f"closing Orca stops a connection that's still waiting, in {time.time() - t0:.1f} s")
+for l, fill in holes:
+    for c in fill: c.close()
+    l.close()
+
 # ---- privacy ----
 logtext = (tmp / "OrcaSlicer" / "spoolstock" / "spoolstock.log").read_text(encoding="utf-8")
 ok("SECRET99" not in logtext and REFRESH not in logtext and "APIKEY" not in logtext and "IDTOKEN1" not in logtext and "pa@ss/1" not in logtext and "nope@" not in logtext,
