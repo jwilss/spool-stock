@@ -27,6 +27,8 @@ The presets live in Orca's own folder as a local preset bundle, `user\<your pres
 2. In **Cameras**, give the camera a name, paste its link and pick the printer it watches. The link is `rtsp://username:password@CAMERA-IP/stream2`. A space, `@` or `/` in the username or password is fine as it is.
 3. Press **Add**. The picture appears in a few seconds, with the printer's current print under it.
 
+**Add a camera** is folded away once you have a camera; click it to open. The pictures size themselves to fill the tab without scrolling: side by side when the tab is wide, one above the other when it's tall and narrow, at each camera's own shape.
+
 `stream2` is the lighter stream and plenty for watching prints. `stream1` is full quality. Cameras only stream while the Cameras view is open, and let go about 10 seconds after you leave it. Only H.264 video can be shown. The links, with their passwords, stay in `cameras.json` on this PC and never go to Spool Stock or the log.
 
 ## Low spool warnings
