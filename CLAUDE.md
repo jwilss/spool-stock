@@ -38,6 +38,7 @@ Pushing to `main` publishes the site through `.github/workflows/site.yml` (only 
   - Alduin is fed from the external spool, which sits in space 1 of his Space Pi dryer.
   - Serials, IPs and access codes aren't kept in this public repo. They're in Spool Stock (Setup > Printers) and the plugin's tab.
 - The Orca plugin has full access in Orca, so its background threads can reach the network.
+- Jack only buys 1 kg spools. Every spool's `netG` is 1000, and the app forces it, so don't add other spool sizes back.
 - Both printers are switched off every night. Nothing on Orca's main thread may wait on a printer or camera: 1.3.0's permission check waited 4 s per port and froze Orca for 16 s with both off.
 - Plugin data on his PC: `%APPDATA%\OrcaSlicer\spoolstock\` (`spoolstock.log`, `jobs.json`, `printers.json`, `account.json`).
 
