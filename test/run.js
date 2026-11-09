@@ -74,6 +74,16 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
  const [dl]=await Promise.all([p.waitForEvent('download'),p.click('[data-act=pdf]')]);await dl.saveAs(out+'/stickers.pdf');
  ok(dl.suggestedFilename()==='spool-stickers.pdf','PDF downloads');await p.waitForTimeout(200);
  db=await dbOf(p);ok(db[uid+'spools/s0001'].labelled===true,'printed stickers leave the queue');
+ // the 99.1 x 38.1 mm sheet, 14 per sheet: every sticker lands in its own label, and its QR code scans
+ {const before=await p.evaluate(()=>({...(S.settings.sheet||{})}));
+  await p.evaluate(()=>{for(const id of Object.keys(S.spools).slice(0,5)) col('spools').doc(id).update({labelled:false});location.hash='stock'});await p.waitForTimeout(150);
+  await p.evaluate(()=>{location.hash='stickers'});await p.waitForSelector('#sheetSel');await p.selectOption('#sheetSel','l7163');await p.waitForSelector('.sheetmap');
+  ok(await p.$$eval('.sheetmap > *',e=>e.length)===14,'the 14 per sheet size shows 14 places to start from');
+  const [d14]=await Promise.all([p.waitForEvent('download'),p.click('[data-act=pdf]')]);await d14.saveAs(out+'/stickers-14.pdf');
+  const r=JSON.parse(require('child_process').execSync(`python3 -I ${__dirname}/sheet_check.py ${out}/stickers-14.pdf 99.1 38.1 2 7 4.65 15.15 101.6 38.1`).toString());
+  ok(r.codes>=5&&r.codes===r.inside&&r.pages===1,`99.1 x 38.1 mm sheet: ${r.codes} QR codes scan, each inside its own label (${r.inside} inside), on one A4 page`);
+  ok(r.inkOutside===0,'nothing is printed in the gaps between labels: '+r.inkOutside+' stray marks');
+  await p.evaluate(b=>{saveConfig({sheet:b})},before);await p.waitForTimeout(100);}
 
  // live camera: feed shows s0002, then a storage sticker
  await p.evaluate(()=>{location.hash='scan'});await p.waitForSelector('#camStart');
