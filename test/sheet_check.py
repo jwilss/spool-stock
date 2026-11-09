@@ -15,8 +15,10 @@ ok, vals, pts, _ = cv2.QRCodeDetector().detectAndDecodeMulti(im)
 codes = [(v, p.mean(0) / k) for v, p in zip(vals, pts)] if ok else []
 codes = [c for c in codes if c[0]]
 inside = sum(1 for _, (x, y) in codes if any(lx <= x <= lx + w and ly <= y <= ly + h for lx, ly in labels))
+right = sum(1 for _, (x, y) in codes if any(lx + w * .6 <= x <= lx + w and ly <= y <= ly + h for lx, ly in labels))
+size = round(min((float(np.ptp(p[:, 0])) / k for p in pts), default=0), 1) if ok else 0
 ink = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) < 200
 mask = np.ones_like(ink)
 for lx, ly in labels:
     mask[int((ly + 0.3) * k):int((ly + h - 0.3) * k), int((lx + 0.3) * k):int((lx + w - 0.3) * k)] = 0
-print(json.dumps({"pages": len(pages), "codes": len(codes), "inside": inside, "inkOutside": int((ink & mask.astype(bool)).sum() > 50)}))
+print(json.dumps({"pages": len(pages), "codes": len(codes), "inside": inside, "right": right, "size": size, "inkOutside": int((ink & mask.astype(bool)).sum() > 50)}))

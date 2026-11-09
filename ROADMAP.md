@@ -44,6 +44,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - Logos are found once and stored per manufacturer in your account: Simple Icons for exact vector matches, Wikimedia Commons as choices, or your own upload. All are turned solid black on transparent. No API keys.
 - Spool rings are sized like a real 1 kg roll: the filament left is the area between the core and the outside, so a ring shrinks slowly at first and quickly near the core. Anything over 1 kg draws as full.
 - Stickers are black except for the colour box: solid, triangles for split colours, or a left to right blend for gradients.
+- Wide labels use `wideSpoolOps` and `wideLocOps`. Density comes from the catalogue line, the empty spool weight from the spool, then its brand, then the catalogue. The PDF's built-in font has no ³, so it's drawn as a small raised 3. `test/sheet_check.py` checks a printed sheet: each QR code scans inside its own label, nothing lands in the gaps, and where the codes sit and how big they are.
 - The Firebase key isn't in the repo or its history. Browsers still need it, so it can be read in `config.js` on the live site. The key is restricted to Firebase services, sign-ups are off, and `firestore.rules` protects the data.
 
 ## Done
@@ -62,6 +63,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Stock view in the Orca plugin's tab: spool cards with colour, weight bar and storage, with search, low only, and grouping by storage, material or brand
 - [x] Live preset sync: the plugin keeps a Spool Stock group in Orca's filament list from the app's list of owned filaments, reloaded while Orca is open
 - [x] Cameras in the Orca plugin's tab: Tapo and other RTSP cameras, relayed by the plugin itself, each linked to a printer
+- [x] Wide stickers (99.1 x 38.1 mm, 14 per sheet, or any label at least 2.2 times as wide as it's tall): the QR code the full height of the label on the far right, the spool code top right of the text, the finish beside the colour, and diameter, density and empty spool weight beside the print settings. Smaller labels keep their layout.
 - [x] Cameras fill the tab (1.3.2): the tiles pick the column count that gives the biggest picture without scrolling, and Add a camera folds away
 - [x] Every spool is 1 kg: the form asks for filament left out of 1000 g, and existing spools with another full weight were set to 1000 g
 - [x] Printers switched off overnight no longer freeze Orca (1.3.1): the permission check never waits, and the plugin keeps trying in the background and reconnects by itself

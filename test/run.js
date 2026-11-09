@@ -83,6 +83,13 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
   const r=JSON.parse(require('child_process').execSync(`python3 -I ${__dirname}/sheet_check.py ${out}/stickers-14.pdf 99.1 38.1 2 7 4.65 15.15 101.6 38.1`).toString());
   ok(r.codes>=5&&r.codes===r.inside&&r.pages===1,`99.1 x 38.1 mm sheet: ${r.codes} QR codes scan, each inside its own label (${r.inside} inside), on one A4 page`);
   ok(r.inkOutside===0,'nothing is printed in the gaps between labels: '+r.inkOutside+' stray marks');
+  ok(r.right===r.codes&&r.size>=31,`on the wide labels each QR code is on the far right and the full height of the label: ${r.size} mm`);
+  const svg=await p.evaluate(()=>{const s=Object.values(S.spools).find(x=>x.brand==='eSUN')||Object.values(S.spools)[0];return opsToSVG(spoolOps(s,99.1,38.1),99.1,38.1)});
+  ok(/Diameter/.test(svg)&&/1\.75 mm/.test(svg)&&/Nozzle/.test(svg),'the wide stickers add more about the filament, such as its diameter');
+  const sizes=await p.evaluate(()=>{const out=new Set();for(const s of Object.values(S.spools)) for(const o of spoolOps(s,99.1,38.1)) if(o.t==='text'&&o.pt<8&&o.text!=='3') out.add(o.pt);return [...out]});
+  ok(sizes.length===1&&sizes[0]===7.5,'every detail line on the wide stickers prints at full size: '+sizes.join(', '));
+  const narrow=await p.evaluate(()=>{const s=Object.values(S.spools)[0];return spoolOps(s,63.5,38.1).find(o=>o.t==='qr')});
+  ok(narrow.x<5&&narrow.s<27,'the smaller stickers keep their layout, with the code on the left');
   await p.evaluate(b=>{saveConfig({sheet:b})},before);await p.waitForTimeout(100);}
 
  // live camera: feed shows s0002, then a storage sticker
