@@ -623,6 +623,9 @@ function curSheet(){
 }
 function buildPDF(items,start,opts){
   const sh=curSheet(), doc=new jspdf.jsPDF({unit:"mm",format:"a4",compress:true});
+  // Ask the print dialog to start at actual size: "Fit to page" shrinks the sheet (about 96% on an A4 printer) and pulls
+  // the stickers towards the middle, so the top row prints low and the bottom row high.
+  try{ doc.viewerPreferences({PrintScaling:"None"}); }catch(e){}
   const per=sh.cols*sh.rows; let i=start%per, page=0;
   for(const it of items){
     const c=i%sh.cols, r=Math.floor(i/sh.cols);
@@ -1222,8 +1225,8 @@ function vStickers(){
         <label class="field"><span>Nudge down (mm)</span><input type="number" step="0.1" id="nudgeY" value="${esc(st.ny??0)}"></label>
       </div>
       <label class="check"><input type="checkbox" id="outline" ${Q.outline?"checked":""}><span>Print sticker outlines, for a test on plain paper</span></label>
-      ${IS_APP?`<p>Print stickers from your PC or a browser. The Android app can't save PDFs.</p>`:`<button class="btn go" data-act="pdf" ${chosen.length?"":"disabled"}>Download PDF (${chosen.length})</button>
-      <p>Print at 100% or Actual size. Fit to page will throw the stickers out of line.</p>`}
+      ${IS_APP?`<p>Print stickers from your PC or a browser. The Android app can't save PDFs.</p>`:`<div class="note warn"><b>Print at Actual size (100%).</b> In the print dialog, set Scale or Page sizing to Actual size, not Fit or Shrink. Fit to page prints the sheet about 4% smaller, so the top row lands low and the bottom row high.</div>
+      <button class="btn go" data-act="pdf" ${chosen.length?"":"disabled"}>Download PDF (${chosen.length})</button>`}
     </div>
   </div>`;
 }

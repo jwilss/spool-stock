@@ -83,6 +83,8 @@ const dbOf=p=>p.evaluate(()=>JSON.parse(localStorage.getItem('__fb')));
   const r=JSON.parse(require('child_process').execSync(`python3 -I ${__dirname}/sheet_check.py ${out}/stickers-14.pdf 99.1 38.1 2 7 4.65 15.15 101.6 38.1`).toString());
   ok(r.codes>=5&&r.codes===r.inside&&r.pages===1,`99.1 x 38.1 mm sheet: ${r.codes} QR codes scan, each inside its own label (${r.inside} inside), on one A4 page`);
   ok(r.inkOutside===0,'nothing is printed in the gaps between labels: '+r.inkOutside+' stray marks');
+  const raw=fs.readFileSync(out+'/stickers-14.pdf','latin1');
+  ok(/\/PrintScaling\s*\/None/.test(raw)&&/Actual size/.test(await p.textContent('#main')),'the PDF asks the print dialog for actual size, and the page says to print at Actual size');
   ok(r.right===r.codes&&r.size>=31,`on the wide labels each QR code is on the far right and the full height of the label: ${r.size} mm`);
   const svg=await p.evaluate(()=>{const s=Object.values(S.spools).find(x=>x.brand==='eSUN')||Object.values(S.spools)[0];return opsToSVG(spoolOps(s,99.1,38.1),99.1,38.1)});
   ok(/Diameter/.test(svg)&&/1\.75 mm/.test(svg)&&/Nozzle/.test(svg),'the wide stickers add more about the filament, such as its diameter');

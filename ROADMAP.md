@@ -100,7 +100,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [ ] Log a print with a real Orca export from Alduin and Betsy
 - [ ] Import the Orca presets zip into Orca, and Send to Orca from the rebuilt Windows app, including the filament list
 - [ ] Camera inside the APK
-- [ ] Sticker alignment on a test sheet
+- [ ] Sticker alignment on a test sheet printed at Actual size. A 99.1 x 38.1 mm sheet printed with Fit to page (Nov 2026) came out at 96.5%, centred on the printable area (about 4.2 mm in from each edge), so the top row was 4 mm low and the bottom 4 mm high. The labels themselves match the layout: 2.5 mm between columns, none between rows. PDFs now ask the print dialog for actual size (`PrintScaling /None`).
 - [ ] Stickers scanning once stuck to a spool
 - [ ] Real label photos in Spool Reader
 - [ ] Logo lookup against the real services
