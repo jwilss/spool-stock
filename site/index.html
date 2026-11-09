@@ -491,7 +491,52 @@ function swatchOps(sp,x,y,sz){
   ops.push({t:"rect",x,y,w:sz,h:sz,stroke:"#000000"});
   return ops;
 }
+/* Wide labels (such as 99.1 x 38.1 mm) get their own layout: the QR code the full height of the label on the far
+   right, and the spare width used for more about the filament. Smaller labels keep the layout below. */
+const isWide = (W,H) => W>=H*2.2;
+function wideSpoolOps(sp,W,H){
+  const m=2.2, ops=[], qs=H-2*m, qx=W-m-qs;
+  ops.push({t:"qr",x:qx,y:m,s:qs,text:qrUrl(sp.id)});
+  const x=m, cw=qx-3.2-x, id=sp.id.toUpperCase(), idW=tw(id,11,"mono",1);
+  ops.push({t:"text",x:x+cw,y:m+3.7,text:id,pt:11,font:"mono",bold:1,align:"right"});
+  const logoH=Math.min(8.2,H*.22), brand=S.brands[slug(sp.brand)], room=cw-idW-3;
+  const lf=logoFit(brand,room,logoH);
+  if(lf) ops.push({t:"img",x,y:m,w:lf.w,h:lf.h,src:lf.src,key:lf.key});
+  else { const f=fit(safe(sp.brand)||"Unknown",room,12,7,"sans",1); ops.push({t:"text",x,y:m+Math.min(logoH-1.2,3.6),text:f.text,pt:f.pt,font:"sans",bold:1}); }
+  let y=m+(lf?lf.h:Math.min(logoH-1.2,4.4))+1.2;
+  const mat=fit(safe(sp.material)||"Filament",cw,18,9,"sans",1);
+  y+=mat.pt*.3528*.76; ops.push({t:"text",x,y,text:mat.text,pt:mat.pt,font:"sans",bold:1}); y+=1.5;
+  const sw=5; ops.push(...swatchOps(sp,x,y,sw));
+  const named=`${sp.colour||""} ${sp.material||""}`.toLowerCase(), fin=sp.finish&&!named.includes(String(sp.finish).toLowerCase())?sp.finish:"";
+  const cn=fit(safe([sp.colour,fin].filter(Boolean).join(", ")),cw-sw-1.3,9,6.5,"sans",0);
+  ops.push({t:"text",x:x+sw+1.3,y:y+3.55,text:cn.text,pt:cn.pt,font:"sans"});
+  y+=sw+1;
+  const deg=v=>v?v+" °C":"-";
+  const left=[["Nozzle",deg(range(sp.nMin,sp.nMax))],["Bed",deg(range(sp.bMin,sp.bMax))],["Dry",sp.dT?(sp.dT+" °C"+(sp.dH?"  "+sp.dH+" h":"")):"-"]];
+  const line=catLine(sp.brand,sp.material), empty=sp.tareG||brand?.tareG||line?.s;
+  const right=[["Diameter",(sp.dia||1.75)+" mm"],...(line?.d?[["Density",line.d+" g/cm",1]]:[]),...(empty?[["Empty spool",Math.round(empty)+" g"]]:[])];
+  const free=H-m-y, step=Math.min(free/3,3.5), pt=7.5;
+  const lv=Math.max(...left.map(r=>tw(r[0],pt,"sans",1)))+1.4, x2=x+Math.min(cw*.5,lv+Math.max(...left.map(r=>tw(r[1],pt,"sans",0)))+2.6);
+  const lw=Math.max(...right.map(r=>tw(r[0],pt,"sans",1)))+1.2;
+  left.forEach((r,i)=>{ const yy=y+step*(i+.8); ops.push({t:"text",x,y:yy,text:r[0],pt,font:"sans",bold:1},{t:"text",x:x+lv,y:yy,text:r[1],pt,font:"sans"}); });
+  right.forEach((r,i)=>{
+    const yy=y+step*(i+.8), sup=r[2]?tw("3",pt*.7,"sans",0)+.2:0, v=fit(safe(r[1]),x+cw-(x2+lw)-sup,pt,6,"sans",0);
+    ops.push({t:"text",x:x2,y:yy,text:r[0],pt,font:"sans",bold:1},{t:"text",x:x2+lw,y:yy,text:v.text,pt:v.pt,font:"sans"});
+    if(r[2]) ops.push({t:"text",x:x2+lw+tw(v.text,v.pt,"sans",0)+.1,y:yy-v.pt*.3528*.38,text:"3",pt:v.pt*.7,font:"sans"});   // cubed, drawn raised as the PDF font has no ³
+  });
+  return ops;
+}
+function wideLocOps(l,W,H){
+  const m=2.2, ops=[], qs=H-2*m, qx=W-m-qs;
+  ops.push({t:"qr",x:qx,y:m,s:qs,text:qrUrl("loc-"+l.id)});
+  const x=m+1, cw=qx-3.2-x, g=!!l.group;
+  const a=fit(safe(l.name),cw,24,10,"sans",1);
+  ops.push({t:"text",x,y:H/2-(g?1:-3),text:a.text,pt:a.pt,font:"sans",bold:1});
+  if(g){ const b=fit(safe(l.group),cw,16,9,"sans",0); ops.push({t:"text",x,y:H/2+7,text:b.text,pt:b.pt,font:"sans"}); }
+  return ops;
+}
 function spoolOps(sp,W,H){
+  if(isWide(W,H)) return wideSpoolOps(sp,W,H);
   const m=2.2, ops=[], idH=3.8;
   const qs=Math.min(H-2*m-idH,W*.42);
   ops.push({t:"qr",x:m,y:m,s:qs,text:qrUrl(sp.id)});
@@ -520,6 +565,7 @@ function spoolOps(sp,W,H){
   return ops;
 }
 function locOps(l,W,H){
+  if(isWide(W,H)) return wideLocOps(l,W,H);
   const m=2.2, ops=[], qs=Math.min(H-2*m,W*.42);
   ops.push({t:"qr",x:m,y:m,s:qs,text:qrUrl("loc-"+l.id)});
   const x=m+qs+2.5, cw=W-x-m;
@@ -539,7 +585,7 @@ function opsToSVG(ops,W,H){
     if(p.t==="img") o+=`<image x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" href="${esc(p.src)}" preserveAspectRatio="xMinYMin meet"/>`;
     if(p.t==="text"){
       const fam=p.font==="mono"?"Courier New,Courier,monospace":"Helvetica,Arial,sans-serif";
-      o+=`<text x="${p.x}" y="${p.y}" font-family="${fam}" font-size="${(p.pt*.3528).toFixed(3)}" font-weight="${p.bold?700:400}" text-anchor="${p.align==="center"?"middle":"start"}" fill="#000">${esc(p.text)}</text>`;
+      o+=`<text x="${p.x}" y="${p.y}" font-family="${fam}" font-size="${(p.pt*.3528).toFixed(3)}" font-weight="${p.bold?700:400}" text-anchor="${p.align==="center"?"middle":p.align==="right"?"end":"start"}" fill="#000">${esc(p.text)}</text>`;
     }
     if(p.t==="qr"){
       const mx=qrMatrix(p.text), n=mx.length, u=p.s/n; let d="";
@@ -562,7 +608,7 @@ function opsToPDF(doc,ops,ox,oy){
     if(p.t==="img"){ try{ doc.addImage(p.src,imgFormat(p.src),x,y,p.w,p.h,p.key,"FAST"); }catch(e){} }
     if(p.t==="text"){
       doc.setFont(p.font==="mono"?"courier":"helvetica",p.bold?"bold":"normal"); doc.setFontSize(p.pt); doc.setTextColor(0,0,0);
-      doc.text(p.text,x,y,{align:p.align==="center"?"center":"left"});
+      doc.text(p.text,x,y,{align:p.align==="center"?"center":p.align==="right"?"right":"left"});
     }
     if(p.t==="qr"){
       const mx=qrMatrix(p.text), n=mx.length, u=p.s/n; doc.setFillColor(0,0,0);
