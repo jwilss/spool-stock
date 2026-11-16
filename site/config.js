@@ -11,6 +11,6 @@ window.SPOOL_CONFIG = {
     projectId: "spool-stock",
     storageBucket: "spool-stock.firebasestorage.app",
     messagingSenderId: "480785711312",
-    appId: "1:480785711312:web:955a29cf39e02e08d45ed5"
-  }
+    appId: "1:480785711312:web:955a29cf39e02e08d45ed5",
+  },
 };

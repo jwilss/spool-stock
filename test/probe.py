@@ -3,19 +3,36 @@ import importlib.util, json, os, socket, ssl, struct, subprocess, sys, tempfile,
 from pathlib import Path
 
 ok_all = True
+
+
 def ok(c, m):
     global ok_all
     print(("PASS " if c else "FAIL ") + m)
     ok_all &= bool(c)
 
+
 tmp = Path(tempfile.mkdtemp())
 os.environ["APPDATA"] = str(tmp)
 (tmp / "OrcaSlicer").mkdir()
-(tmp / "OrcaSlicer" / "OrcaSlicer.conf").write_text(json.dumps({"app": {"preset_folder": "default", "user_access_code": "x"}, "access_code": {"01P00C512345678": "SECRET99"}, "filaments": {}}) + "\n# MD5 checksum X\n")
+(tmp / "OrcaSlicer" / "OrcaSlicer.conf").write_text(
+    json.dumps(
+        {
+            "app": {"preset_folder": "default", "user_access_code": "x"},
+            "access_code": {"01P00C512345678": "SECRET99"},
+            "filaments": {},
+        }
+    )
+    + "\n# MD5 checksum X\n"
+)
 
 # stand-in orca module
 orca = types.ModuleType("orca")
-class Base: pass
+
+
+class Base:
+    pass
+
+
 registered = []
 orca.base = Base
 orca.plugin = lambda cls: (cls().register_capabilities(), cls)[1]
@@ -23,77 +40,186 @@ orca.register_capability = registered.append
 orca.request_permissions = lambda **k: None
 orca.PluginType = types.SimpleNamespace(Pages="Pages")
 orca.ExecutionResult = types.SimpleNamespace(success=lambda *a: "ok")
+
+
 class PagesBase:
-    def __init__(self): self.sent = []
-    def post_message(self, m): self.sent.append(m)
-class SlicingBase: pass
+    def __init__(self):
+        self.sent = []
+
+    def post_message(self, m):
+        self.sent.append(m)
+
+
+class SlicingBase:
+    pass
+
+
 orca.pages = types.SimpleNamespace(PagesPluginCapabilityBase=PagesBase)
 orca.slicing = types.SimpleNamespace(SlicingPipelineCapabilityBase=SlicingBase)
+
+
 class Preset:
-    def __init__(self, name, cfg): self.name, self.cfg = name, cfg
-    def config_value(self, k): return self.cfg.get(k, "")
-bundle = types.SimpleNamespace(current_printer_preset=lambda: Preset("Bambu Lab P1S 0.4 nozzle", {"printer_model": "Bambu Lab P1S", "print_host": "127.0.0.1"}),
-                               printers=[Preset("Bambu Lab P1S 0.4 nozzle", {"print_host": "127.0.0.1"})],
-                               current_filament_preset_names=lambda: ["Bambu PLA Matte @BBL X1C"])
-orca.host = types.SimpleNamespace(app_info=lambda: {"version": "2.5.0"}, preset_bundle=lambda: bundle, ui=types.SimpleNamespace())
+    def __init__(self, name, cfg):
+        self.name, self.cfg = name, cfg
+
+    def config_value(self, k):
+        return self.cfg.get(k, "")
+
+
+bundle = types.SimpleNamespace(
+    current_printer_preset=lambda: Preset(
+        "Bambu Lab P1S 0.4 nozzle", {"printer_model": "Bambu Lab P1S", "print_host": "127.0.0.1"}
+    ),
+    printers=[Preset("Bambu Lab P1S 0.4 nozzle", {"print_host": "127.0.0.1"})],
+    current_filament_preset_names=lambda: ["Bambu PLA Matte @BBL X1C"],
+)
+orca.host = types.SimpleNamespace(
+    app_info=lambda: {"version": "2.5.0"}, preset_bundle=lambda: bundle, ui=types.SimpleNamespace()
+)
 sys.modules["orca"] = orca
 
 # fake printer: MQTT over TLS
 cert, key = tmp / "c.pem", tmp / "k.pem"
-subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(cert), "-days", "1", "-subj", "/CN=01P00C512345678"], check=True, capture_output=True)
-srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); srv.bind(("127.0.0.1", 0)); srv.listen(1)
+subprocess.run(
+    [
+        "openssl",
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        str(key),
+        "-out",
+        str(cert),
+        "-days",
+        "1",
+        "-subj",
+        "/CN=01P00C512345678",
+    ],
+    check=True,
+    capture_output=True,
+)
+srv = socket.socket()
+srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("127.0.0.1", 0))
+srv.listen(1)
 port = srv.getsockname()[1]
-sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); sctx.load_cert_chain(cert, key)
+sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+sctx.load_cert_chain(cert, key)
 seen = {}
-def mstr(s): b = s.encode(); return struct.pack("!H", len(b)) + b
+
+
+def mstr(s):
+    b = s.encode()
+    return struct.pack("!H", len(b)) + b
+
+
 def mlen(n):
     out = bytearray()
     while True:
-        d, n = n % 128, n // 128; out.append(d | (128 if n else 0))
-        if not n: return bytes(out)
+        d, n = n % 128, n // 128
+        out.append(d | (128 if n else 0))
+        if not n:
+            return bytes(out)
+
+
 def publish(conn, topic, doc):
-    body = mstr(topic) + json.dumps(doc).encode(); conn.sendall(bytes([0x30]) + mlen(len(body)) + body)
+    body = mstr(topic) + json.dumps(doc).encode()
+    conn.sendall(bytes([0x30]) + mlen(len(body)) + body)
+
+
 def read(conn):
     first = conn.recv(1)
-    if not first: return None
+    if not first:
+        return None
     size, shift = 0, 0
     while True:
-        b = conn.recv(1)[0]; size |= (b & 127) << shift; shift += 7
-        if not b & 128: break
+        b = conn.recv(1)[0]
+        size |= (b & 127) << shift
+        shift += 7
+        if not b & 128:
+            break
     body = b""
-    while len(body) < size: body += conn.recv(size - len(body))
+    while len(body) < size:
+        body += conn.recv(size - len(body))
     return first[0], body
-status = {"print": {"command": "push_status", "gcode_state": "RUNNING", "mc_percent": 12, "layer_num": 5, "total_layer_num": 80,
-          "subtask_name": "Bracket", "gcode_file": "/cache/Bracket.gcode.3mf", "task_id": "77",
-          "ams": {"tray_now": "2", "ams": [{"id": "0", "tray": [{"id": "0", "tray_type": "PLA", "tray_color": "C8102EFF", "remain": 80, "tag_uid": "0000000000000000"},
-                                                                {"id": "2", "tray_type": "PETG", "tray_color": "F4F4F2FF", "remain": -1}]}]},
-          "vt_tray": {"tray_type": "PLA", "tray_color": "00843DFF"}, "ams_mapping": [0, 2]}}
+
+
+status = {
+    "print": {
+        "command": "push_status",
+        "gcode_state": "RUNNING",
+        "mc_percent": 12,
+        "layer_num": 5,
+        "total_layer_num": 80,
+        "subtask_name": "Bracket",
+        "gcode_file": "/cache/Bracket.gcode.3mf",
+        "task_id": "77",
+        "ams": {
+            "tray_now": "2",
+            "ams": [
+                {
+                    "id": "0",
+                    "tray": [
+                        {
+                            "id": "0",
+                            "tray_type": "PLA",
+                            "tray_color": "C8102EFF",
+                            "remain": 80,
+                            "tag_uid": "0000000000000000",
+                        },
+                        {"id": "2", "tray_type": "PETG", "tray_color": "F4F4F2FF", "remain": -1},
+                    ],
+                }
+            ],
+        },
+        "vt_tray": {"tray_type": "PLA", "tray_color": "00843DFF"},
+        "ams_mapping": [0, 2],
+    }
+}
+
+
 def broker():
     srv.accept()[0].close()  # the main-thread reachability check
     raw, _ = srv.accept()
     conn = sctx.wrap_socket(raw, server_side=True)
     t, body = read(conn)
-    i = 10 + struct.unpack("!H", body[10:12])[0] + 2   # after protocol + flags + keepalive + client id
-    user_len = struct.unpack("!H", body[i:i+2])[0]; user = body[i+2:i+2+user_len].decode(); i += 2 + user_len
-    pw = body[i+2:i+2+struct.unpack("!H", body[i:i+2])[0]].decode()
+    i = 10 + struct.unpack("!H", body[10:12])[0] + 2  # after protocol + flags + keepalive + client id
+    user_len = struct.unpack("!H", body[i : i + 2])[0]
+    user = body[i + 2 : i + 2 + user_len].decode()
+    i += 2 + user_len
+    pw = body[i + 2 : i + 2 + struct.unpack("!H", body[i : i + 2])[0]].decode()
     seen["login"] = (user, pw)
     conn.sendall(b"\x20\x02\x00\x00")
-    t, body = read(conn); seen["subscribe"] = body[4:4+struct.unpack("!H", body[2:4])[0]].decode()
+    t, body = read(conn)
+    seen["subscribe"] = body[4 : 4 + struct.unpack("!H", body[2:4])[0]].decode()
     publish(conn, "device/01P00C512345678/report", status)
     conn.settimeout(10)
     try:
         while True:
             pk = read(conn)
-            if pk is None: break
+            if pk is None:
+                break
             if pk[0] >> 4 == 3:
-                n = struct.unpack("!H", pk[1][:2])[0]; seen["request"] = (pk[1][2:2+n].decode(), pk[1][2+n:].decode())
-                publish(conn, "device/01P00C512345678/report", {"print": {"command": "push_status", "gcode_state": "FINISH", "mc_percent": 100}})
+                n = struct.unpack("!H", pk[1][:2])[0]
+                seen["request"] = (pk[1][2 : 2 + n].decode(), pk[1][2 + n :].decode())
+                publish(
+                    conn,
+                    "device/01P00C512345678/report",
+                    {"print": {"command": "push_status", "gcode_state": "FINISH", "mc_percent": 100}},
+                )
     except Exception:
         pass
+
+
 threading.Thread(target=broker, daemon=True).start()
 
-spec = importlib.util.spec_from_file_location("probe", Path(__file__).resolve().parent.parent / "orca-plugin" / "probe" / "spoolstock_probe.py")
-probe = importlib.util.module_from_spec(spec); spec.loader.exec_module(probe)
+spec = importlib.util.spec_from_file_location(
+    "probe", Path(__file__).resolve().parent.parent / "orca-plugin" / "probe" / "spoolstock_probe.py"
+)
+probe = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(probe)
 probe.MQTT_PORT = port
 
 ok(len(registered) == 2, "registers a tab and a slicing step")
@@ -107,97 +233,196 @@ page.on_message({"type": "add", "name": "Alpha", "ip": "127.0.0.1", "serial": ""
 ok("127.0.0.1" in probe._allowed, "printer reached once from the main thread before the link starts")
 for _ in range(50):
     time.sleep(0.2)
-    if "request" in seen and probe._links.get("Alpha") and probe._links["Alpha"].last_sum.get("state") == "FINISH": break
+    if "request" in seen and probe._links.get("Alpha") and probe._links["Alpha"].last_sum.get("state") == "FINISH":
+        break
 ok(seen.get("login") == ("bblp", "SECRET99"), "logs in as bblp with the access code")
-ok(seen.get("subscribe") == "device/01P00C512345678/report", "reads the serial from the printer's certificate and subscribes to that printer only")
-ok(seen.get("request", ("", ""))[0] == "device/01P00C512345678/request" and "pushall" in seen["request"][1], "asks for full status")
+ok(
+    seen.get("subscribe") == "device/01P00C512345678/report",
+    "reads the serial from the printer's certificate and subscribes to that printer only",
+)
+ok(
+    seen.get("request", ("", ""))[0] == "device/01P00C512345678/request" and "pushall" in seen["request"][1],
+    "asks for full status",
+)
 link = probe._links["Alpha"]
 s = link.last_sum
 time.sleep(0.5)
-ok(len(s["trays"]) == 2 and s["trays"][0]["type"] == "PLA" and s["external"]["type"] == "PLA", "AMS trays and external spool read")
+ok(
+    len(s["trays"]) == 2 and s["trays"][0]["type"] == "PLA" and s["external"]["type"] == "PLA",
+    "AMS trays and external spool read",
+)
 ok(s["mapping_fields"].get("ams_mapping") == [0, 2], "tray mapping field captured")
-page.on_lifecycle_event("LifecycleEvent.PrintJobStarted", types.SimpleNamespace(name="Bracket", device_id="01P00C512345678", code="Info"))
-gc = tmp / "x.gcode"; gc.write_text("G1 X1\n; filament used [g] = 12.50, 3.20\n")
-ctx = types.SimpleNamespace(step="Step.psGCodePostProcess", gcode_path=str(gc), config_value=lambda k: {"filament_settings_id": '"Bambu PLA Matte @BBL X1C";"Landu Rapid PETG (Spool Stock)"', "filament_colour": "#C8102E;#F4F4F2", "filament_type": "PLA;PETG"}.get(k, ""))
+page.on_lifecycle_event(
+    "LifecycleEvent.PrintJobStarted", types.SimpleNamespace(name="Bracket", device_id="01P00C512345678", code="Info")
+)
+gc = tmp / "x.gcode"
+gc.write_text("G1 X1\n; filament used [g] = 12.50, 3.20\n")
+ctx = types.SimpleNamespace(
+    step="Step.psGCodePostProcess",
+    gcode_path=str(gc),
+    config_value=lambda k: {
+        "filament_settings_id": '"Bambu PLA Matte @BBL X1C";"Landu Rapid PETG (Spool Stock)"',
+        "filament_colour": "#C8102E;#F4F4F2",
+        "filament_type": "PLA;PETG",
+    }.get(k, ""),
+)
 ok(registered[1]().execute(ctx) == "ok", "slicing step runs")
 ex = tmp / ".1.0.gcode"
-ex.write_text("; HEADER_BLOCK_START\n; total filament used [g] : 15.7\n; HEADER_BLOCK_END\nG1 X1\n; filament used [g] = 10.10, 5.60\n; CONFIG_BLOCK_START\n; filament_settings_id = \"Generic PETG @BBL P1S\";\"Landu Rapid PETG (Spool Stock)\"\n; filament_colour = #2850E0;#0ACC38\n; filament_type = PETG;PETG\n; CONFIG_BLOCK_END\n")
-page.on_lifecycle_event("LifecycleEvent.GCodeExportFinished", types.SimpleNamespace(name="Multicolor", msg=str(ex), code="Ok"))
+ex.write_text(
+    '; HEADER_BLOCK_START\n; total filament used [g] : 15.7\n; HEADER_BLOCK_END\nG1 X1\n; filament used [g] = 10.10, 5.60\n; CONFIG_BLOCK_START\n; filament_settings_id = "Generic PETG @BBL P1S";"Landu Rapid PETG (Spool Stock)"\n; filament_colour = #2850E0;#0ACC38\n; filament_type = PETG;PETG\n; CONFIG_BLOCK_END\n'
+)
+page.on_lifecycle_event(
+    "LifecycleEvent.GCodeExportFinished", types.SimpleNamespace(name="Multicolor", msg=str(ex), code="Ok")
+)
 page.on_message({"type": "snapshot"})
 time.sleep(0.5)
 logtext = (tmp / "OrcaSlicer" / "spoolstock-probe" / "probe.log").read_text(encoding="utf-8")
 kinds = [json.loads(l)["kind"] for l in logtext.splitlines()]
-for k in ("probe.start", "orca.api", "orca.printer", "orca.conf", "printer.connected", "printer.serial_found", "printer.certificate", "printer.first_report", "printer.change", "printer.full_status", "orca.event", "slice.step", "slice.gcode", "printer.job_file_error"):
+for k in (
+    "probe.start",
+    "orca.api",
+    "orca.printer",
+    "orca.conf",
+    "printer.connected",
+    "printer.serial_found",
+    "printer.certificate",
+    "printer.first_report",
+    "printer.change",
+    "printer.full_status",
+    "orca.event",
+    "slice.step",
+    "slice.gcode",
+    "printer.job_file_error",
+):
     ok(k in kinds, "logs " + k)
 ok("SECRET99" not in logtext, "access code never written to the log")
 sl = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "slice.step"][0]
-ok(sl["grams"] == [12.5, 3.2] and "Landu Rapid PETG" in sl["config"]["filament_settings_id"], "slice grams and presets logged")
+ok(
+    sl["grams"] == [12.5, 3.2] and "Landu Rapid PETG" in sl["config"]["filament_settings_id"],
+    "slice grams and presets logged",
+)
 sg = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "slice.gcode"][0]
-ok(sg["grams"] == [10.1, 5.6] and "Landu Rapid PETG" in sg["config"]["filament_settings_id"] and sg["config"]["filament_type"] == "PETG;PETG", "exported G-code read when Orca says where it is")
+ok(
+    sg["grams"] == [10.1, 5.6]
+    and "Landu Rapid PETG" in sg["config"]["filament_settings_id"]
+    and sg["config"]["filament_type"] == "PETG;PETG",
+    "exported G-code read when Orca says where it is",
+)
 je = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "printer.job_file_error"][0]
-jp = {j["phase"] for j in [json.loads(l) for l in logtext.splitlines()] if j["kind"] == "printer.job_file_error"}; ok(jp == {"running", "end"} and je["stage"] == "connect" and je["attempt"] == 1, "job file looked for once printing is under way and again at the end, with the stage that failed")
+jp = {j["phase"] for j in [json.loads(l) for l in logtext.splitlines()] if j["kind"] == "printer.job_file_error"}
+ok(
+    jp == {"running", "end"} and je["stage"] == "connect" and je["attempt"] == 1,
+    "job file looked for once printing is under way and again at the end, with the stage that failed",
+)
 pi = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "orca.printer"][0]["info"]
 ok(pi.get("filament_presets") == ["Bambu PLA Matte @BBL X1C"], "Orca's chosen filament presets listed")
 conf = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "orca.conf"][0]["hints"]
-ok("access_code" in conf["sections"] and conf["access_code"]["keys"] == ["01P00C512345678"], "Orca's settings sections listed, keys only")
-ok(oct(os.stat(tmp / "OrcaSlicer" / "spoolstock-probe" / "printers.json").st_mode)[-3:] in ("600", "666"), "saved printers file is private")
+ok(
+    "access_code" in conf["sections"] and conf["access_code"]["keys"] == ["01P00C512345678"],
+    "Orca's settings sections listed, keys only",
+)
+ok(
+    oct(os.stat(tmp / "OrcaSlicer" / "spoolstock-probe" / "printers.json").st_mode)[-3:] in ("600", "666"),
+    "saved printers file is private",
+)
 real = probe.socket.create_connection
-def blocked(*a, **k): raise PermissionError("Plugin attempted audited operation without permission")
-probe.socket.create_connection = blocked; probe._allowed.clear()
+
+
+def blocked(*a, **k):
+    raise PermissionError("Plugin attempted audited operation without permission")
+
+
+probe.socket.create_connection = blocked
+probe._allowed.clear()
 note = probe.authorise("10.0.0.9")
 probe.socket.create_connection = real
 ok("Press Connect" in note and "10.0.0.9" not in probe._allowed, "a refused permission says to press Connect")
 # fake printer file server: implicit FTPS, TLS before the welcome line, like a Bambu printer on port 990
 import io, zipfile
+
 zb = io.BytesIO()
 with zipfile.ZipFile(zb, "w") as z:
-    z.writestr("Metadata/slice_info.config", '<config><plate><metadata key="index" value="1"/><filament id="1" type="PETG" color="#2850E0" used_m="3.30" used_g="10.10"/><filament id="2" type="PETG" color="#0ACC38" used_m="1.83" used_g="5.60"/></plate></config>')
+    z.writestr(
+        "Metadata/slice_info.config",
+        '<config><plate><metadata key="index" value="1"/><filament id="1" type="PETG" color="#2850E0" used_m="3.30" used_g="10.10"/><filament id="2" type="PETG" color="#0ACC38" used_m="1.83" used_g="5.60"/></plate></config>',
+    )
     z.writestr("Metadata/plate_1.gcode", "G1 X1\n")
 job_zip = zb.getvalue()
-fsrv = socket.socket(); fsrv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); fsrv.bind(("127.0.0.1", 0)); fsrv.listen(2)
+fsrv = socket.socket()
+fsrv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+fsrv.bind(("127.0.0.1", 0))
+fsrv.listen(2)
 ftp_seen = []
+
+
 def ftp_server():
     raw, _ = fsrv.accept()
     c = sctx.wrap_socket(raw, server_side=True)
     f = c.makefile("rb")
     c.sendall(b"220 Bambu FTPS\r\n")
     data_l = None
+
     def data_send(payload):
-        d, _ = data_l.accept(); d = sctx.wrap_socket(d, server_side=True)
+        d, _ = data_l.accept()
+        d = sctx.wrap_socket(d, server_side=True)
         d.sendall(payload)
-        try: d.unwrap()
-        except Exception: pass
+        try:
+            d.unwrap()
+        except Exception:
+            pass
         d.close()
+
     while True:
         line = f.readline().decode().strip()
-        if not line: break
+        if not line:
+            break
         cmd, _, arg = line.partition(" ")
         ftp_seen.append(cmd.upper())
         cmd = cmd.upper()
-        if cmd == "USER": c.sendall(b"331 ok\r\n")
-        elif cmd == "PASS": c.sendall(b"230 ok\r\n" if arg == "SECRET99" else b"530 no\r\n")
-        elif cmd in ("PBSZ", "PROT", "TYPE"): c.sendall(b"200 ok\r\n")
+        if cmd == "USER":
+            c.sendall(b"331 ok\r\n")
+        elif cmd == "PASS":
+            c.sendall(b"230 ok\r\n" if arg == "SECRET99" else b"530 no\r\n")
+        elif cmd in ("PBSZ", "PROT", "TYPE"):
+            c.sendall(b"200 ok\r\n")
         elif cmd == "PASV":
-            data_l = socket.socket(); data_l.bind(("127.0.0.1", 0)); data_l.listen(1); dp = data_l.getsockname()[1]
+            data_l = socket.socket()
+            data_l.bind(("127.0.0.1", 0))
+            data_l.listen(1)
+            dp = data_l.getsockname()[1]
             c.sendall(f"227 Entering Passive Mode (127,0,0,1,{dp >> 8},{dp & 255})\r\n".encode())
         elif cmd == "NLST":
             c.sendall(b"150 here\r\n")
-            data_send(("/cache/Bracket.gcode.3mf\r\n/cache/old.gcode.3mf\r\n" if arg in ("/", "/cache") else "").encode())
+            data_send(
+                ("/cache/Bracket.gcode.3mf\r\n/cache/old.gcode.3mf\r\n" if arg in ("/", "/cache") else "").encode()
+            )
             c.sendall(b"226 done\r\n")
         elif cmd == "RETR":
-            c.sendall(b"150 here\r\n"); data_send(job_zip); c.sendall(b"226 done\r\n")
+            c.sendall(b"150 here\r\n")
+            data_send(job_zip)
+            c.sendall(b"226 done\r\n")
         elif cmd == "QUIT":
-            c.sendall(b"221 bye\r\n"); break
-        else: c.sendall(b"502 no\r\n")
+            c.sendall(b"221 bye\r\n")
+            break
+        else:
+            c.sendall(b"502 no\r\n")
     c.close()
+
+
 threading.Thread(target=ftp_server, daemon=True).start()
 probe.FTP_PORT = fsrv.getsockname()[1]
 link.stop.clear()
 got = link._check_job_once({"file": "Bracket.gcode.3mf", "job": "Bracket", "phase": "end", "percent_at": 100}, 1)
 logtext = (tmp / "OrcaSlicer" / "spoolstock-probe" / "probe.log").read_text(encoding="utf-8")
 jf = [json.loads(l) for l in logtext.splitlines() if json.loads(l)["kind"] == "printer.job_file"]
-ok(got and jf and jf[-1]["path"] == "/cache/Bracket.gcode.3mf", "job file found over implicit FTPS, where TLS starts before the welcome line")
-ok(jf and [f["used_g"] for f in jf[-1]["plates"][0]["filaments"]] == ["10.10", "5.60"], "per-filament grams read from the job file")
+ok(
+    got and jf and jf[-1]["path"] == "/cache/Bracket.gcode.3mf",
+    "job file found over implicit FTPS, where TLS starts before the welcome line",
+)
+ok(
+    jf and [f["used_g"] for f in jf[-1]["plates"][0]["filaments"]] == ["10.10", "5.60"],
+    "per-filament grams read from the job file",
+)
 ok(ftp_seen[:2] == ["USER", "PASS"] and "RETR" in ftp_seen, "logs in as bblp and only lists and downloads")
 probe.disconnect_all()
 sys.exit(0 if ok_all else 1)

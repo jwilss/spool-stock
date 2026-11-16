@@ -53,6 +53,7 @@ JOB_MAX = 96 * 1024 * 1024
 
 # ---------- files ----------
 
+
 def _data_dir() -> Path:
     here = Path(__file__).resolve()
     for parent in here.parents:
@@ -80,7 +81,9 @@ def _redact(text: str) -> str:
 def log(kind: str, **data) -> None:
     """One JSON line per entry. Never raises."""
     try:
-        line = json.dumps({"t": time.strftime("%Y-%m-%d %H:%M:%S"), "kind": kind, **data}, default=str, ensure_ascii=False)
+        line = json.dumps(
+            {"t": time.strftime("%Y-%m-%d %H:%M:%S"), "kind": kind, **data}, default=str, ensure_ascii=False
+        )
         line = _redact(line)
         with _log_lock:
             DATA.mkdir(parents=True, exist_ok=True)
@@ -116,6 +119,7 @@ def save_printers(items: list[dict]) -> None:
 
 # ---------- what Orca offers ----------
 
+
 def _names(obj) -> list[str]:
     try:
         return sorted(n for n in dir(obj) if not n.startswith("_"))
@@ -139,6 +143,7 @@ def _fields(ctx) -> dict:
 def survey_api() -> dict:
     """Names of everything the plugin interface exposes, a few levels down. No values."""
     seen = {}
+
     def walk(obj, path, depth):
         if depth > 3 or path in seen:
             return
@@ -149,8 +154,11 @@ def survey_api() -> dict:
                 child = getattr(obj, n)
             except Exception:
                 continue
-            if type(child).__name__ in ("module",) or (hasattr(child, "__dict__") and not callable(child) and depth < 3):
+            if type(child).__name__ in ("module",) or (
+                hasattr(child, "__dict__") and not callable(child) and depth < 3
+            ):
                 walk(child, f"{path}.{n}", depth + 1)
+
     walk(orca, "orca", 0)
     return seen
 
@@ -189,13 +197,16 @@ def orca_conf_hints() -> dict:
             if isinstance(val, dict) and re.search(r"access|lan|ip|device|dev_|printer|machine", sec, re.I):
                 out[sec] = {"keys": sorted(val.keys())[:50]}
         app = j.get("app", {})
-        out["app_keys_device"] = sorted(k for k in app if re.search(r"access|lan|ip|device|dev_|printer|machine|user", k, re.I))[:80]
+        out["app_keys_device"] = sorted(
+            k for k in app if re.search(r"access|lan|ip|device|dev_|printer|machine|user", k, re.I)
+        )[:80]
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
     return out
 
 
 # ---------- printers over the local network ----------
+
 
 def _mlen(n: int) -> bytes:
     out = bytearray()
@@ -258,7 +269,7 @@ def cert_names(der: bytes) -> list[str]:
             n = der[j + 1]
             if n < 128:
                 try:
-                    out.append(der[j + 2:j + 2 + n].decode("utf-8", "replace"))
+                    out.append(der[j + 2 : j + 2 + n].decode("utf-8", "replace"))
                 except Exception:
                     pass
         i = j
@@ -286,22 +297,44 @@ def summarise(status: dict) -> dict:
     trays = []
     for unit in ams.get("ams") or []:
         for tray in unit.get("tray") or []:
-            trays.append({
-                "ams": unit.get("id"), "tray": tray.get("id"),
-                "type": tray.get("tray_type"), "colour": tray.get("tray_color"),
-                "info_idx": tray.get("tray_info_idx"), "sub_brand": tray.get("tray_sub_brands"),
-                "remain": tray.get("remain"), "rfid": bool(tray.get("tag_uid") and tray.get("tag_uid") != "0000000000000000"),
-                "nozzle_min": tray.get("nozzle_temp_min"), "nozzle_max": tray.get("nozzle_temp_max"),
-            })
+            trays.append(
+                {
+                    "ams": unit.get("id"),
+                    "tray": tray.get("id"),
+                    "type": tray.get("tray_type"),
+                    "colour": tray.get("tray_color"),
+                    "info_idx": tray.get("tray_info_idx"),
+                    "sub_brand": tray.get("tray_sub_brands"),
+                    "remain": tray.get("remain"),
+                    "rfid": bool(tray.get("tag_uid") and tray.get("tag_uid") != "0000000000000000"),
+                    "nozzle_min": tray.get("nozzle_temp_min"),
+                    "nozzle_max": tray.get("nozzle_temp_max"),
+                }
+            )
     vt = p.get("vt_tray") or {}
     mapping = {k: v for k, v in p.items() if "map" in k.lower()}
     return {
-        "state": p.get("gcode_state"), "percent": p.get("mc_percent"), "layer": p.get("layer_num"),
-        "layers": p.get("total_layer_num"), "job": p.get("subtask_name"), "file": p.get("gcode_file"),
-        "task_id": p.get("task_id"), "subtask_id": p.get("subtask_id"),
-        "tray_now": ams.get("tray_now"), "tray_pre": ams.get("tray_pre"), "tray_tar": ams.get("tray_tar"),
-        "ams_exist_bits": ams.get("ams_exist_bits"), "trays": trays,
-        "external": {"type": vt.get("tray_type"), "colour": vt.get("tray_color"), "info_idx": vt.get("tray_info_idx"), "remain": vt.get("remain")} if vt else None,
+        "state": p.get("gcode_state"),
+        "percent": p.get("mc_percent"),
+        "layer": p.get("layer_num"),
+        "layers": p.get("total_layer_num"),
+        "job": p.get("subtask_name"),
+        "file": p.get("gcode_file"),
+        "task_id": p.get("task_id"),
+        "subtask_id": p.get("subtask_id"),
+        "tray_now": ams.get("tray_now"),
+        "tray_pre": ams.get("tray_pre"),
+        "tray_tar": ams.get("tray_tar"),
+        "ams_exist_bits": ams.get("ams_exist_bits"),
+        "trays": trays,
+        "external": {
+            "type": vt.get("tray_type"),
+            "colour": vt.get("tray_color"),
+            "info_idx": vt.get("tray_info_idx"),
+            "remain": vt.get("remain"),
+        }
+        if vt
+        else None,
         "mapping_fields": mapping,
     }
 
@@ -347,7 +380,10 @@ class Link:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         ip, code = self.p["ip"], self.p["code"]
-        with socket.create_connection((ip, MQTT_PORT), timeout=10) as raw, ctx.wrap_socket(raw, server_hostname=ip) as s:
+        with (
+            socket.create_connection((ip, MQTT_PORT), timeout=10) as raw,
+            ctx.wrap_socket(raw, server_hostname=ip) as s,
+        ):
             s.settimeout(5)
             if not self.serial:
                 try:
@@ -363,7 +399,14 @@ class Link:
                     log("printer.certificate_error", printer=self.p.get("name"), error=str(e))
             if not self.serial:
                 raise ConnectionError("serial number unknown: add it from the printer's screen (Settings, Device)")
-            body = _mstr("MQTT") + b"\x04\xc2" + struct.pack("!H", 60) + _mstr("spoolstock-probe-" + os.urandom(3).hex()) + _mstr("bblp") + _mstr(code)
+            body = (
+                _mstr("MQTT")
+                + b"\x04\xc2"
+                + struct.pack("!H", 60)
+                + _mstr("spoolstock-probe-" + os.urandom(3).hex())
+                + _mstr("bblp")
+                + _mstr(code)
+            )
             s.sendall(_pkt(0x10, body))
             ack = _read_packet(s)
             if not ack or ack[0] >> 4 != 2:
@@ -385,13 +428,13 @@ class Link:
                 if pk and pk[0] >> 4 == 3:
                     b = pk[1]
                     n = struct.unpack("!H", b[:2])[0]
-                    topic = b[2:2 + n].decode("utf-8", "replace")
+                    topic = b[2 : 2 + n].decode("utf-8", "replace")
                     if not self.serial and topic.count("/") >= 2:
                         self.serial = topic.split("/")[1]
                         self.p["serial"] = self.serial
                         log("printer.serial_found", printer=self.p.get("name"), serial=self.serial)
                     try:
-                        doc = json.loads(b[2 + n:])
+                        doc = json.loads(b[2 + n :])
                     except ValueError:
                         continue
                     self.on_report(doc, first=not full_logged)
@@ -419,14 +462,22 @@ class Link:
         old_state = self.last_sum.get("state")
         self.last_sum = s
         if s.get("state") != old_state:
-            log("printer.full_status", printer=self.p.get("name"), why=f"state {old_state} -> {s.get('state')}", status=self.status)
+            log(
+                "printer.full_status",
+                printer=self.p.get("name"),
+                why=f"state {old_state} -> {s.get('state')}",
+                status=self.status,
+            )
         if s.get("file"):
             self.job_file = s["file"]
         # The printer is busy reading the file while it prepares, so look once printing is under way
         # (layer 1 or later) and again when it ends, by which time the report has cleared the file name.
         state = s.get("state")
-        phase = "end" if state in ("FINISH", "FAILED") and old_state not in ("FINISH", "FAILED", None) else (
-            "running" if state == "RUNNING" and (s.get("layer") or 0) >= 1 else "")
+        phase = (
+            "end"
+            if state in ("FINISH", "FAILED") and old_state not in ("FINISH", "FAILED", None)
+            else ("running" if state == "RUNNING" and (s.get("layer") or 0) >= 1 else "")
+        )
         if phase and self.job_file:
             key = f"{phase}|{self.job_file}|{s.get('job')}"
             if key not in self.jobs_checked:
@@ -452,6 +503,7 @@ class Link:
             class Ftps(ftplib.FTP_TLS):
                 """Implicit FTPS, as Bambu printers use on port 990: TLS starts before the printer says hello,
                 so the socket is wrapped the moment it's made, not after the welcome line."""
+
                 _plain = None
 
                 @property
@@ -481,7 +533,14 @@ class Link:
                     listing[folder] = ftp.nlst(folder)[:200]
                 except ftplib.all_errors as e:
                     listing[folder] = f"<{e}>"
-            log("printer.files", printer=self.p.get("name"), phase=s.get("phase"), job_file=s.get("file"), job=s.get("job"), listing=listing)
+            log(
+                "printer.files",
+                printer=self.p.get("name"),
+                phase=s.get("phase"),
+                job_file=s.get("file"),
+                job=s.get("job"),
+                listing=listing,
+            )
             want = [x for x in (s.get("file"), s.get("job")) if x]
             names = [n for v in listing.values() if isinstance(v, list) for n in v]
             hit = None
@@ -499,11 +558,13 @@ class Link:
                 return True
             buf = io.BytesIO()
             size = [0]
+
             def keep(chunk):
                 size[0] += len(chunk)
                 if size[0] > JOB_MAX:
                     raise ValueError("job file too large")
                 buf.write(chunk)
+
             stage = "download"
             ftp.retrbinary(f"RETR {hit}", keep)
             ftp.quit()
@@ -516,12 +577,28 @@ class Link:
                 for pl in root.iter("plate"):
                     meta = {m.get("key"): m.get("value") for m in pl.findall("metadata")}
                     plates.append({"meta": meta, "filaments": [f.attrib for f in pl.findall("filament")]})
-            log("printer.job_file", printer=self.p.get("name"), phase=s.get("phase"), percent=s.get("percent_at"),
-                path=hit, bytes=size[0], seconds=round(time.monotonic() - started, 1), entries=entries[:60], plates=plates)
+            log(
+                "printer.job_file",
+                printer=self.p.get("name"),
+                phase=s.get("phase"),
+                percent=s.get("percent_at"),
+                path=hit,
+                bytes=size[0],
+                seconds=round(time.monotonic() - started, 1),
+                entries=entries[:60],
+                plates=plates,
+            )
             return True
         except Exception as e:
-            log("printer.job_file_error", printer=self.p.get("name"), phase=s.get("phase"), attempt=attempt, stage=stage,
-                seconds=round(time.monotonic() - started, 1), error=f"{type(e).__name__}: {e}")
+            log(
+                "printer.job_file_error",
+                printer=self.p.get("name"),
+                phase=s.get("phase"),
+                attempt=attempt,
+                stage=stage,
+                seconds=round(time.monotonic() - started, 1),
+                error=f"{type(e).__name__}: {e}",
+            )
             return False
 
 
@@ -584,6 +661,7 @@ def disconnect_all() -> None:
 
 # ---------- slicing ----------
 
+
 def grams_from_gcode(path: str) -> list[float]:
     try:
         size = os.path.getsize(path)
@@ -598,8 +676,15 @@ def grams_from_gcode(path: str) -> list[float]:
     return []
 
 
-GCODE_KEYS = ("filament_settings_id", "filament_type", "filament_colour", "filament_vendor", "filament_ids",
-              "printer_settings_id", "printer_model")
+GCODE_KEYS = (
+    "filament_settings_id",
+    "filament_type",
+    "filament_colour",
+    "filament_vendor",
+    "filament_ids",
+    "printer_settings_id",
+    "printer_model",
+)
 
 
 def slice_from_gcode(path: str) -> dict:
@@ -673,11 +758,23 @@ def _state(suggest: str = "", hint: str = "") -> dict:
     rows = []
     for p in load_printers():
         link = _links.get(p.get("name") or p.get("ip"))
-        rows.append({"name": p.get("name", ""), "ip": p.get("ip", ""),
-                     "serial": (link.serial if link else "") or p.get("serial", ""),
-                     "state": link.state if link else "not connected"})
-    return {"type": "state", "log": str(LOG), "suggest": suggest, "hint": hint, "printers": rows,
-            "live": [{"name": k, "summary": v.last_sum} for k, v in _links.items()], "recent": list(_recent)}
+        rows.append(
+            {
+                "name": p.get("name", ""),
+                "ip": p.get("ip", ""),
+                "serial": (link.serial if link else "") or p.get("serial", ""),
+                "state": link.state if link else "not connected",
+            }
+        )
+    return {
+        "type": "state",
+        "log": str(LOG),
+        "suggest": suggest,
+        "hint": hint,
+        "printers": rows,
+        "live": [{"name": k, "summary": v.last_sum} for k, v in _links.items()],
+        "recent": list(_recent),
+    }
 
 
 def _suggest_ip() -> str:
@@ -705,6 +802,7 @@ Slicing = getattr(getattr(orca, "slicing", None), "SlicingPipelineCapabilityBase
 
 
 if Pages is not None:
+
     class ProbePage(Pages):
         def __init__(self):
             super().__init__()
@@ -747,7 +845,14 @@ if Pages is not None:
                         self.post_message(_state(hint="Needs at least the IP and access code."))
                         return
                     items = load_printers()
-                    items.append({"name": d.get("name") or d["ip"], "ip": d["ip"], "serial": d.get("serial", ""), "code": d["code"]})
+                    items.append(
+                        {
+                            "name": d.get("name") or d["ip"],
+                            "ip": d["ip"],
+                            "serial": d.get("serial", ""),
+                            "code": d["code"],
+                        }
+                    )
                     _secrets.add(d["code"])
                     save_printers(items)
                     log("printer.added", name=d.get("name"), ip=d["ip"], serial_given=bool(d.get("serial")))
@@ -792,6 +897,7 @@ if Pages is not None:
 
 
 if Slicing is not None:
+
     class ProbeSlice(Slicing):
         def get_name(self):
             return "Spool Stock Probe"
@@ -802,8 +908,18 @@ if Slicing is not None:
                 entry = {"step": step, "fields": _fields(ctx)}
                 if "GCodePostProcess" in step:
                     cfg = {}
-                    for key in ("filament_settings_id", "filament_colour", "filament_type", "filament_vendor", "filament_ids",
-                                "printer_model", "printer_settings_id", "print_host", "filament_map", "filament_map_mode"):
+                    for key in (
+                        "filament_settings_id",
+                        "filament_colour",
+                        "filament_type",
+                        "filament_vendor",
+                        "filament_ids",
+                        "printer_model",
+                        "printer_settings_id",
+                        "print_host",
+                        "filament_map",
+                        "filament_map_mode",
+                    ):
                         try:
                             cfg[key] = str(ctx.config_value(key))[:1000]
                         except Exception as e:

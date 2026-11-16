@@ -11,9 +11,14 @@ const BACKUP = "OrcaSlicer.conf.spoolstock.bak";
 function orcaRunning() {
   if (process.platform !== "win32") return false;
   try {
-    const out = execFileSync("tasklist", ["/FI", "IMAGENAME eq orca-slicer.exe", "/NH"], {encoding: "utf8", windowsHide: true});
+    const out = execFileSync("tasklist", ["/FI", "IMAGENAME eq orca-slicer.exe", "/NH"], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
     return /orca-slicer\.exe/i.test(out);
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 function orcaBase(appData) {
@@ -36,7 +41,9 @@ function readConf(base) {
     const text = fs.readFileSync(path.join(base, "OrcaSlicer.conf"), "utf8");
     const end = text.lastIndexOf("}");
     return {text, json: JSON.parse(text.slice(0, end + 1))};
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 // Orca saves its settings as JSON followed by an MD5 checksum line of that JSON.
@@ -53,10 +60,13 @@ function systemFilaments(base) {
     for (const e of fs.readdirSync(dir, {withFileTypes: true})) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walk(p);
-      else if (e.name.endsWith(".json") && !/@base\.json$/.test(e.name) && /[\\/]filament[\\/]/.test(p)) out.push(e.name.slice(0, -5));
+      else if (e.name.endsWith(".json") && !/@base\.json$/.test(e.name) && /[\\/]filament[\\/]/.test(p))
+        out.push(e.name.slice(0, -5));
     }
   };
-  try { walk(path.join(base, "system")); } catch {}
+  try {
+    walk(path.join(base, "system"));
+  } catch {}
   return out;
 }
 
@@ -65,8 +75,18 @@ function check(file) {
   if (!/^[^\\/:*?"<>|]{1,150}\.json$/.test(file.name) || file.name.includes("..")) return "Bad file name: " + file.name;
   if (file.text.length > 200000) return "Too large: " + file.name;
   let j;
-  try { j = JSON.parse(file.text); } catch { return "Not JSON: " + file.name; }
-  if (j.type !== "filament" || j.from !== "User" || !Array.isArray(j.filament_settings_id) || j.name + ".json" !== file.name) return "Not a filament preset: " + file.name;
+  try {
+    j = JSON.parse(file.text);
+  } catch {
+    return "Not JSON: " + file.name;
+  }
+  if (
+    j.type !== "filament" ||
+    j.from !== "User" ||
+    !Array.isArray(j.filament_settings_id) ||
+    j.name + ".json" !== file.name
+  )
+    return "Not a filament preset: " + file.name;
   return null;
 }
 
@@ -75,8 +95,12 @@ function writePresets(appData, files, opts = {}, running = orcaRunning) {
   const show = opts && Array.isArray(opts.show) ? opts.show : null;
   if (!Array.isArray(files) || files.length > 500) return {error: "Nothing to send."};
   if (!files.length && !show) return {error: "Nothing to send."};
-  if (show && (show.length > 500 || show.some(n => typeof n !== "string" || !n || n.length > 200))) return {error: "Bad filament list."};
-  for (const f of files) { const bad = check(f); if (bad) return {error: bad}; }
+  if (show && (show.length > 500 || show.some(n => typeof n !== "string" || !n || n.length > 200)))
+    return {error: "Bad filament list."};
+  for (const f of files) {
+    const bad = check(f);
+    if (bad) return {error: bad};
+  }
   const where = orcaDir(appData);
   if (where.error) return where;
   if (show && running()) return {error: "Close Orca first, so it doesn't overwrite its filament list when it closes."};
@@ -84,14 +108,22 @@ function writePresets(appData, files, opts = {}, running = orcaRunning) {
   for (const f of files) fs.writeFileSync(path.join(where.dir, f.name), f.text, "utf8");
   const result = {dir: where.dir, written: files.length};
   if (show) {
-    const base = orcaBase(appData), conf = readConf(base);
-    if (!conf) return {...result, error: "Sent the presets, but couldn't read Orca's settings to set its filament list."};
+    const base = orcaBase(appData),
+      conf = readConf(base);
+    if (!conf)
+      return {...result, error: "Sent the presets, but couldn't read Orca's settings to set its filament list."};
     // The site sends Orca's exact preset names. Older Orca keeps one file per preset on disk, so any
     // installed variants found there are added too.
-    const installed = systemFilaments(base), visible = {}, missing = [];
+    const installed = systemFilaments(base),
+      visible = {},
+      missing = [];
     for (const name of show) {
       visible[name] = "true";
-      installed.filter(n => n.startsWith(name.replace(/ @System$/, "") + " @")).forEach(n => { visible[n] = "true"; });
+      installed
+        .filter(n => n.startsWith(name.replace(/ @System$/, "") + " @"))
+        .forEach(n => {
+          visible[n] = "true";
+        });
     }
     if (!fs.existsSync(path.join(base, BACKUP))) fs.writeFileSync(path.join(base, BACKUP), conf.text, "utf8");
     conf.json.filaments = visible;
@@ -107,9 +139,18 @@ function restoreList(appData, running = orcaRunning) {
   const backup = path.join(base, BACKUP);
   if (!fs.existsSync(backup)) return {error: "There's no saved list to restore."};
   if (running()) return {error: "Close Orca first, then restore."};
-  const conf = readConf(base), old = (() => { try { const t = fs.readFileSync(backup, "utf8"); return JSON.parse(t.slice(0, t.lastIndexOf("}") + 1)); } catch { return null; } })();
+  const conf = readConf(base),
+    old = (() => {
+      try {
+        const t = fs.readFileSync(backup, "utf8");
+        return JSON.parse(t.slice(0, t.lastIndexOf("}") + 1));
+      } catch {
+        return null;
+      }
+    })();
   if (!conf || !old) return {error: "Couldn't read Orca's settings."};
-  if (old.filaments) conf.json.filaments = old.filaments; else delete conf.json.filaments;
+  if (old.filaments) conf.json.filaments = old.filaments;
+  else delete conf.json.filaments;
   writeConf(base, conf.json);
   fs.unlinkSync(backup);
   return {restored: true};

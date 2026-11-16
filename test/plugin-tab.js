@@ -4,13 +4,20 @@
 const fs = require("fs");
 const path = require("path");
 let chromium;
-try { ({chromium} = require("playwright")); } catch { ({chromium} = require(require("child_process").execSync("npm root -g").toString().trim() + "/playwright")); }
+try {
+  ({chromium} = require("playwright"));
+} catch {
+  ({chromium} = require(require("child_process").execSync("npm root -g").toString().trim() + "/playwright"));
+}
 
 const [html, statePath, camPath, shots] = process.argv.slice(2);
 const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
 const camReplies = camPath ? JSON.parse(fs.readFileSync(camPath, "utf8")) : [];
 let failed = false;
-const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) failed = true; };
+const ok = (c, m) => {
+  console.log((c ? "PASS " : "FAIL ") + m);
+  if (!c) failed = true;
+};
 
 (async () => {
   const browser = await chromium.launch();
@@ -22,84 +29,187 @@ const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) failed 
       window.__sent = [];
       let i = 0;
       // Plays back what the plugin sent for a real camera stream, one reply per request, as the plugin would
-      window.orca = {postMessage: m => {
-        window.__sent.push(m);
-        if (m.type === "cams" && window.__on) {
-          const r = replies[Math.min(i++, replies.length - 1)];
-          const out = {type: "cams", cams: m.want.map(w => r && i <= replies.length ? {...r, id: w.id} : {id: w.id, status: "Live", gen: r ? r.gen : 0})};
-          setTimeout(() => window.__on(out), 20);
-        }
-      }, onMessage: f => { window.__on = f; }};
+      window.orca = {
+        postMessage: m => {
+          window.__sent.push(m);
+          if (m.type === "cams" && window.__on) {
+            const r = replies[Math.min(i++, replies.length - 1)];
+            const out = {
+              type: "cams",
+              cams: m.want.map(w =>
+                r && i <= replies.length ? {...r, id: w.id} : {id: w.id, status: "Live", gen: r ? r.gen : 0},
+              ),
+            };
+            setTimeout(() => window.__on(out), 20);
+          }
+        },
+        onMessage: f => {
+          window.__on = f;
+        },
+      };
     }, camReplies);
     await p.goto("file://" + path.resolve(html));
     await p.evaluate(s => window.__on(s), {...state, dark});
     if (!dark) {
-      ok(await p.isVisible("#v-prints") && !(await p.isVisible("#v-stock")), "opens on Prints");
+      ok((await p.isVisible("#v-prints")) && !(await p.isVisible("#v-stock")), "opens on Prints");
       await p.click("nav [data-v=stock]");
       const n = await p.$$eval("#stock .sp", e => e.length);
       ok(n === state.stock.spools.length, "Stock shows a card per spool: " + n);
-      ok(await p.$$eval("#stock h3", e => e.length) >= 3, "grouped by storage");
+      ok((await p.$$eval("#stock h3", e => e.length)) >= 3, "grouped by storage");
       await p.fill("#q", "alpha");
-      ok(await p.$$eval("#stock .sp", e => e.length) === state.stock.spools.filter(s => s.printer === "Alpha").length, "finds spools by the printer feeding from them");
+      ok(
+        (await p.$$eval("#stock .sp", e => e.length)) === state.stock.spools.filter(s => s.printer === "Alpha").length,
+        "finds spools by the printer feeding from them",
+      );
       await p.fill("#q", "");
       await p.check("#lowonly");
-      ok(await p.$$eval("#stock .sp", e => e.length) === state.stock.spools.filter(s => s.low).length && /1 low/.test(await p.textContent("#stockinfo")), "Low only shows the low spools");
+      ok(
+        (await p.$$eval("#stock .sp", e => e.length)) === state.stock.spools.filter(s => s.low).length &&
+          /1 low/.test(await p.textContent("#stockinfo")),
+        "Low only shows the low spools",
+      );
       await p.uncheck("#lowonly");
       await p.selectOption("#grp", "mat");
       const heads = await p.$$eval("#stock h3", e => e.map(x => x.childNodes[0].textContent.trim()));
-      ok(heads.join() === [...heads].sort((a, b) => a.localeCompare(b)).join() && heads.includes("PETG"), "grouped by material, in order: " + heads.join(", "));
+      ok(
+        heads.join() === [...heads].sort((a, b) => a.localeCompare(b)).join() && heads.includes("PETG"),
+        "grouped by material, in order: " + heads.join(", "),
+      );
       const bar = await p.$eval("#stock .sp .bar i", e => e.style.width);
       ok(/^\d+%$/.test(bar), "weight bar drawn: " + bar);
       await p.click("[data-a=refresh]");
       ok((await p.evaluate(() => window.__sent.map(m => m.type))).includes("refresh"), "Refresh asks for fresh stock");
       await p.click("nav [data-v=presets]");
-      ok(/Spool Stock group/.test(await p.textContent("#presets")) && await p.$$eval("#presets .list div", e => e.length) === state.presets.feed.length, "Presets lists your filaments");
+      ok(
+        /Spool Stock group/.test(await p.textContent("#presets")) &&
+          (await p.$$eval("#presets .list div", e => e.length)) === state.presets.feed.length,
+        "Presets lists your filaments",
+      );
       await p.click("[data-a=presets_now]");
       ok((await p.evaluate(() => window.__sent.map(m => m.type))).includes("presets_now"), "Update now is sent");
       await p.reload();
       await p.evaluate(s => window.__on(s), {...state, dark});
-      ok(await p.isVisible("#v-presets") && await p.inputValue("#grp") === "mat", "remembers the view and grouping");
+      ok(
+        (await p.isVisible("#v-presets")) && (await p.inputValue("#grp")) === "mat",
+        "remembers the view and grouping",
+      );
       if (camReplies.length) {
         await p.click("nav [data-v=cameras]");
-        ok(await p.$$eval("#camgrid .cam", e => e.length) === 2 && /Alpha/.test(await p.textContent("#camgrid .camjob")), "Cameras shows a tile per camera, with its printer");
-        ok(!(await p.$eval("#camadd", e => e.open)) && await p.isVisible("#camadd summary") && !(await p.isVisible("#curl")), "Add a camera is folded away while there are cameras");
+        ok(
+          (await p.$$eval("#camgrid .cam", e => e.length)) === 2 &&
+            /Alpha/.test(await p.textContent("#camgrid .camjob")),
+          "Cameras shows a tile per camera, with its printer",
+        );
+        ok(
+          !(await p.$eval("#camadd", e => e.open)) &&
+            (await p.isVisible("#camadd summary")) &&
+            !(await p.isVisible("#curl")),
+          "Add a camera is folded away while there are cameras",
+        );
         let played = null;
         try {
-          await p.waitForFunction(() => { const v = document.querySelector("#camgrid video"); return v && v.currentTime > 0.5 && v.videoWidth > 0; }, null, {timeout: 15000});
+          await p.waitForFunction(
+            () => {
+              const v = document.querySelector("#camgrid video");
+              return v && v.currentTime > 0.5 && v.videoWidth > 0;
+            },
+            null,
+            {timeout: 15000},
+          );
           played = await p.$eval("#camgrid video", v => ({w: v.videoWidth, h: v.videoHeight, t: v.currentTime}));
-        } catch (e) { played = await p.$eval("#camgrid video", v => ({w: v.videoWidth, t: v.currentTime, err: v.error && v.error.message})); }
-        ok(played && played.w === 320 && played.h === 240 && played.t > 0.5, "the camera's video plays in the tab: " + JSON.stringify(played));
+        } catch (e) {
+          played = await p.$eval("#camgrid video", v => ({
+            w: v.videoWidth,
+            t: v.currentTime,
+            err: v.error && v.error.message,
+          }));
+        }
+        ok(
+          played && played.w === 320 && played.h === 240 && played.t > 0.5,
+          "the camera's video plays in the tab: " + JSON.stringify(played),
+        );
         ok(await p.$eval("#camgrid .camst", e => e.hidden), "the status bar clears once the picture is up");
-        ok((await p.evaluate(() => window.__sent.filter(m => m.type === "cams").length)) >= 3, "asks for more video while the page is open");
-        const boxes = async () => { await p.waitForTimeout(250); return p.evaluate(() => ({vh: innerHeight, vw: document.documentElement.clientWidth, scroll: document.documentElement.scrollHeight,
-          add: document.querySelector("#camadd").getBoundingClientRect().bottom,
-          t: [...document.querySelectorAll("#camgrid .cam")].map(e => { const r = e.getBoundingClientRect(), v = e.querySelector(".vid").getBoundingClientRect(); return {x: r.left, y: Math.round(r.top), w: r.width, b: r.bottom, r: r.right, vw: v.width, vh: v.height}; })})); };
-        const fits = b => b.t.every(t => t.b <= b.vh && t.r <= b.vw && t.x >= 0) && b.add <= b.vh && b.scroll <= b.vh + 1;
+        ok(
+          (await p.evaluate(() => window.__sent.filter(m => m.type === "cams").length)) >= 3,
+          "asks for more video while the page is open",
+        );
+        const boxes = async () => {
+          await p.waitForTimeout(250);
+          return p.evaluate(() => ({
+            vh: innerHeight,
+            vw: document.documentElement.clientWidth,
+            scroll: document.documentElement.scrollHeight,
+            add: document.querySelector("#camadd").getBoundingClientRect().bottom,
+            t: [...document.querySelectorAll("#camgrid .cam")].map(e => {
+              const r = e.getBoundingClientRect(),
+                v = e.querySelector(".vid").getBoundingClientRect();
+              return {x: r.left, y: Math.round(r.top), w: r.width, b: r.bottom, r: r.right, vw: v.width, vh: v.height};
+            }),
+          }));
+        };
+        const fits = b =>
+          b.t.every(t => t.b <= b.vh && t.r <= b.vw && t.x >= 0) && b.add <= b.vh && b.scroll <= b.vh + 1;
         let b = await boxes();
-        ok(fits(b) && b.t[0].x === b.t[1].x && b.t[1].y > b.t[0].y, `narrow and tall tab: the two stack and both fit, with Add a camera below (${Math.round(b.t[0].vw)}x${Math.round(b.t[0].vh)} each)` + (fits(b) ? "" : " " + JSON.stringify(b)));
-        ok(Math.abs(b.t[0].vw / b.t[0].vh - 320 / 240) < 0.02, "pictures are the camera's own shape: " + (b.t[0].vw / b.t[0].vh).toFixed(2));
-        await p.setViewportSize({width: 1600, height: 800}); b = await boxes();
-        ok(fits(b) && b.t[0].y === b.t[1].y && b.t[0].w > 600, `wide tab: side by side and both fit (${Math.round(b.t[0].vw)}x${Math.round(b.t[0].vh)} each)` + (fits(b) ? "" : " " + JSON.stringify(b)));
+        ok(
+          fits(b) && b.t[0].x === b.t[1].x && b.t[1].y > b.t[0].y,
+          `narrow and tall tab: the two stack and both fit, with Add a camera below (${Math.round(b.t[0].vw)}x${Math.round(b.t[0].vh)} each)` +
+            (fits(b) ? "" : " " + JSON.stringify(b)),
+        );
+        ok(
+          Math.abs(b.t[0].vw / b.t[0].vh - 320 / 240) < 0.02,
+          "pictures are the camera's own shape: " + (b.t[0].vw / b.t[0].vh).toFixed(2),
+        );
+        await p.setViewportSize({width: 1600, height: 800});
+        b = await boxes();
+        ok(
+          fits(b) && b.t[0].y === b.t[1].y && b.t[0].w > 600,
+          `wide tab: side by side and both fit (${Math.round(b.t[0].vw)}x${Math.round(b.t[0].vh)} each)` +
+            (fits(b) ? "" : " " + JSON.stringify(b)),
+        );
         if (shots) await p.screenshot({path: path.join(shots, "tab-cameras-wide.png")});
-        await p.setViewportSize({width: 1100, height: 480}); b = await boxes();
-        ok(fits(b), `short tab: they shrink to fit (${Math.round(b.t[0].vw)}x${Math.round(b.t[0].vh)} each)` + (fits(b) ? "" : " " + JSON.stringify(b)));
+        await p.setViewportSize({width: 1100, height: 480});
+        b = await boxes();
+        ok(
+          fits(b),
+          `short tab: they shrink to fit (${Math.round(b.t[0].vw)}x${Math.round(b.t[0].vh)} each)` +
+            (fits(b) ? "" : " " + JSON.stringify(b)),
+        );
         await p.setViewportSize({width: 760, height: 900});
         await p.click("#camadd summary");
         ok(await p.isVisible("#curl"), "Add a camera opens when clicked");
-        await p.fill("#cname", "Bravo cam"); await p.fill("#curl", "rtsp://printer cam:pw@192.168.1.51/stream2"); await p.click("#cadd");
+        await p.fill("#cname", "Bravo cam");
+        await p.fill("#curl", "rtsp://printer cam:pw@192.168.1.51/stream2");
+        await p.click("#cadd");
         const add = await p.evaluate(() => window.__sent.find(m => m.type === "cam_add"));
-        ok(add && add.name === "Bravo cam" && add.url.endsWith("/stream2") && (await p.inputValue("#curl")) === "" && !(await p.$eval("#camadd", e => e.open)), "Add sends the camera, clears the link box and folds away again");
+        ok(
+          add &&
+            add.name === "Bravo cam" &&
+            add.url.endsWith("/stream2") &&
+            (await p.inputValue("#curl")) === "" &&
+            !(await p.$eval("#camadd", e => e.open)),
+          "Add sends the camera, clears the link box and folds away again",
+        );
         await p.click("#camgrid [data-a=cam_remove]");
-        ok(!(await p.evaluate(() => window.__sent.some(m => m.type === "cam_remove"))) && /Remove it/.test(await p.textContent("#camgrid [data-a=cam_remove]")), "Remove asks again before it removes");
+        ok(
+          !(await p.evaluate(() => window.__sent.some(m => m.type === "cam_remove"))) &&
+            /Remove it/.test(await p.textContent("#camgrid [data-a=cam_remove]")),
+          "Remove asks again before it removes",
+        );
         await p.click("#camgrid [data-a=cam_remove]");
-        ok(await p.evaluate(() => window.__sent.some(m => m.type === "cam_remove" && m.id === "c1")), "and removes on the second press");
+        ok(
+          await p.evaluate(() => window.__sent.some(m => m.type === "cam_remove" && m.id === "c1")),
+          "and removes on the second press",
+        );
         if (shots) await p.screenshot({path: path.join(shots, "tab-cameras-light.png"), fullPage: true});
         await p.click("nav [data-v=presets]");
       }
     } else {
       await p.click("nav [data-v=stock]");
     }
-    ok(!errors.length, (dark ? "dark" : "light") + ": no page errors" + (errors.length ? ": " + errors.join("; ") : ""));
+    ok(
+      !errors.length,
+      (dark ? "dark" : "light") + ": no page errors" + (errors.length ? ": " + errors.join("; ") : ""),
+    );
     if (shots) {
       await p.click("nav [data-v=stock]");
       await p.screenshot({path: path.join(shots, `tab-stock-${dark ? "dark" : "light"}.png`), fullPage: true});
@@ -110,4 +220,7 @@ const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) failed 
   }
   await browser.close();
   process.exit(failed ? 1 : 0);
-})().catch(e => { console.error(e); process.exit(1); });
+})().catch(e => {
+  console.error(e);
+  process.exit(1);
+});

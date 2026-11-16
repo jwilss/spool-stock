@@ -4,7 +4,12 @@
 import json, subprocess, sys, tempfile, glob, os
 import cv2, numpy as np
 
-pdf, w, h, cols, rows, left, top, px, py = sys.argv[1], *map(float, sys.argv[2:4]), *map(int, sys.argv[4:6]), *map(float, sys.argv[6:10])
+pdf, w, h, cols, rows, left, top, px, py = (
+    sys.argv[1],
+    *map(float, sys.argv[2:4]),
+    *map(int, sys.argv[4:6]),
+    *map(float, sys.argv[6:10]),
+)
 d = tempfile.mkdtemp()
 subprocess.run(["pdftoppm", "-r", "300", "-png", pdf, os.path.join(d, "p")], check=True)
 pages = sorted(glob.glob(os.path.join(d, "p*.png")))
@@ -15,10 +20,21 @@ ok, vals, pts, _ = cv2.QRCodeDetector().detectAndDecodeMulti(im)
 codes = [(v, p.mean(0) / k) for v, p in zip(vals, pts)] if ok else []
 codes = [c for c in codes if c[0]]
 inside = sum(1 for _, (x, y) in codes if any(lx <= x <= lx + w and ly <= y <= ly + h for lx, ly in labels))
-right = sum(1 for _, (x, y) in codes if any(lx + w * .6 <= x <= lx + w and ly <= y <= ly + h for lx, ly in labels))
+right = sum(1 for _, (x, y) in codes if any(lx + w * 0.6 <= x <= lx + w and ly <= y <= ly + h for lx, ly in labels))
 size = round(min((float(np.ptp(p[:, 0])) / k for p in pts), default=0), 1) if ok else 0
 ink = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) < 200
 mask = np.ones_like(ink)
 for lx, ly in labels:
-    mask[int((ly + 0.3) * k):int((ly + h - 0.3) * k), int((lx + 0.3) * k):int((lx + w - 0.3) * k)] = 0
-print(json.dumps({"pages": len(pages), "codes": len(codes), "inside": inside, "right": right, "size": size, "inkOutside": int((ink & mask.astype(bool)).sum() > 50)}))
+    mask[int((ly + 0.3) * k) : int((ly + h - 0.3) * k), int((lx + 0.3) * k) : int((lx + w - 0.3) * k)] = 0
+print(
+    json.dumps(
+        {
+            "pages": len(pages),
+            "codes": len(codes),
+            "inside": inside,
+            "right": right,
+            "size": size,
+            "inkOutside": int((ink & mask.astype(bool)).sum() > 50),
+        }
+    )
+)

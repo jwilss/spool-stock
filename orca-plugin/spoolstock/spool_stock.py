@@ -54,7 +54,7 @@ import orca
 NAME = "Spool Stock"
 VERSION = "1.3.2"
 MQTT_PORT, FTP_PORT = 8883, 990
-RETRY_MAX = 60   # seconds between tries at most, for a printer or camera that's switched off
+RETRY_MAX = 60  # seconds between tries at most, for a printer or camera that's switched off
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
 TOKEN_URL = "https://securetoken.googleapis.com/v1/token"
 FIRESTORE_URL = "https://firestore.googleapis.com/v1"
@@ -66,6 +66,7 @@ ACTIVE = ("PREPARE", "RUNNING", "PAUSE", "SLICING")
 
 
 # ---------- files ----------
+
 
 def _data_dir() -> Path:
     here = Path(__file__).resolve()
@@ -96,7 +97,9 @@ def _redact(text: str) -> str:
 def log(kind: str, **data) -> None:
     """One JSON line per entry. Never raises."""
     try:
-        line = json.dumps({"t": time.strftime("%Y-%m-%d %H:%M:%S"), "kind": kind, **data}, default=str, ensure_ascii=False)
+        line = json.dumps(
+            {"t": time.strftime("%Y-%m-%d %H:%M:%S"), "kind": kind, **data}, default=str, ensure_ascii=False
+        )
         with _log_lock:
             DATA.mkdir(parents=True, exist_ok=True)
             if LOG.exists() and LOG.stat().st_size > LOG_MAX:
@@ -139,6 +142,7 @@ def save_printers(items: list[dict]) -> None:
 
 # ---------- jobs: what's printing, what's waiting to be taken off, what needs you ----------
 
+
 class Store:
     """Kept in jobs.json so a restart of Orca mid-print loses nothing.
 
@@ -159,7 +163,10 @@ class Store:
     def save(self):
         with self.lock:
             try:
-                _write_json(JOBS, {"active": self.active, "outbox": self.outbox, "pending": self.pending, "recent": self.recent[:20]})
+                _write_json(
+                    JOBS,
+                    {"active": self.active, "outbox": self.outbox, "pending": self.pending, "recent": self.recent[:20]},
+                )
             except Exception as e:
                 log("store.error", error=str(e))
 
@@ -174,6 +181,7 @@ _wake = threading.Event()
 
 
 # ---------- Spool Stock (Firestore over its REST interface) ----------
+
 
 class CloudError(Exception):
     def __init__(self, status: str, message: str, code: int = 0):
@@ -237,7 +245,7 @@ class Cloud:
         self._secret_parts()
         self.id_token, self.expires = "", 0.0
         self.lock = threading.RLock()
-        self.ui_mode = False       # Orca refused network calls from the background thread, so make them from the tab
+        self.ui_mode = False  # Orca refused network calls from the background thread, so make them from the tab
         self.snap: dict | None = None
         self.snap_at = 0.0
         self.status = "Not signed in" if not self.acct else "Signed in"
@@ -306,8 +314,12 @@ class Cloud:
             if not self.signed_in:
                 raise CloudError("SIGNED_OUT", "not signed in")
             try:
-                d = self._http("POST", f"{TOKEN_URL}?key={urllib.parse.quote(self.acct['k'])}",
-                               form={"grant_type": "refresh_token", "refresh_token": self.acct["t"]}, auth=False)
+                d = self._http(
+                    "POST",
+                    f"{TOKEN_URL}?key={urllib.parse.quote(self.acct['k'])}",
+                    form={"grant_type": "refresh_token", "refresh_token": self.acct["t"]},
+                    auth=False,
+                )
             except CloudError as e:
                 if e.code in (400, 401, 403):
                     self.status = "The sign-in code no longer works. Copy a new one from Spool Stock."
@@ -358,8 +370,12 @@ class Cloud:
         with self.lock:
             if self.snap is not None and time.time() - self.snap_at < max_age:
                 return self.snap
-            snap = {"printers": self.docs("printers"), "locs": self.docs("locations"), "spools": self.docs("spools"),
-                    "orca": self.get("config/orca")[0]}
+            snap = {
+                "printers": self.docs("printers"),
+                "locs": self.docs("locations"),
+                "spools": self.docs("spools"),
+                "orca": self.get("config/orca")[0],
+            }
             self.snap, self.snap_at = snap, time.time()
             self.status = "Signed in" + (f" as {self.acct.get('e')}" if self.acct.get("e") else "")
             return snap
@@ -369,6 +385,7 @@ CLOUD = Cloud()
 
 
 # ---------- which spool is in which tray, as the app works it out (trayToSpool in index.html) ----------
+
 
 def _spaced(l) -> bool:
     return bool(l and l.get("spaces") and (l.get("capacity") or 0) > 0)
@@ -394,13 +411,17 @@ def _seated(snap, l) -> list:
 
 
 def _loose(snap, l) -> list:
-    return sorted(_live_in(snap, l["id"]), key=lambda s: (s.get("pos") if s.get("pos") is not None else 1e9, s.get("addedAt") or 0, s["id"]))
+    return sorted(
+        _live_in(snap, l["id"]),
+        key=lambda s: (s.get("pos") if s.get("pos") is not None else 1e9, s.get("addedAt") or 0, s["id"]),
+    )
 
 
 def find_printer(snap, serial: str, name: str):
     ps = list(snap["printers"].values())
-    return (next((p for p in ps if serial and (p.get("serial") or "").strip().upper() == serial.upper()), None)
-            or next((p for p in ps if name and (p.get("name") or "").strip().casefold() == name.strip().casefold()), None))
+    return next((p for p in ps if serial and (p.get("serial") or "").strip().upper() == serial.upper()), None) or next(
+        (p for p in ps if name and (p.get("name") or "").strip().casefold() == name.strip().casefold()), None
+    )
 
 
 def tray_to_spool(snap, printer, unit, tray):
@@ -408,7 +429,18 @@ def tray_to_spool(snap, printer, unit, tray):
     if not printer:
         return None
     feeds = printer.get("feeds") or []
-    f = next((f for f in feeds if (f.get("kind") == "external" if unit == "external" else f.get("kind") == "ams" and f.get("unit") == int(unit) + 1)), None)
+    f = next(
+        (
+            f
+            for f in feeds
+            if (
+                f.get("kind") == "external"
+                if unit == "external"
+                else f.get("kind") == "ams" and f.get("unit") == int(unit) + 1
+            )
+        ),
+        None,
+    )
     l = snap["locs"].get(f.get("loc")) if f else None
     if not l:
         return None
@@ -470,8 +502,10 @@ def tray_of(job: dict, fil_id: int, index: int):
 
 # ---------- the job file on the printer: grams per filament ----------
 
+
 class Ftps(ftplib.FTP_TLS):
     """Implicit FTPS, as Bambu printers use on port 990: TLS starts before the printer says hello."""
+
     _plain = None
 
     @property
@@ -512,8 +546,9 @@ def read_job_file(ip: str, code: str, file: str, plate: int) -> list[dict]:
                 names += [n if n.startswith("/") else f"{folder.rstrip('/')}/{n}" for n in ftp.nlst(folder)]
             except ftplib.all_errors:
                 pass
-        hit = next((n for n in names if os.path.basename(n) == base), None) or \
-            next((n for n in names if n.endswith(".3mf") and base.replace(".gcode.3mf", "") in n), None)
+        hit = next((n for n in names if os.path.basename(n) == base), None) or next(
+            (n for n in names if n.endswith(".3mf") and base.replace(".gcode.3mf", "") in n), None
+        )
         if not hit:
             raise FileNotFoundError(f"{base} isn't on the printer")
         buf, size = io.BytesIO(), [0]
@@ -523,6 +558,7 @@ def read_job_file(ip: str, code: str, file: str, plate: int) -> list[dict]:
             if size[0] > JOB_MAX:
                 raise ValueError("job file too large")
             buf.write(chunk)
+
         ftp.retrbinary(f"RETR {hit}", keep)
     finally:
         try:
@@ -536,14 +572,22 @@ def read_job_file(ip: str, code: str, file: str, plate: int) -> list[dict]:
     plates = []
     for pl in ET.fromstring(z.read(info)).iter("plate"):
         meta = {m.get("key"): m.get("value") for m in pl.findall("metadata")}
-        fils = [{"id": int(f.get("id", "0") or 0), "type": f.get("type", ""), "colour": f.get("color", ""),
-                 "g": round(float(f.get("used_g", "0") or 0), 2)} for f in pl.findall("filament")]
+        fils = [
+            {
+                "id": int(f.get("id", "0") or 0),
+                "type": f.get("type", ""),
+                "colour": f.get("color", ""),
+                "g": round(float(f.get("used_g", "0") or 0), 2),
+            }
+            for f in pl.findall("filament")
+        ]
         plates.append((int(meta.get("index", "0") or 0), fils))
     chosen = next((f for i, f in plates if i == plate), None) or next((f for _, f in plates if f), [])
     return [f for f in chosen if f["g"] > 0]
 
 
 # ---------- printers ----------
+
 
 def _mlen(n: int) -> bytes:
     out = bytearray()
@@ -570,7 +614,7 @@ def _recv_exact(sock, n: int) -> bytes:
             chunk = sock.recv(n - len(buf))
         except socket.timeout:
             waits += 1
-            if waits >= 6:   # half a packet and then nothing for 30 s: the printer has gone
+            if waits >= 6:  # half a packet and then nothing for 30 s: the printer has gone
                 raise TimeoutError("the printer stopped part way through a message")
             continue
         if not chunk:
@@ -605,7 +649,7 @@ def serial_from_cert(der: bytes) -> str:
             return ""
         j = i + 5
         if j + 2 <= len(der) and der[j + 1] < 128:
-            name = der[j + 2:j + 2 + der[j + 1]].decode("utf-8", "replace")
+            name = der[j + 2 : j + 2 + der[j + 1]].decode("utf-8", "replace")
             if re.fullmatch(r"[0-9A-Z]{12,20}", name):
                 return name
         i = j
@@ -636,7 +680,9 @@ class Link:
         self.fetching = False
         self.sock = None
         self.last_err = ""
-        self.thread = threading.Thread(target=self.run, daemon=True, name="spoolstock-" + printer.get("name", "printer"))
+        self.thread = threading.Thread(
+            target=self.run, daemon=True, name="spoolstock-" + printer.get("name", "printer")
+        )
         self.thread.start()
 
     def close(self):
@@ -673,11 +719,13 @@ class Link:
                 if self.stop.is_set():
                     return
                 if offline(e):
-                    self.state = f"not answering, it may be switched off. Trying again every {min(delay * 2, RETRY_MAX)} s."
+                    self.state = (
+                        f"not answering, it may be switched off. Trying again every {min(delay * 2, RETRY_MAX)} s."
+                    )
                 else:
                     self.state = f"reconnecting ({type(e).__name__}: {e})"
                 err = f"{type(e).__name__}: {e}"
-                if err != self.last_err:   # once per kind of failure, so a night switched off doesn't fill the log
+                if err != self.last_err:  # once per kind of failure, so a night switched off doesn't fill the log
                     log("printer.error", printer=self.name, error=err)
                     self.last_err = err
                 self.stop.wait(delay)
@@ -699,7 +747,14 @@ class Link:
                     if it.get("ip") == ip:
                         it["serial"] = self.serial
                 save_printers(items)
-            body = _mstr("MQTT") + b"\x04\xc2" + struct.pack("!H", 60) + _mstr("spoolstock-" + os.urandom(3).hex()) + _mstr("bblp") + _mstr(code)
+            body = (
+                _mstr("MQTT")
+                + b"\x04\xc2"
+                + struct.pack("!H", 60)
+                + _mstr("spoolstock-" + os.urandom(3).hex())
+                + _mstr("bblp")
+                + _mstr(code)
+            )
             s.sendall(_pkt(0x10, body))
             ack = _read_packet(s)
             if not ack or ack[0] >> 4 != 2:
@@ -726,7 +781,7 @@ class Link:
                     b = pk[1]
                     n = struct.unpack("!H", b[:2])[0]
                     try:
-                        doc = json.loads(b[2 + n:])
+                        doc = json.loads(b[2 + n :])
                     except ValueError:
                         doc = None
                     if isinstance(doc, dict):
@@ -747,7 +802,9 @@ class Link:
         cmd = p.get("command")
         if cmd == "project_file":
             # Reports only carry what changed, so record the new job's name here or the last one lingers
-            _merge(self.status, {"print": {"subtask_name": p.get("subtask_name") or "", "gcode_file": p.get("file") or ""}})
+            _merge(
+                self.status, {"print": {"subtask_name": p.get("subtask_name") or "", "gcode_file": p.get("file") or ""}}
+            )
             self.start_job(p)
             return
         if cmd not in (None, "push_status"):
@@ -785,19 +842,51 @@ class Link:
                     threading.Thread(target=self.fetch, args=(job,), daemon=True).start()
             elif state in ("FINISH", "FAILED") and job["state"] == "running":
                 job["state"] = "ended"
-                job["result"] = "finished" if state == "FINISH" else ("cancelled" if s.get("print_error") == CANCELLED else "failed")
+                job["result"] = (
+                    "finished"
+                    if state == "FINISH"
+                    else ("cancelled" if s.get("print_error") == CANCELLED else "failed")
+                )
                 job["ended_at"] = time.time()
                 STORE.save()
                 threading.Thread(target=self.end, args=(job,), daemon=True).start()
 
-    def new_job(self, name: str, file: str, plate: int, late: bool = False, mapping=None, mapping2=None, use_ams=None) -> dict:
+    def new_job(
+        self, name: str, file: str, plate: int, late: bool = False, mapping=None, mapping2=None, use_ams=None
+    ) -> dict:
         now = time.time()
-        job = {"key": f"{self.serial}-{int(now * 1000)}", "serial": self.serial, "printer": self.name, "name": name or "print",
-               "file": file, "plate": plate, "mapping": mapping, "mapping2": mapping2, "use_ams": use_ams, "late": late,
-               "started": now, "state": "sent", "percent": 0, "layer": 0, "layers": 0, "trays_seen": [], "fils": None}
+        job = {
+            "key": f"{self.serial}-{int(now * 1000)}",
+            "serial": self.serial,
+            "printer": self.name,
+            "name": name or "print",
+            "file": file,
+            "plate": plate,
+            "mapping": mapping,
+            "mapping2": mapping2,
+            "use_ams": use_ams,
+            "late": late,
+            "started": now,
+            "state": "sent",
+            "percent": 0,
+            "layer": 0,
+            "layers": 0,
+            "trays_seen": [],
+            "fils": None,
+        }
         STORE.active[self.serial] = job
         STORE.save()
-        log("job.start", printer=self.name, job=job["name"], file=file, plate=plate, mapping=mapping, mapping2=mapping2, use_ams=use_ams, late=late)
+        log(
+            "job.start",
+            printer=self.name,
+            job=job["name"],
+            file=file,
+            plate=plate,
+            mapping=mapping,
+            mapping2=mapping2,
+            use_ams=use_ams,
+            late=late,
+        )
         return job
 
     def start_job(self, p: dict):
@@ -810,9 +899,14 @@ class Link:
                 prev["state"] = "ended"
                 prev["result"] = "unseen"
                 threading.Thread(target=self.end, args=(prev,), daemon=True).start()
-            self.new_job(name=p.get("subtask_name") or "", file=p.get("file") or os.path.basename(str(p.get("url", ""))),
-                         plate=int(m.group(1)) if m else 1, mapping=p.get("ams_mapping"), mapping2=p.get("ams_mapping2"),
-                         use_ams=p.get("use_ams"))
+            self.new_job(
+                name=p.get("subtask_name") or "",
+                file=p.get("file") or os.path.basename(str(p.get("url", ""))),
+                plate=int(m.group(1)) if m else 1,
+                mapping=p.get("ams_mapping"),
+                mapping2=p.get("ams_mapping2"),
+                use_ams=p.get("use_ams"),
+            )
             job = STORE.active[self.serial]
             self.fetching = True
         # Read the grams straight away, so a spool that's too low is flagged before the print gets going
@@ -834,13 +928,19 @@ class Link:
                     try:
                         check_low(job)
                     except PermissionError:
-                        pass   # the tab tries again from Orca's main thread
+                        pass  # the tab tries again from Orca's main thread
                     except Exception as e:
                         job["checked_low"] = True
                         log("low.error", error=f"{type(e).__name__}: {e}")
                     return True
                 except Exception as e:
-                    log("job.file_error", printer=self.name, job=job["name"], attempt=attempt, error=f"{type(e).__name__}: {e}")
+                    log(
+                        "job.file_error",
+                        printer=self.name,
+                        job=job["name"],
+                        attempt=attempt,
+                        error=f"{type(e).__name__}: {e}",
+                    )
                     if self.stop.wait(15):
                         return False
             return False
@@ -848,9 +948,9 @@ class Link:
             self.fetching = False
 
     def end(self, job: dict):
-        job["checked_low"] = True   # too late to warn
+        job["checked_low"] = True  # too late to warn
         until = time.monotonic() + 120
-        while self.fetching and time.monotonic() < until:   # a read started during the print is still going
+        while self.fetching and time.monotonic() < until:  # a read started during the print is still going
             time.sleep(0.5)
         if job.get("fils") is None:
             self.fetch(job)
@@ -901,9 +1001,11 @@ def check_low(job: dict) -> None:
             continue
         need = round(f["g"])
         what = f"{sp['id'].upper()} ({' '.join(x for x in (sp.get('brand'), sp.get('material'), sp.get('colour')) if x)}) in {tray_name(t)}"
-        warnings.append(f"{job['name']} needs {need} g from {what}, which has about {round(left)} g left."
-                        if left < f["g"] else
-                        f"{job['name']} needs {need} g from {what}, which has about {round(left)} g left. That's only just enough.")
+        warnings.append(
+            f"{job['name']} needs {need} g from {what}, which has about {round(left)} g left."
+            if left < f["g"]
+            else f"{job['name']} needs {need} g from {what}, which has about {round(left)} g left. That's only just enough."
+        )
     with STORE.lock:
         job["checked_low"], job["warnings"] = True, warnings
         for w in warnings:
@@ -922,24 +1024,50 @@ def finish_job(job: dict):
     with STORE.lock:
         if STORE.active.get(job["serial"]) is job:
             del STORE.active[job["serial"]]
-        entry = {"key": job["key"], "printer": job["printer"], "serial": job["serial"], "name": job["name"], "plate": job["plate"],
-                 "result": job.get("result"), "percent": job.get("percent", 0), "layer": job.get("layer", 0),
-                 "layers": job.get("layers", 0), "at": int(job.get("ended_at", time.time()) * 1000),
-                 "items": [{"fil": f["id"], "type": f["type"], "colour": f["colour"], "g": f["g"], "tray": f["tray"]} for f in fils]}
+        entry = {
+            "key": job["key"],
+            "printer": job["printer"],
+            "serial": job["serial"],
+            "name": job["name"],
+            "plate": job["plate"],
+            "result": job.get("result"),
+            "percent": job.get("percent", 0),
+            "layer": job.get("layer", 0),
+            "layers": job.get("layers", 0),
+            "at": int(job.get("ended_at", time.time()) * 1000),
+            "items": [
+                {"fil": f["id"], "type": f["type"], "colour": f["colour"], "g": f["g"], "tray": f["tray"]} for f in fils
+            ],
+        }
         if job.get("result") == "finished" and fils and all(f["tray"] for f in fils):
             entry["pct"] = 100
             STORE.outbox.append(entry)
         else:
-            entry["why"] = ("No grams: the job file couldn't be read from the printer." if not fils else
-                            {"cancelled": "Cancelled", "failed": "Failed", "unseen": "The plugin didn't see this print end"}.get(job.get("result"), "Couldn't tell which tray it used"))
+            entry["why"] = (
+                "No grams: the job file couldn't be read from the printer."
+                if not fils
+                else {
+                    "cancelled": "Cancelled",
+                    "failed": "Failed",
+                    "unseen": "The plugin didn't see this print end",
+                }.get(job.get("result"), "Couldn't tell which tray it used")
+            )
             STORE.pending.append(entry)
         STORE.save()
-    log("job.end", printer=job["printer"], job=job["name"], result=job.get("result"), percent=job.get("percent"), items=entry["items"],
-        waiting=entry in STORE.pending)
+    log(
+        "job.end",
+        printer=job["printer"],
+        job=job["name"],
+        result=job.get("result"),
+        percent=job.get("percent"),
+        items=entry["items"],
+        waiting=entry in STORE.pending,
+    )
     _wake.set()
 
 
 # ---------- taking it off in Spool Stock ----------
+
 
 def resolve(entry: dict, snap: dict) -> list[str]:
     """Fill in the spool for each item from the trays. Returns what couldn't be matched."""
@@ -953,7 +1081,9 @@ def resolve(entry: dict, snap: dict) -> list[str]:
         if sp:
             it["spool"] = sp["id"]
         elif not printer:
-            missing.append(f"{entry['printer']} isn't set up in Spool Stock (Setup > Printers, with serial {entry['serial']})")
+            missing.append(
+                f"{entry['printer']} isn't set up in Spool Stock (Setup > Printers, with serial {entry['serial']})"
+            )
         else:
             missing.append(f"No spool in {printer.get('name')} {tray_name(t)} in Spool Stock")
     return missing
@@ -970,21 +1100,43 @@ def book(entry: dict) -> str:
         return "nothing"
     at = int(entry.get("at") or time.time() * 1000)
     for attempt in range(3):
-        writes = [{"update": {"name": CLOUD._name(f"jobs/{entry['key']}"), "fields": to_fs({
-            "at": at, "printer": entry["printer"], "serial": entry["serial"], "job": entry["name"], "plate": entry["plate"],
-            "pct": pct, "result": entry.get("result") or "", "source": "orca",
-            "items": [{"spool": sid, "g": round(g, 1)} for sid, g in use.items()]})["mapValue"]["fields"]},
-            "currentDocument": {"exists": False}}]
+        writes = [
+            {
+                "update": {
+                    "name": CLOUD._name(f"jobs/{entry['key']}"),
+                    "fields": to_fs(
+                        {
+                            "at": at,
+                            "printer": entry["printer"],
+                            "serial": entry["serial"],
+                            "job": entry["name"],
+                            "plate": entry["plate"],
+                            "pct": pct,
+                            "result": entry.get("result") or "",
+                            "source": "orca",
+                            "items": [{"spool": sid, "g": round(g, 1)} for sid, g in use.items()],
+                        }
+                    )["mapValue"]["fields"],
+                },
+                "currentDocument": {"exists": False},
+            }
+        ]
         for sid, g in use.items():
             doc, when = CLOUD.get(f"spools/{sid}")
             if doc is None:
                 raise CloudError("NOT_FOUND", f"spool {sid.upper()} isn't in Spool Stock")
             have = doc.get("remainG") if doc.get("remainG") is not None else doc.get("netG") or 0
             prints = [{"at": at, "name": entry["name"], "g": round(g, 1)}] + list(doc.get("prints") or [])
-            writes.append({"update": {"name": CLOUD._name(f"spools/{sid}"),
-                                      "fields": {"remainG": to_fs(max(0, round(have - g))), "prints": to_fs(prints[:30])}},
-                           "updateMask": {"fieldPaths": ["remainG", "prints"]},
-                           "currentDocument": {"updateTime": when}})
+            writes.append(
+                {
+                    "update": {
+                        "name": CLOUD._name(f"spools/{sid}"),
+                        "fields": {"remainG": to_fs(max(0, round(have - g))), "prints": to_fs(prints[:30])},
+                    },
+                    "updateMask": {"fieldPaths": ["remainG", "prints"]},
+                    "currentDocument": {"updateTime": when},
+                }
+            )
         try:
             CLOUD.commit(writes)
             entry["items_booked"] = [{"spool": sid, "g": round(g, 1)} for sid, g in use.items()]
@@ -1082,14 +1234,14 @@ def authorise(host: str, ports: tuple) -> str:
                     s.setblocking(False)
                     s.connect(addr)
                 except (BlockingIOError, InterruptedError):
-                    pass   # under way, so Orca allowed it
+                    pass  # under way, so Orca allowed it
                 finally:
                     s.close()
         except PermissionError as e:
             log("permission.denied", host=host, port=port, error=str(e))
             return "Orca didn't allow the connection. Press Connect and choose Yes."
         except OSError:
-            pass   # allowed, just not there right now (switched off, or no network)
+            pass  # allowed, just not there right now (switched off, or no network)
     _allowed.add(host)
     return ""
 
@@ -1130,8 +1282,13 @@ def open_socket(host: str, port: int, timeout: float, holder) -> socket.socket:
 
 def offline(e: Exception) -> bool:
     """A connection that failed because the device is off or out of reach, rather than refusing us."""
-    return isinstance(e, (TimeoutError, socket.timeout, ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError)) or \
-        (isinstance(e, OSError) and not isinstance(e, (ssl.SSLError, PermissionError)) and getattr(e, "errno", None) is not None)
+    return isinstance(
+        e, (TimeoutError, socket.timeout, ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError)
+    ) or (
+        isinstance(e, OSError)
+        and not isinstance(e, (ssl.SSLError, PermissionError))
+        and getattr(e, "errno", None) is not None
+    )
 
 
 def connect_all() -> list[str]:
@@ -1167,7 +1324,7 @@ def disconnect_all() -> None:
 
 # ---------- your stock, for the Stock view in the tab ----------
 
-LOW_G = 150   # the same as the app's low stock mark
+LOW_G = 150  # the same as the app's low stock mark
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -1181,13 +1338,27 @@ def stock_view(snap) -> dict | None:
     if not snap:
         return None
     locs = snap["locs"]
-    order = sorted(locs.values(), key=lambda l: (l.get("order") if isinstance(l.get("order"), (int, float)) else 1e9, l.get("name") or "", l["id"]))
+    order = sorted(
+        locs.values(),
+        key=lambda l: (
+            l.get("order") if isinstance(l.get("order"), (int, float)) else 1e9,
+            l.get("name") or "",
+            l["id"],
+        ),
+    )
     rank = {l["id"]: i for i, l in enumerate(order)}
-    fed: dict = {}   # storage id -> [(printer name, space or None)]
+    fed: dict = {}  # storage id -> [(printer name, space or None)]
     for p in snap["printers"].values():
         for f in p.get("feeds") or []:
             if f.get("loc"):
-                fed.setdefault(f["loc"], []).append((p.get("name") or "", int(f.get("space") or 1) if f.get("kind") == "external" and _spaced(locs.get(f["loc"])) else None))
+                fed.setdefault(f["loc"], []).append(
+                    (
+                        p.get("name") or "",
+                        int(f.get("space") or 1)
+                        if f.get("kind") == "external" and _spaced(locs.get(f["loc"]))
+                        else None,
+                    )
+                )
     places: dict = {}
     for l in order:
         for i, s in enumerate(_seated(snap, l) if _spaced(l) else _loose(snap, l)):
@@ -1199,20 +1370,35 @@ def stock_view(snap) -> dict | None:
             continue
         l = locs.get(s.get("loc"))
         r, i, space = places.get(s["id"], (len(order), 0, None))
-        cols = [c for c in (s.get("colours") or []) if isinstance(c, str) and HEX.match(c)] or ([s["hex"]] if HEX.match(str(s.get("hex") or "")) else [])
+        cols = [c for c in (s.get("colours") or []) if isinstance(c, str) and HEX.match(c)] or (
+            [s["hex"]] if HEX.match(str(s.get("hex") or "")) else []
+        )
         left, net = _left(s), s.get("netG") if isinstance(s.get("netG"), (int, float)) else None
         printer = ""
         if l:
             for name, sp in fed.get(l["id"], []):
                 if sp is None or sp == space:
                     printer = name
-        out.append({"id": s["id"], "code": s["id"].upper(), "brand": s.get("brand") or "", "material": s.get("material") or "",
-                    "colour": s.get("colour") or "", "finish": s.get("finish") or "", "cols": cols,
-                    "pattern": s.get("pattern") if len(cols) > 1 and s.get("pattern") in ("split", "gradient") else "solid",
-                    "left": round(left) if left is not None else None, "net": round(net) if net else None,
-                    "low": left is not None and left <= LOW_G,
-                    "where": (l.get("name") or "") + (f", space {space}" if space else "") if l else "Not in a storage",
-                    "group": (l.get("group") or "") if l else "", "locRank": r, "pos": i, "printer": printer})
+        out.append(
+            {
+                "id": s["id"],
+                "code": s["id"].upper(),
+                "brand": s.get("brand") or "",
+                "material": s.get("material") or "",
+                "colour": s.get("colour") or "",
+                "finish": s.get("finish") or "",
+                "cols": cols,
+                "pattern": s.get("pattern") if len(cols) > 1 and s.get("pattern") in ("split", "gradient") else "solid",
+                "left": round(left) if left is not None else None,
+                "net": round(net) if net else None,
+                "low": left is not None and left <= LOW_G,
+                "where": (l.get("name") or "") + (f", space {space}" if space else "") if l else "Not in a storage",
+                "group": (l.get("group") or "") if l else "",
+                "locRank": r,
+                "pos": i,
+                "printer": printer,
+            }
+        )
     out.sort(key=lambda x: (x["locRank"], x["pos"], x["id"]))
     return {"spools": out, "at": time.strftime("%H:%M", time.localtime(CLOUD.snap_at)) if CLOUD.snap_at else ""}
 
@@ -1227,7 +1413,13 @@ def stock_view(snap) -> dict | None:
 BUNDLE_ID, BUNDLE_NAME = "spool-stock", "Spool Stock"
 _SAFE_NAME = re.compile(r'^[^\\/:*?"<>|\x00-\x1f]{1,150}$')
 _SAFE_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-_KEEP_OUT = ("compatible_printers", "compatible_prints", "compatible_printers_condition", "filament_start_gcode", "filament_end_gcode")
+_KEEP_OUT = (
+    "compatible_printers",
+    "compatible_prints",
+    "compatible_printers_condition",
+    "filament_start_gcode",
+    "filament_end_gcode",
+)
 
 
 def _preset_state() -> dict:
@@ -1298,8 +1490,15 @@ def build_presets(items: list, has=None) -> tuple[dict, list]:
         if not parent:
             skipped.append(it.get("label") or name)
             continue
-        preset = {"type": "filament", "name": name, "from": "User", "instantiation": "true", "inherits": parent,
-                  "version": str(p.get("version") or "2.4.0.0"), "filament_settings_id": [name]}
+        preset = {
+            "type": "filament",
+            "name": name,
+            "from": "User",
+            "instantiation": "true",
+            "inherits": parent,
+            "version": str(p.get("version") or "2.4.0.0"),
+            "filament_settings_id": [name],
+        }
         for k, v in p.items():
             if k in preset or k in _KEEP_OUT or k.startswith("printhost") or not _SAFE_KEY.match(k):
                 continue
@@ -1352,7 +1551,13 @@ def sync_presets(feed: dict | None) -> dict:
     base = orca_dir() / "user" / folder / "_local" / BUNDLE_ID
     fdir = base / "filament"
     presets, skipped = build_presets(items, _finder())
-    meta = {"id": BUNDLE_ID, "name": BUNDLE_NAME, "version": VERSION, "description": "The filaments you own in Spool Stock", "author": "Spool Stock"}
+    meta = {
+        "id": BUNDLE_ID,
+        "name": BUNDLE_NAME,
+        "version": VERSION,
+        "description": "The filaments you own in Spool Stock",
+        "author": "Spool Stock",
+    }
     changed = _write_text_if_changed(base / "bundle_metadata.json", json.dumps(meta, indent=4))
     for file, preset in presets.items():
         changed |= _write_text_if_changed(fdir / file, json.dumps(preset, indent=4))
@@ -1375,7 +1580,12 @@ def sync_presets(feed: dict | None) -> dict:
             j = json.loads(old.read_text(encoding="utf-8")) if old.is_file() else None
         except Exception:
             j = None
-        if isinstance(j, dict) and j.get("from") == "User" and j.get("name") == file[:-5] and file.endswith(" (Spool Stock).json"):
+        if (
+            isinstance(j, dict)
+            and j.get("from") == "User"
+            and j.get("name") == file[:-5]
+            and file.endswith(" (Spool Stock).json")
+        ):
             keep = DATA / "old-presets" / file
             keep.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -1387,20 +1597,51 @@ def sync_presets(feed: dict | None) -> dict:
             except OSError as e:
                 log("presets.move_error", file=file, error=str(e))
     how, detail = ("live", "nothing changed") if not changed and state.get("how") == "live" else reload_bundle()
-    state.update({"on": True, "sig": (feed or {}).get("sig", ""), "folder": folder, "count": len(presets), "skipped": skipped,
-                  "how": how, "detail": detail, "at": time.time(), "moved": moved + int(state.get("moved") or 0) if moved else state.get("moved", 0)})
+    state.update(
+        {
+            "on": True,
+            "sig": (feed or {}).get("sig", ""),
+            "folder": folder,
+            "count": len(presets),
+            "skipped": skipped,
+            "how": how,
+            "detail": detail,
+            "at": time.time(),
+            "moved": moved + int(state.get("moved") or 0) if moved else state.get("moved", 0),
+        }
+    )
     _save_preset_state(state)
-    log("presets.sync", folder=folder, presets=len(presets), removed=removed, skipped=skipped, moved_old=moved, reload=how, detail=detail)
+    log(
+        "presets.sync",
+        folder=folder,
+        presets=len(presets),
+        removed=removed,
+        skipped=skipped,
+        moved_old=moved,
+        reload=how,
+        detail=detail,
+    )
     return state
 
 
 def presets_view(feed: dict | None) -> dict:
     st = _preset_state()
     items = (feed or {}).get("items") or []
-    return {"on": bool(st.get("on")), "feed": [{"label": it.get("label") or it.get("name"), "own": bool(it.get("own")), "name": it.get("name")} for it in items],
-            "have": feed is not None, "count": st.get("count", 0), "skipped": st.get("skipped") or [], "how": st.get("how", ""),
-            "detail": st.get("detail", ""), "when": time.strftime("%d %b %H:%M", time.localtime(st["at"])) if st.get("at") else "",
-            "behind": bool(st.get("on")) and feed is not None and feed.get("sig") != st.get("sig"), "moved": st.get("moved", 0)}
+    return {
+        "on": bool(st.get("on")),
+        "feed": [
+            {"label": it.get("label") or it.get("name"), "own": bool(it.get("own")), "name": it.get("name")}
+            for it in items
+        ],
+        "have": feed is not None,
+        "count": st.get("count", 0),
+        "skipped": st.get("skipped") or [],
+        "how": st.get("how", ""),
+        "detail": st.get("detail", ""),
+        "when": time.strftime("%d %b %H:%M", time.localtime(st["at"])) if st.get("at") else "",
+        "behind": bool(st.get("on")) and feed is not None and feed.get("sig") != st.get("sig"),
+        "moved": st.get("moved", 0),
+    }
 
 
 def remove_presets() -> None:
@@ -1426,8 +1667,8 @@ def remove_presets() -> None:
 # Camera links (with their passwords) stay in cameras.json on this PC and are never logged.
 
 CAMERAS = DATA / "cameras.json"
-CAM_IDLE = 10          # seconds without the page asking before a camera is let go
-CAM_KEEP = 300         # fragments kept for a page that's catching up
+CAM_IDLE = 10  # seconds without the page asking before a camera is let go
+CAM_KEEP = 300  # fragments kept for a page that's catching up
 
 
 def load_cameras() -> list[dict]:
@@ -1452,7 +1693,7 @@ def parse_rtsp(url: str) -> dict | None:
     rest = m.group(1).strip()
     # the host comes after the last @, so an @ or / in the password still works
     at = rest.rfind("@")
-    cred, after = (rest[:at], rest[at + 1:]) if at >= 0 else ("", rest)
+    cred, after = (rest[:at], rest[at + 1 :]) if at >= 0 else ("", rest)
     hostport, _, path = after.partition("/")
     user, _, password = cred.partition(":")
     host, _, port = hostport.partition(":")
@@ -1460,11 +1701,17 @@ def parse_rtsp(url: str) -> dict | None:
         return None
     user, password = urllib.parse.unquote(user), urllib.parse.unquote(password)
     port_n = int(port or 554)
-    return {"user": user, "password": password, "host": host, "port": port_n,
-            "url": f"rtsp://{host}{':' + str(port_n) if port else ''}/{path}"}
+    return {
+        "user": user,
+        "password": password,
+        "host": host,
+        "port": port_n,
+        "url": f"rtsp://{host}{':' + str(port_n) if port else ''}/{path}",
+    }
 
 
 # --- H.264 bits ---
+
 
 def _unescape(nal: bytes) -> bytes:
     return nal.replace(b"\x00\x00\x03", b"\x00\x00")
@@ -1505,7 +1752,9 @@ def sps_size(sps: bytes) -> tuple[int, int]:
         chroma = b.ue()
         if chroma == 3:
             b.u(1)
-        b.ue(); b.ue(); b.u(1)
+        b.ue()
+        b.ue()
+        b.u(1)
         if b.u(1):
             for i in range(8 if chroma != 3 else 12):
                 if b.u(1):
@@ -1519,10 +1768,13 @@ def sps_size(sps: bytes) -> tuple[int, int]:
     if poc == 0:
         b.ue()
     elif poc == 1:
-        b.u(1); b.se(); b.se()
+        b.u(1)
+        b.se()
+        b.se()
         for _ in range(b.ue()):
             b.se()
-    b.ue(); b.u(1)
+    b.ue()
+    b.u(1)
     w_mbs, h_maps = b.ue() + 1, b.ue() + 1
     frame_mbs_only = b.u(1)
     if not frame_mbs_only:
@@ -1550,23 +1802,75 @@ _MATRIX = struct.pack(">9I", 0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000)
 def mp4_init(sps: bytes, pps: bytes) -> tuple[bytes, str]:
     """The MP4 header (ftyp and moov) for one H.264 track at 90 kHz, and the codec string for MediaSource."""
     w, h = sps_size(sps)
-    avcc = _box(b"avcC", bytes([1, sps[1], sps[2], sps[3], 0xFF, 0xE1]), struct.pack(">H", len(sps)), sps,
-                b"\x01", struct.pack(">H", len(pps)), pps)
-    avc1 = _box(b"avc1", b"\x00" * 6, struct.pack(">H", 1), b"\x00" * 16, struct.pack(">HH", w, h),
-                struct.pack(">II", 0x480000, 0x480000), b"\x00" * 4, struct.pack(">H", 1), b"\x00" * 32,
-                struct.pack(">Hh", 0x18, -1), avcc)
-    stbl = _box(b"stbl", _full(b"stsd", 0, 0, struct.pack(">I", 1), avc1), _full(b"stts", 0, 0, b"\x00" * 4),
-                _full(b"stsc", 0, 0, b"\x00" * 4), _full(b"stsz", 0, 0, b"\x00" * 8), _full(b"stco", 0, 0, b"\x00" * 4))
-    minf = _box(b"minf", _full(b"vmhd", 0, 1, b"\x00" * 8),
-                _box(b"dinf", _full(b"dref", 0, 0, struct.pack(">I", 1), _full(b"url ", 0, 1))), stbl)
-    mdia = _box(b"mdia", _full(b"mdhd", 0, 0, struct.pack(">IIII", 0, 0, 90000, 0), struct.pack(">HH", 0x55C4, 0)),
-                _full(b"hdlr", 0, 0, b"\x00" * 4, b"vide", b"\x00" * 12, b"Video\x00"), minf)
-    tkhd = _full(b"tkhd", 0, 3, struct.pack(">IIIII", 0, 0, 1, 0, 0), b"\x00" * 8, struct.pack(">hhhH", 0, 0, 0, 0),
-                 _MATRIX, struct.pack(">II", w << 16, h << 16))
-    mvhd = _full(b"mvhd", 0, 0, struct.pack(">IIII", 0, 0, 1000, 0), struct.pack(">IH", 0x10000, 0x100), b"\x00" * 10,
-                 _MATRIX, b"\x00" * 24, struct.pack(">I", 2))
-    moov = _box(b"moov", mvhd, _box(b"trak", tkhd, mdia),
-                _box(b"mvex", _full(b"trex", 0, 0, struct.pack(">IIIII", 1, 1, 0, 0, 0))))
+    avcc = _box(
+        b"avcC",
+        bytes([1, sps[1], sps[2], sps[3], 0xFF, 0xE1]),
+        struct.pack(">H", len(sps)),
+        sps,
+        b"\x01",
+        struct.pack(">H", len(pps)),
+        pps,
+    )
+    avc1 = _box(
+        b"avc1",
+        b"\x00" * 6,
+        struct.pack(">H", 1),
+        b"\x00" * 16,
+        struct.pack(">HH", w, h),
+        struct.pack(">II", 0x480000, 0x480000),
+        b"\x00" * 4,
+        struct.pack(">H", 1),
+        b"\x00" * 32,
+        struct.pack(">Hh", 0x18, -1),
+        avcc,
+    )
+    stbl = _box(
+        b"stbl",
+        _full(b"stsd", 0, 0, struct.pack(">I", 1), avc1),
+        _full(b"stts", 0, 0, b"\x00" * 4),
+        _full(b"stsc", 0, 0, b"\x00" * 4),
+        _full(b"stsz", 0, 0, b"\x00" * 8),
+        _full(b"stco", 0, 0, b"\x00" * 4),
+    )
+    minf = _box(
+        b"minf",
+        _full(b"vmhd", 0, 1, b"\x00" * 8),
+        _box(b"dinf", _full(b"dref", 0, 0, struct.pack(">I", 1), _full(b"url ", 0, 1))),
+        stbl,
+    )
+    mdia = _box(
+        b"mdia",
+        _full(b"mdhd", 0, 0, struct.pack(">IIII", 0, 0, 90000, 0), struct.pack(">HH", 0x55C4, 0)),
+        _full(b"hdlr", 0, 0, b"\x00" * 4, b"vide", b"\x00" * 12, b"Video\x00"),
+        minf,
+    )
+    tkhd = _full(
+        b"tkhd",
+        0,
+        3,
+        struct.pack(">IIIII", 0, 0, 1, 0, 0),
+        b"\x00" * 8,
+        struct.pack(">hhhH", 0, 0, 0, 0),
+        _MATRIX,
+        struct.pack(">II", w << 16, h << 16),
+    )
+    mvhd = _full(
+        b"mvhd",
+        0,
+        0,
+        struct.pack(">IIII", 0, 0, 1000, 0),
+        struct.pack(">IH", 0x10000, 0x100),
+        b"\x00" * 10,
+        _MATRIX,
+        b"\x00" * 24,
+        struct.pack(">I", 2),
+    )
+    moov = _box(
+        b"moov",
+        mvhd,
+        _box(b"trak", tkhd, mdia),
+        _box(b"mvex", _full(b"trex", 0, 0, struct.pack(">IIIII", 1, 1, 0, 0, 0))),
+    )
     ftyp = _box(b"ftyp", b"isom", struct.pack(">I", 0x200), b"isomiso6avc1mp41")
     return ftyp + moov, "avc1.%02X%02X%02X" % (sps[1], sps[2], sps[3])
 
@@ -1577,15 +1881,24 @@ def mp4_fragment(seq: int, start: int, duration: int, nals: list[bytes], key: bo
     flags = 0x02000000 if key else 0x01010000
 
     def moof(offset):
-        trun = _full(b"trun", 0, 0x000701, struct.pack(">Ii", 1, offset), struct.pack(">III", duration, len(data), flags))
-        traf = _box(b"traf", _full(b"tfhd", 0, 0x020000, struct.pack(">I", 1)), _full(b"tfdt", 1, 0, struct.pack(">Q", start)), trun)
+        trun = _full(
+            b"trun", 0, 0x000701, struct.pack(">Ii", 1, offset), struct.pack(">III", duration, len(data), flags)
+        )
+        traf = _box(
+            b"traf",
+            _full(b"tfhd", 0, 0x020000, struct.pack(">I", 1)),
+            _full(b"tfdt", 1, 0, struct.pack(">Q", start)),
+            trun,
+        )
         return _box(b"moof", _full(b"mfhd", 0, 0, struct.pack(">I", seq)), traf)
+
     m = moof(0)
     m = moof(len(m) + 8)
     return m + _box(b"mdat", data)
 
 
 # --- RTSP over TCP ---
+
 
 class CamError(Exception):
     pass
@@ -1628,7 +1941,7 @@ class Camera:
         self.gen = 0
         self.init = b""
         self.mime = ""
-        self.frags: list[tuple[int, bytes]] = []   # (seq, fragment), kept from the last keyframe on
+        self.frags: list[tuple[int, bytes]] = []  # (seq, fragment), kept from the last keyframe on
         self.seq = 0
         self.thread = None
         self.stop = threading.Event()
@@ -1665,7 +1978,7 @@ class Camera:
                 after = -1
             first_key = self.frags[0][0] if self.frags else 0
             if after < first_key - 1:
-                after = -1   # too far behind: start again from the last keyframe
+                after = -1  # too far behind: start again from the last keyframe
             new = [(s, f) for s, f in self.frags if s > after]
             out["chunks"] = [base64.b64encode(f).decode() for _, f in new]
             out["seq"] = new[-1][0] if new else after
@@ -1690,8 +2003,11 @@ class Camera:
             except Exception as e:
                 if self.stop.is_set():
                     break
-                self.status = ("Not answering, it may be switched off. Trying again." if offline(e)
-                               else f"Reconnecting ({type(e).__name__}: {e})")
+                self.status = (
+                    "Not answering, it may be switched off. Trying again."
+                    if offline(e)
+                    else f"Reconnecting ({type(e).__name__}: {e})"
+                )
                 err = f"{type(e).__name__}: {e}"
                 if err != self.last_err:
                     log("camera.error", camera=self.name, error=err)
@@ -1712,10 +2028,12 @@ class Camera:
             headers["Session"] = self.session_id
         if self.auth:
             headers["Authorization"] = self._authorisation(method, url)
-        s.sendall((f"{method} {url} RTSP/1.0\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n").encode())
+        s.sendall(
+            (f"{method} {url} RTSP/1.0\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n").encode()
+        )
         while True:
             first = rd.exact(1)
-            if first == b"$":   # video already flowing ahead of the reply
+            if first == b"$":  # video already flowing ahead of the reply
                 rd.exact(1)
                 rd.exact(struct.unpack(">H", rd.exact(2))[0])
                 continue
@@ -1746,7 +2064,7 @@ class Camera:
         else:
             head += f', response="{md5(f"{ha1}:{p.get("nonce", "")}:{ha2}")}"'
         if p.get("algorithm"):
-            head += f', algorithm={p["algorithm"]}'
+            head += f", algorithm={p['algorithm']}"
         if p.get("opaque"):
             head += f', opaque="{p["opaque"]}"'
         return head
@@ -1757,7 +2075,7 @@ class Camera:
             raise CamError("That isn't an RTSP link. It should start rtsp://")
         self.status, self.cseq, self.session_id, self.auth = "Connecting", 0, "", None
         with self.lock:
-            self.init, self.frags = b"", []   # a new connection starts a new stream for the page
+            self.init, self.frags = b"", []  # a new connection starts a new stream for the page
         with open_socket(u["host"], u["port"], 5, self) as s:
             s.settimeout(15)
             rd = _Reader(s)
@@ -1773,7 +2091,9 @@ class Camera:
                     self.auth = ("basic", {})
                 code, hdrs, body = self._request(s, rd, "DESCRIBE", u["url"], {"Accept": "application/sdp"})
                 if code == 401:
-                    raise CamError("The camera didn't accept the username and password. Check the Camera Account in the Tapo app.")
+                    raise CamError(
+                        "The camera didn't accept the username and password. Check the Camera Account in the Tapo app."
+                    )
             if code == 404:
                 raise CamError("The camera has no stream at that link. Check the end of it, for example /stream2.")
             if code != 200:
@@ -1785,9 +2105,17 @@ class Camera:
                 raise CamError("The camera didn't offer any video.")
             codec = (re.search(r"a=rtpmap:\d+\s+([\w-]+)/", video) or [None, ""])[1].upper()
             if codec != "H264":
-                raise CamError(f"The camera sends {codec or 'an unknown format'} video, and only H.264 can be shown here.")
+                raise CamError(
+                    f"The camera sends {codec or 'an unknown format'} video, and only H.264 can be shown here."
+                )
             control = (re.search(r"a=control:\s*(\S+)", video) or [None, ""])[1]
-            track = base if control in ("", "*") else control if control.lower().startswith("rtsp://") else base.rstrip("/") + "/" + control
+            track = (
+                base
+                if control in ("", "*")
+                else control
+                if control.lower().startswith("rtsp://")
+                else base.rstrip("/") + "/" + control
+            )
             self.sps = self.pps = b""
             sprop = re.search(r"sprop-parameter-sets=([A-Za-z0-9+/=]+),([A-Za-z0-9+/=]+)", video)
             if sprop:
@@ -1808,7 +2136,11 @@ class Camera:
             self.status = "Waiting for a picture"
             self.read_video(s, rd, chan, base)
             try:
-                s.sendall((f"TEARDOWN {base} RTSP/1.0\r\nCSeq: {self.cseq + 1}\r\nSession: {self.session_id}\r\n\r\n").encode())
+                s.sendall(
+                    (
+                        f"TEARDOWN {base} RTSP/1.0\r\nCSeq: {self.cseq + 1}\r\nSession: {self.session_id}\r\n\r\n"
+                    ).encode()
+                )
             except OSError:
                 pass
 
@@ -1816,7 +2148,7 @@ class Camera:
         nals: list[bytes] = []
         fu = None
         ts_now = None
-        pending = None   # the last frame, held until the next one gives its duration
+        pending = None  # the last frame, held until the next one gives its duration
         t0 = None
         last_ts = 0
         unwrapped = 0
@@ -1824,11 +2156,16 @@ class Camera:
         while not self.stop.is_set() and not self.idle():
             if time.monotonic() - ping > 25:
                 self.cseq += 1
-                s.sendall((f"GET_PARAMETER {base} RTSP/1.0\r\nCSeq: {self.cseq}\r\nSession: {self.session_id}\r\n"
-                           + (f"Authorization: {self._authorisation('GET_PARAMETER', base)}\r\n" if self.auth else "") + "\r\n").encode())
+                s.sendall(
+                    (
+                        f"GET_PARAMETER {base} RTSP/1.0\r\nCSeq: {self.cseq}\r\nSession: {self.session_id}\r\n"
+                        + (f"Authorization: {self._authorisation('GET_PARAMETER', base)}\r\n" if self.auth else "")
+                        + "\r\n"
+                    ).encode()
+                )
                 ping = time.monotonic()
             first = rd.exact(1)
-            if first != b"$":   # a reply to the keep-alive
+            if first != b"$":  # a reply to the keep-alive
                 head = (first + rd.until(b"\r\n\r\n")).decode("utf-8", "replace")
                 n = re.search(r"content-length:\s*(\d+)", head, re.I)
                 rd.exact(int(n.group(1)) if n else 0)
@@ -1841,9 +2178,9 @@ class Camera:
             marker = pkt[1] & 0x80
             ts = struct.unpack(">I", pkt[4:8])[0]
             off = 12 + cc * 4
-            if pkt[0] & 0x10 and len(pkt) >= off + 4:   # header extension
-                off += 4 + struct.unpack(">H", pkt[off + 2:off + 4])[0] * 4
-            pay = pkt[off:len(pkt) - (pkt[-1] if pkt[0] & 0x20 else 0)]
+            if pkt[0] & 0x10 and len(pkt) >= off + 4:  # header extension
+                off += 4 + struct.unpack(">H", pkt[off + 2 : off + 4])[0] * 4
+            pay = pkt[off : len(pkt) - (pkt[-1] if pkt[0] & 0x20 else 0)]
             if not pay:
                 continue
             if ts_now is not None and ts != ts_now and nals:
@@ -1853,13 +2190,13 @@ class Camera:
             t = pay[0] & 0x1F
             if 1 <= t <= 23:
                 nals.append(pay)
-            elif t == 24:   # STAP-A: several NALs in one packet
+            elif t == 24:  # STAP-A: several NALs in one packet
                 i = 1
                 while i + 2 <= len(pay):
-                    n = struct.unpack(">H", pay[i:i + 2])[0]
-                    nals.append(pay[i + 2:i + 2 + n])
+                    n = struct.unpack(">H", pay[i : i + 2])[0]
+                    nals.append(pay[i + 2 : i + 2 + n])
                     i += 2 + n
-            elif t == 28 and len(pay) > 2:   # FU-A: one NAL split over several packets
+            elif t == 28 and len(pay) > 2:  # FU-A: one NAL split over several packets
                 if pay[1] & 0x80:
                     fu = bytearray([(pay[0] & 0xE0) | (pay[1] & 0x1F)]) + pay[2:]
                 elif fu is not None:
@@ -1898,7 +2235,7 @@ class Camera:
         with self.lock:
             if not self.init:
                 if not (key and self.sps and self.pps):
-                    return   # wait for the first keyframe
+                    return  # wait for the first keyframe
                 try:
                     self.init, self.mime = mp4_init(self.sps, self.pps)
                 except Exception as e:
@@ -1911,7 +2248,7 @@ class Camera:
             self.ts_last = ts
             self.seq += 1
             frag = mp4_fragment(self.seq, self.base, duration, body, key)
-            if key:   # keep the last two keyframes' worth, so a page that's a little behind can catch up
+            if key:  # keep the last two keyframes' worth, so a page that's a little behind can catch up
                 self.keys = (self.keys + [self.seq])[-2:]
                 self.frags = [f for f in self.frags if f[0] >= self.keys[0]]
             self.frags.append((self.seq, frag))
@@ -1938,8 +2275,15 @@ def camera(cid: str) -> Camera | None:
 
 
 def cameras_view() -> list[dict]:
-    return [{"id": c["id"], "name": c.get("name") or "", "printer": c.get("printer") or "",
-             "host": (parse_rtsp(c.get("url", "")) or {}).get("host", "")} for c in load_cameras()]
+    return [
+        {
+            "id": c["id"],
+            "name": c.get("name") or "",
+            "printer": c.get("printer") or "",
+            "host": (parse_rtsp(c.get("url", "")) or {}).get("host", ""),
+        }
+        for c in load_cameras()
+    ]
 
 
 def watch_cameras(want: list) -> dict:
@@ -1955,12 +2299,19 @@ def watch_cameras(want: list) -> dict:
             # Reach it once from here so Orca can ask permission. Only every 30 s, as an unreachable camera
             # would otherwise hold up Orca on every request.
             if time.monotonic() - _cam_checked.get(host, -60) < 30:
-                out.append({"id": cam.id, "status": cam.status if cam.status != "Starting" else "Checking the connection"})
+                out.append(
+                    {"id": cam.id, "status": cam.status if cam.status != "Starting" else "Checking the connection"}
+                )
                 continue
             _cam_checked[host] = time.monotonic()
             why = authorise(host, (u["port"],))
             if why.startswith("Orca didn't allow"):
-                out.append({"id": cam.id, "status": "Orca didn't allow the connection to this camera. Press Connect on the Prints page and choose Yes."})
+                out.append(
+                    {
+                        "id": cam.id,
+                        "status": "Orca didn't allow the connection to this camera. Press Connect on the Prints page and choose Yes.",
+                    }
+                )
                 continue
             _allowed.add(host)
         cam.want()
@@ -1970,11 +2321,15 @@ def watch_cameras(want: list) -> dict:
 
 # ---------- the tab ----------
 
+
 def _spool_options(snap) -> list[dict]:
     if not snap:
         return []
-    out = [{"id": s["id"], "label": spool_label(s), "mat": (s.get("material") or "").upper()}
-           for s in snap["spools"].values() if s.get("status") != "used"]
+    out = [
+        {"id": s["id"], "label": spool_label(s), "mat": (s.get("material") or "").upper()}
+        for s in snap["spools"].values()
+        if s.get("status") != "used"
+    ]
     return sorted(out, key=lambda x: x["id"])
 
 
@@ -2009,11 +2364,34 @@ def _state(hint: str = "") -> dict:
             for i, f in enumerate(fils):
                 t = tray_of({**job, "fil_count": len(fils)}, f["id"], i)
                 sp = tray_to_spool(snap, ss, t[0], t[1]) if (t and ss and snap) else None
-                trays.append({"colour": f["colour"], "type": f["type"], "g": f["g"], "tray": tray_name(t), "spool": spool_label(sp) if sp else ""})
-        rows.append({"name": p.get("name", ""), "ip": p.get("ip", ""), "serial": serial, "state": link.state if link else "not connected",
-                     "linked": (ss or {}).get("name", ""), "job": {"name": job["name"], "percent": job.get("percent", 0), "state": job["state"],
-                                                                     "late": job.get("late"), "trays": trays,
-                                                                     "warnings": job.get("warnings") or []} if job else None})
+                trays.append(
+                    {
+                        "colour": f["colour"],
+                        "type": f["type"],
+                        "g": f["g"],
+                        "tray": tray_name(t),
+                        "spool": spool_label(sp) if sp else "",
+                    }
+                )
+        rows.append(
+            {
+                "name": p.get("name", ""),
+                "ip": p.get("ip", ""),
+                "serial": serial,
+                "state": link.state if link else "not connected",
+                "linked": (ss or {}).get("name", ""),
+                "job": {
+                    "name": job["name"],
+                    "percent": job.get("percent", 0),
+                    "state": job["state"],
+                    "late": job.get("late"),
+                    "trays": trays,
+                    "warnings": job.get("warnings") or [],
+                }
+                if job
+                else None,
+            }
+        )
     with STORE.lock:
         pending = []
         for e in STORE.pending:
@@ -2021,62 +2399,377 @@ def _state(hint: str = "") -> dict:
             items = []
             for it in e["items"]:
                 t = it.get("tray")
-                guess = it.get("spool") or ((tray_to_spool(snap, ss, t[0], t[1]) or {}).get("id", "") if (t and ss) else "")
+                guess = it.get("spool") or (
+                    (tray_to_spool(snap, ss, t[0], t[1]) or {}).get("id", "") if (t and ss) else ""
+                )
                 items.append({**it, "spool": guess, "trayName": tray_name(t)})
             pending.append({**e, "items": items})
-        recent = [{"when": time.strftime("%d %b %H:%M", time.localtime(r["at"])), "text": r["text"]} for r in STORE.recent[:10]]
+        recent = [
+            {"when": time.strftime("%d %b %H:%M", time.localtime(r["at"])), "text": r["text"]}
+            for r in STORE.recent[:10]
+        ]
         outbox = len(STORE.outbox)
-    return {"type": "state", "version": VERSION, "hint": hint, "signedIn": CLOUD.signed_in, "account": CLOUD.acct.get("e", ""),
-            "cloud": CLOUD.status, "printers": rows, "pending": pending, "recent": recent, "outbox": outbox,
-            "spools": _spool_options(snap), "log": str(LOG), "dark": orca_dark(),
-            "stock": stock_view(snap) if CLOUD.signed_in else None,
-            "presets": presets_view(snap.get("orca")) if (CLOUD.signed_in and snap) else None,
-            "cameras": cameras_view()}
+    return {
+        "type": "state",
+        "version": VERSION,
+        "hint": hint,
+        "signedIn": CLOUD.signed_in,
+        "account": CLOUD.acct.get("e", ""),
+        "cloud": CLOUD.status,
+        "printers": rows,
+        "pending": pending,
+        "recent": recent,
+        "outbox": outbox,
+        "spools": _spool_options(snap),
+        "log": str(LOG),
+        "dark": orca_dark(),
+        "stock": stock_view(snap) if CLOUD.signed_in else None,
+        "presets": presets_view(snap.get("orca")) if (CLOUD.signed_in and snap) else None,
+        "cameras": cameras_view(),
+    }
 
 
 PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><style>
-:root{color-scheme:light;--fg:#262e30;--bg:#fff;--card:#fff;--line:#d6d6d6;--go:#009688;--warn:#c76b00;--warnbg:#fff6e8;--track:#ececec}
-:root[data-theme=dark]{color-scheme:dark;--fg:#efeff0;--bg:#2d2d31;--card:#36363c;--line:#4c4c54;--warn:#e7a23c;--warnbg:#3b3122;--track:#47474e}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;--fg:#efeff0;--bg:#2d2d31;--card:#36363c;--line:#4c4c54;--warn:#e7a23c;--warnbg:#3b3122;--track:#47474e}}
-body{font:14px/1.45 system-ui,"Segoe UI",sans-serif;margin:0;padding:16px;color:var(--fg);background:var(--bg)}
-h1{font-size:20px;margin:0 0 8px}h2{font-size:15px;margin:20px 0 6px;text-transform:uppercase;letter-spacing:.04em;opacity:.75}
-h3{font-size:14px;margin:16px 0 4px;display:flex;gap:8px;align-items:baseline}h3 .muted{font-weight:normal}
-nav{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:10px}
-nav button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:6px 12px;opacity:.75}
-nav button[aria-current]{border-bottom-color:var(--go);opacity:1;font-weight:600}
-.card{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:8px 0;background:var(--card)}
-.muted{opacity:.7;font-size:13px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-input,select,textarea{font:inherit;padding:5px 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:inherit}
-input{width:150px}input.pct{width:60px}select{max-width:100%}textarea{width:100%;box-sizing:border-box;height:60px}
-input[type=checkbox]{width:auto}input[type=search]{width:200px}
-button{font:inherit;padding:6px 12px;border:1px solid var(--line);border-radius:5px;background:transparent;color:inherit;cursor:pointer}
-button.go{background:var(--go);border-color:var(--go);color:#fff}
-.sw{display:inline-block;width:14px;height:14px;border:1px solid #0006;border-radius:3px;vertical-align:-2px}
-table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}td{border-top:1px solid var(--line);padding:4px 6px;vertical-align:middle}
-.warn{border-color:var(--warn)}.alert{background:var(--warnbg);border-left:3px solid var(--warn);padding:6px 8px;margin-top:6px;border-radius:4px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
-.sp{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--card)}
-.sp.low{border-color:var(--warn)}
-.disc{width:34px;height:34px;border-radius:50%;border:1px solid #0005;box-sizing:border-box;position:relative}
-.disc::after{content:"";position:absolute;inset:11px;border-radius:50%;background:var(--card);border:1px solid #0003}
-.sp b{font-variant-numeric:tabular-nums}.sp .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bar{height:6px;border-radius:3px;background:var(--track);overflow:hidden;margin:5px 0 2px}.bar i{display:block;height:100%;border-radius:3px}
-.tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:9px;border:1px solid var(--line);margin-left:4px}
-.tag.lowt{border-color:var(--warn);color:var(--warn)}
-.list div{padding:3px 0;border-top:1px solid var(--line)}.list div:first-child{border-top:0}
-.camgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;margin-bottom:10px;justify-content:center}
-.cam{border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--card)}
-.camhead{display:flex;gap:8px;align-items:center;margin-bottom:6px}.camhead b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.camhead select,.camhead button{font-size:12px;padding:3px 6px}
-.vid{position:relative;background:#000;aspect-ratio:var(--ar,16/9);border-radius:6px;overflow:hidden}
-.vid video{width:100%;height:100%;object-fit:contain;display:block}
-.camst{position:absolute;left:0;right:0;bottom:0;padding:6px 8px;background:#000b;color:#fff;font-size:12px}
-.camjob{margin-top:5px;min-height:1.45em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-details.card{padding:0}details.card>summary{padding:10px 12px;cursor:pointer;font-weight:600;list-style:none;display:flex;align-items:center;gap:8px}
-details.card>summary::-webkit-details-marker{display:none}details.card>summary::before{content:"+";display:inline-block;width:1em;text-align:center;font-weight:700}
-details.card[open]>summary::before{content:"\2212"}details.card>.inner{padding:0 12px 10px}
-input.wide{width:330px}
-[hidden]{display:none!important}
+:root {
+  color-scheme: light;
+  --fg: #262e30;
+  --bg: #fff;
+  --card: #fff;
+  --line: #d6d6d6;
+  --go: #009688;
+  --warn: #c76b00;
+  --warnbg: #fff6e8;
+  --track: #ececec;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --fg: #efeff0;
+  --bg: #2d2d31;
+  --card: #36363c;
+  --line: #4c4c54;
+  --warn: #e7a23c;
+  --warnbg: #3b3122;
+  --track: #47474e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --fg: #efeff0;
+    --bg: #2d2d31;
+    --card: #36363c;
+    --line: #4c4c54;
+    --warn: #e7a23c;
+    --warnbg: #3b3122;
+    --track: #47474e;
+  }
+}
+body {
+  font:
+    14px/1.45 system-ui,
+    "Segoe UI",
+    sans-serif;
+  margin: 0;
+  padding: 16px;
+  color: var(--fg);
+  background: var(--bg);
+}
+h1 {
+  font-size: 20px;
+  margin: 0 0 8px;
+}
+h2 {
+  font-size: 15px;
+  margin: 20px 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+h3 {
+  font-size: 14px;
+  margin: 16px 0 4px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+h3 .muted {
+  font-weight: normal;
+}
+nav {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+nav button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 6px 12px;
+  opacity: 0.75;
+}
+nav button[aria-current] {
+  border-bottom-color: var(--go);
+  opacity: 1;
+  font-weight: 600;
+}
+.card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  background: var(--card);
+}
+.muted {
+  opacity: 0.7;
+  font-size: 13px;
+}
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+input,
+select,
+textarea {
+  font: inherit;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  color: inherit;
+}
+input {
+  width: 150px;
+}
+input.pct {
+  width: 60px;
+}
+select {
+  max-width: 100%;
+}
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  height: 60px;
+}
+input[type="checkbox"] {
+  width: auto;
+}
+input[type="search"] {
+  width: 200px;
+}
+button {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+button.go {
+  background: var(--go);
+  border-color: var(--go);
+  color: #fff;
+}
+.sw {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #0006;
+  border-radius: 3px;
+  vertical-align: -2px;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  margin-top: 6px;
+}
+td {
+  border-top: 1px solid var(--line);
+  padding: 4px 6px;
+  vertical-align: middle;
+}
+.warn {
+  border-color: var(--warn);
+}
+.alert {
+  background: var(--warnbg);
+  border-left: 3px solid var(--warn);
+  padding: 6px 8px;
+  margin-top: 6px;
+  border-radius: 4px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+}
+.sp {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--card);
+}
+.sp.low {
+  border-color: var(--warn);
+}
+.disc {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid #0005;
+  box-sizing: border-box;
+  position: relative;
+}
+.disc::after {
+  content: "";
+  position: absolute;
+  inset: 11px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 1px solid #0003;
+}
+.sp b {
+  font-variant-numeric: tabular-nums;
+}
+.sp .name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--track);
+  overflow: hidden;
+  margin: 5px 0 2px;
+}
+.bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+.tag {
+  display: inline-block;
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  margin-left: 4px;
+}
+.tag.lowt {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.list div {
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+}
+.list div:first-child {
+  border-top: 0;
+}
+.camgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+  justify-content: center;
+}
+.cam {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--card);
+}
+.camhead {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.camhead b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.camhead select,
+.camhead button {
+  font-size: 12px;
+  padding: 3px 6px;
+}
+.vid {
+  position: relative;
+  background: #000;
+  aspect-ratio: var(--ar, 16/9);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.vid video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.camst {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 6px 8px;
+  background: #000b;
+  color: #fff;
+  font-size: 12px;
+}
+.camjob {
+  margin-top: 5px;
+  min-height: 1.45em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+details.card {
+  padding: 0;
+}
+details.card > summary {
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+details.card > summary::-webkit-details-marker {
+  display: none;
+}
+details.card > summary::before {
+  content: "+";
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  font-weight: 700;
+}
+details.card[open] > summary::before {
+  content: "\2212";
+}
+details.card > .inner {
+  padding: 0 12px 10px;
+}
+input.wide {
+  width: 330px;
+}
+[hidden] {
+  display: none !important;
+}
 </style></head><body>
 <h1>Spool Stock</h1>
 <nav><button data-v="prints" aria-current="page">Prints<span id="nb"></span></button><button data-v="stock">Stock</button><button data-v="presets">Presets</button><button data-v="cameras">Cameras</button></nav>
@@ -2106,150 +2799,785 @@ input.wide{width:330px}
 <p class="muted">Cameras only stream while this page is open.</p></div></details>
 </section>
 <script>
-var o=window.orca,last={},spools=[],view="prints",D=null;function send(m){o.postMessage(m)}
-function h(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
-function sw(c){return '<span class="sw" style="background:'+h(c||"#0000")+'"></span>'}
-function set(id,html,key){if(last[id]===key)return;last[id]=key;document.getElementById(id).innerHTML=html}
-function kept(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){}return null}
-function show(v){view=v;kept("ss.view",v);document.querySelectorAll("nav button").forEach(function(b){if(b.dataset.v===v)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")});
- ["prints","stock","presets","cameras"].forEach(function(x){document.getElementById("v-"+x).hidden=x!==v});
- if(v!=="cameras")Object.keys(CAMS).forEach(function(k){try{CAMS[k].video.pause()}catch(e){}});if(D)paint();if(v==="cameras")camFitSoon()}
-var CAMS={},camAsk=0;
-function b64(x){var s=atob(x),a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a}
-function camStatus(C,t){C.st.textContent=t||"";C.st.hidden=!t}
-function camReset(C,mime){C.q=[];C.sb=null;C.mime=mime;
- if(!window.MediaSource||!MediaSource.isTypeSupported(mime)){C.bad="Orca's viewer can't play this camera's video ("+mime+").";return}
- C.bad="";var ms=new MediaSource();C.ms=ms;C.video.src=URL.createObjectURL(ms);
- ms.addEventListener("sourceopen",function(){if(C.ms!==ms)return;try{C.sb=ms.addSourceBuffer(mime);C.sb.addEventListener("updateend",function(){camLive(C);camPump(C)});camPump(C)}catch(e){C.bad="Couldn't start the video: "+e.message}},{once:true})}
-function camPump(C){var sb=C.sb;if(!sb||sb.updating||!C.q.length)return;try{sb.appendBuffer(C.q.shift())}catch(e){C.gen=0;C.seq=-1}}
-function camLive(C){var v=C.video,br=v.buffered,sb=C.sb;if(!br.length)return;var end=br.end(br.length-1);
- if(end-v.currentTime>1.5||v.currentTime<br.start(br.length-1))v.currentTime=Math.max(br.start(br.length-1),end-0.25);
- if(v.paused&&view==="cameras")v.play().catch(function(){});
- if(sb&&!sb.updating&&v.currentTime-br.start(0)>30){try{sb.remove(br.start(0),v.currentTime-10)}catch(e){}}}
+var o = window.orca,
+  last = {},
+  spools = [],
+  view = "prints",
+  D = null;
+function send(m) {
+  o.postMessage(m);
+}
+function h(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+    return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c];
+  });
+}
+function sw(c) {
+  return '<span class="sw" style="background:' + h(c || "#0000") + '"></span>';
+}
+function set(id, html, key) {
+  if (last[id] === key) return;
+  last[id] = key;
+  document.getElementById(id).innerHTML = html;
+}
+function kept(k, v) {
+  try {
+    if (v === undefined) return localStorage.getItem(k);
+    localStorage.setItem(k, v);
+  } catch (e) {}
+  return null;
+}
+function show(v) {
+  view = v;
+  kept("ss.view", v);
+  document.querySelectorAll("nav button").forEach(function (b) {
+    if (b.dataset.v === v) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+  ["prints", "stock", "presets", "cameras"].forEach(function (x) {
+    document.getElementById("v-" + x).hidden = x !== v;
+  });
+  if (v !== "cameras")
+    Object.keys(CAMS).forEach(function (k) {
+      try {
+        CAMS[k].video.pause();
+      } catch (e) {}
+    });
+  if (D) paint();
+  if (v === "cameras") camFitSoon();
+}
+var CAMS = {},
+  camAsk = 0;
+function b64(x) {
+  var s = atob(x),
+    a = new Uint8Array(s.length);
+  for (var i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+  return a;
+}
+function camStatus(C, t) {
+  C.st.textContent = t || "";
+  C.st.hidden = !t;
+}
+function camReset(C, mime) {
+  C.q = [];
+  C.sb = null;
+  C.mime = mime;
+  if (!window.MediaSource || !MediaSource.isTypeSupported(mime)) {
+    C.bad = "Orca's viewer can't play this camera's video (" + mime + ").";
+    return;
+  }
+  C.bad = "";
+  var ms = new MediaSource();
+  C.ms = ms;
+  C.video.src = URL.createObjectURL(ms);
+  ms.addEventListener(
+    "sourceopen",
+    function () {
+      if (C.ms !== ms) return;
+      try {
+        C.sb = ms.addSourceBuffer(mime);
+        C.sb.addEventListener("updateend", function () {
+          camLive(C);
+          camPump(C);
+        });
+        camPump(C);
+      } catch (e) {
+        C.bad = "Couldn't start the video: " + e.message;
+      }
+    },
+    {once: true},
+  );
+}
+function camPump(C) {
+  var sb = C.sb;
+  if (!sb || sb.updating || !C.q.length) return;
+  try {
+    sb.appendBuffer(C.q.shift());
+  } catch (e) {
+    C.gen = 0;
+    C.seq = -1;
+  }
+}
+function camLive(C) {
+  var v = C.video,
+    br = v.buffered,
+    sb = C.sb;
+  if (!br.length) return;
+  var end = br.end(br.length - 1);
+  if (end - v.currentTime > 1.5 || v.currentTime < br.start(br.length - 1))
+    v.currentTime = Math.max(br.start(br.length - 1), end - 0.25);
+  if (v.paused && view === "cameras") v.play().catch(function () {});
+  if (sb && !sb.updating && v.currentTime - br.start(0) > 30) {
+    try {
+      sb.remove(br.start(0), v.currentTime - 10);
+    } catch (e) {}
+  }
+}
 /* Size the camera tiles so they all fit the tab without scrolling: try each number of columns, and keep the one
    that gives the biggest picture at the camera's own shape. */
-var camFitKey="";
-function camFit(){var grid=document.getElementById("camgrid"),tiles=grid.children,n=tiles.length;
- if(view!=="cameras"||!n||!grid.clientWidth)return;
- var t=tiles[0],v=t.querySelector(".vid"),chromeH=t.offsetHeight-v.offsetHeight,chromeW=t.offsetWidth-v.offsetWidth,gap=10;
- // everything on the page that isn't the cameras (heading, tabs, the folded Add a camera, margins), as it is now
- var add=document.getElementById("camadd"),open=add.open?add.offsetHeight-add.querySelector("summary").offsetHeight:0;
- var rest=document.body.offsetHeight-grid.offsetHeight-open,H=Math.max(200,window.innerHeight-rest-1),W=grid.clientWidth;
- var ar=0;Object.keys(CAMS).forEach(function(k){var x=CAMS[k].video;if(!ar&&x.videoWidth&&x.videoHeight)ar=x.videoWidth/x.videoHeight});ar=ar||16/9;
- var best=0,cols=1;
- for(var c=1;c<=n;c++){var r=Math.ceil(n/c),w=Math.min((W-gap*(c-1))/c,((H-gap*(r-1))/r-chromeH)*ar+chromeW);if(w>best+1){best=w;cols=c}}
- best=Math.max(160,Math.floor(best));
- var key=[cols,best,ar.toFixed(3)].join();if(key===camFitKey)return;camFitKey=key;
- grid.style.setProperty("--ar",ar);grid.style.gridTemplateColumns="repeat("+cols+","+best+"px)"}
-function camFitSoon(){camFitKey="";requestAnimationFrame(camFit)}
-function camTiles(){var list=D.cameras||[],grid=document.getElementById("camgrid"),names=D.printers.map(function(p){return p.name}).filter(Boolean);
- document.getElementById("camnone").hidden=!!list.length;
- var add=document.getElementById("camadd");if(!list.length&&!add.dataset.auto){add.open=true;add.dataset.auto="1"}if(list.length&&add.dataset.auto==="1"){add.open=false;add.dataset.auto="2"}
- var count=grid.children.length;
- var opts=function(sel){return '<option value="">No printer</option>'+names.concat(sel&&names.indexOf(sel)<0?[sel]:[]).map(function(n){return '<option'+(n===sel?" selected":"")+'>'+h(n)+'</option>'}).join("")};
- set("cprinter",opts(document.getElementById("cprinter").value),JSON.stringify(names));
- Object.keys(CAMS).forEach(function(id){if(!list.some(function(c){return c.id===id})){CAMS[id].el.remove();delete CAMS[id]}});
- list.forEach(function(c){var C=CAMS[c.id];
-  if(!C){var el=document.createElement("div");el.className="cam";el.dataset.id=c.id;
-   el.innerHTML='<div class="camhead"><b></b><select class="campr"></select><button data-a="cam_remove">Remove</button></div><div class="vid"><video muted autoplay playsinline></video><div class="camst">Connecting</div></div><div class="muted camjob"></div>';
-   grid.appendChild(el);C=CAMS[c.id]={id:c.id,el:el,video:el.querySelector("video"),st:el.querySelector(".camst"),gen:0,seq:-1,q:[],bad:""};
-   C.video.addEventListener("loadedmetadata",camFitSoon);
-   el.querySelector(".campr").addEventListener("change",function(ev){send({type:"cam_edit",id:c.id,printer:ev.target.value})})}
-  C.el.querySelector("b").textContent=c.name;C.el.querySelector("b").title=c.name+" ("+c.host+")";
-  var key=JSON.stringify([c.printer,names]);if(C.pk!==key){C.pk=key;C.el.querySelector(".campr").innerHTML=opts(c.printer)}
-  var p=D.printers.filter(function(x){return x.name===c.printer})[0],j=p&&p.job;
-  C.el.querySelector(".camjob").textContent=!c.printer?"":!p?c.printer+": not added under Prints":j?c.printer+": printing "+j.name+(j.percent?", "+j.percent+"%":""):c.printer+": "+p.state});
- if(grid.children.length!==count)camFitSoon();else camFit()}
-function camPoll(){if(view!=="cameras"||!D||!(D.cameras||[]).length)return;if(camAsk&&Date.now()-camAsk<3000)return;camAsk=Date.now();
- send({type:"cams",want:Object.keys(CAMS).map(function(k){var C=CAMS[k];return {id:k,gen:C.gen,seq:C.seq}})})}
-function camGot(d){camAsk=0;(d.cams||[]).forEach(function(r){var C=CAMS[r.id];if(!C)return;
- if(r.init){C.gen=r.gen;C.seq=-1;camReset(C,r.mime);if(!C.bad)C.q.push(b64(r.init))}
- if(r.chunks&&r.gen===C.gen&&!C.bad){r.chunks.forEach(function(x){C.q.push(b64(x))});if(r.seq!=null)C.seq=r.seq;if(C.q.length>200)C.q.splice(1,C.q.length-60)}
- camPump(C);camStatus(C,C.bad||(r.status==="Live"&&C.video.buffered.length?"":r.status==="Live"?"Starting the picture":r.status))})}
-function fill(s){var c=s.cols.length?s.cols:["#9AA5AB"];if(c.length<2)return c[0];
- if(s.pattern==="gradient")return "linear-gradient(135deg,"+c.join(",")+")";
- var n=c.length;return "conic-gradient("+c.map(function(x,i){return x+" "+(i*360/n)+"deg "+((i+1)*360/n)+"deg"}).join(",")+")"}
-function barCol(s){return s.cols.length?(s.pattern==="solid"?s.cols[0]:"linear-gradient(90deg,"+s.cols.join(",")+")"):"#9AA5AB"}
-function card(s){var pc=s.net&&s.left!=null?Math.max(0,Math.min(100,Math.round(s.left*100/s.net))):100;
- return '<div class="sp'+(s.low?" low":"")+'" title="'+h(s.code+" "+s.brand+" "+s.material+" "+s.colour)+'"><span class="disc" style="background:'+h(fill(s))+'"></span><div style="min-width:0">'
- +'<div class="name"><b>'+h(s.code)+'</b> '+h([s.brand,s.material].filter(Boolean).join(" "))+'</div>'
- +'<div class="muted name">'+h([s.colour,s.where].filter(Boolean).join(", "))+'</div>'
- +'<div class="bar"><i style="width:'+pc+'%;background:'+h(barCol(s))+'"></i></div>'
- +'<div class="muted">'+(s.left!=null?s.left+" g left"+(s.net?" of "+s.net+" g":""):"Weight not known")+(s.low?'<span class="tag lowt">Low</span>':"")+(s.printer?'<span class="tag" title="'+h(s.printer)+' feeds from it">'+h(s.printer)+'</span>':"")+'</div></div></div>'}
-function paintStock(){var st=D.stock;
- if(!D.signedIn){set("stock",'<p class="muted">Sign in on the Prints page to see your stock here.</p>',"out");set("stockinfo","","");return}
- if(!st){set("stock",'<p class="muted">Loading your stock.</p>',"wait");return}
- var q=document.getElementById("q").value.trim().toLowerCase(),g=document.getElementById("grp").value,lo=document.getElementById("lowonly").checked;
- var words=q.split(/\s+/).filter(Boolean),list=st.spools.filter(function(s){if(lo&&!s.low)return false;var hay=(s.code+" "+s.brand+" "+s.material+" "+s.colour+" "+s.finish+" "+s.where+" "+s.group+" "+s.printer).toLowerCase();return words.every(function(w){return hay.indexOf(w)>=0})});
- var kg=list.reduce(function(a,s){return a+(s.left||0)},0)/1000,low=list.filter(function(s){return s.low}).length;
- set("stockinfo",list.length+" spool"+(list.length===1?"":"s")+", "+kg.toFixed(1)+" kg"+(low?", "+low+" low":"")+(st.at?". Updated "+h(st.at)+".":""),[list.length,kg,low,st.at].join());
- var groups=[],at={};list.forEach(function(s){var k=g==="loc"?(s.group?s.group+": ":"")+s.where.replace(/, space \d+$/,""):g==="mat"?(s.material||"Unknown material"):g==="brand"?(s.brand||"Unknown brand"):"";
-  if(!(k in at)){at[k]=groups.length;groups.push({k:k,s:[]})}groups[at[k]].s.push(s)});
- if(g==="mat"||g==="brand")groups.sort(function(a,b){return a.k.localeCompare(b.k)});
- var html=list.length?groups.map(function(gr){var t=gr.s.reduce(function(a,s){return a+(s.left||0)},0);
-  return (gr.k?'<h3>'+h(gr.k)+' <span class="muted">'+gr.s.length+(gr.s.length===1?" spool, ":" spools, ")+(t>=1000?(t/1000).toFixed(1)+" kg":Math.round(t)+" g")+'</span></h3>':"")+'<div class="grid">'+gr.s.map(card).join("")+'</div>'}).join("")
-  :'<p class="muted">'+(st.spools.length?"Nothing matches.":"No spools yet. Add them in Spool Stock.")+'</p>';
- set("stock",html,JSON.stringify([st.spools,q,g,lo]))}
-function paintPresets(){var p=D.presets;
- if(!D.signedIn){set("presets",'<p class="muted">Sign in on the Prints page first.</p>',"out");return}
- var intro='<p>Adds a Spool Stock group to Orca\'s filament list, with one preset for each filament you own. Ones Orca already has a profile for use it unchanged. The rest build on Orca\'s closest generic profile, with the temperatures from your stickers. The group updates by itself as your stock changes.</p>';
- if(!p){set("presets",intro+'<p class="muted">Loading your stock.</p>',"wait");return}
- if(!p.have){set("presets",intro+'<p class="muted">Open Spool Stock on your phone or PC once, so it can send your filament list here.</p>',"none");return}
- var st=p.on?(p.behind?"Updating.":p.how==="live"?"In Orca's filament list under Spool Stock. Updated "+h(p.when)+".":p.how==="restart"?"Saved. Restart Orca to see them, as this version of Orca can't add them while it's open.":"Saved, but Orca didn't load them ("+h(p.detail)+"). Restart Orca to see them."):"";
- var html=intro+(p.on?'<div class="card'+(p.how==="error"?" warn":"")+'">'+st+'<div class="row" style="margin-top:6px"><button data-a="presets_now">Update now</button><button data-a="presets_off">Remove them from Orca</button></div></div>'
-  :'<div class="row"><button class="go" data-a="presets_on">Add them to Orca</button></div>')
-  +(p.skipped.length?'<div class="alert">Couldn\'t add '+h(p.skipped.join(", "))+', as Orca has none of the profiles they build on.</div>':"")
-  +(p.moved?'<p class="muted">Moved '+p.moved+' older cop'+(p.moved===1?"y":"ies")+' from the Windows app to the old-presets folder, next to the log, so nothing shows twice. Restart Orca once to clear '+(p.moved===1?"it":"them")+' from the list.</p>':"")
-  +'<h3>Your filaments <span class="muted">'+p.feed.length+'</span></h3><div class="card list">'+(p.feed.map(function(f){return '<div>'+h(f.label)+' <span class="muted">'+(f.own?"Orca's own profile":"on a generic profile, with your temperatures")+'</span></div>'}).join("")||'<div class="muted">No spools yet.</div>')+'</div>';
- set("presets",html,JSON.stringify(p))}
-function paint(){if(view==="stock")paintStock();else if(view==="presets")paintPresets();camTiles()}
-o.onMessage(function(d){if(d&&d.type==="cams"){camGot(d);return}if(!d||d.type!=="state")return;D=d;spools=d.spools||[];
-document.documentElement.dataset.theme=d.dark===true?"dark":d.dark===false?"light":"";
-document.getElementById("ver").textContent="Version "+d.version+".";
-document.getElementById("hint").textContent=d.hint||"";
-document.getElementById("nb").textContent=d.pending.length?" ("+d.pending.length+")":"";
-set("acct",d.signedIn?'<div class="card">'+h(d.cloud)+(d.outbox?" "+d.outbox+" waiting to send.":"")+'<div class="row" style="margin-top:6px"><button data-a="signout">Sign out</button></div></div>'
- :'<div class="card'+(d.cloud&&d.cloud!=="Not signed in"?" warn":"")+'"><p>'+h(d.cloud)+'</p><p class="muted">In Spool Stock, open Setup, then Orca plugin, and press Copy sign-in code. Paste it here.</p><textarea id="codein"></textarea><div class="row"><button class="go" data-a="signin">Sign in</button></div></div>',
- JSON.stringify([d.signedIn,d.cloud,d.outbox]));
-document.getElementById("pendwrap").style.display=d.pending.length?"":"none";
-set("pending",d.pending.map(function(e){
- var stop=e.result==="finished"?"":(e.layers?" at "+e.percent+"%, layer "+e.layer+" of "+e.layers:" at "+e.percent+"%");
- return '<div class="card warn" data-key="'+h(e.key)+'"><b>'+h(e.printer)+': '+h(e.name)+'</b><br><span class="muted">'+h(e.why)+(e.result!=="finished"&&e.result?h(stop)+".":"")+'</span>'
- +'<div class="row" style="margin-top:6px">How much printed <input class="pct" type="number" min="0" max="100" value="'+(e.result==="finished"?100:Math.round(e.percent||0))+'">%</div>'
- +'<table>'+e.items.map(function(it,i){var opts='<option value="">Not from a spool in Spool Stock</option>'+spools.map(function(s){return '<option value="'+h(s.id)+'"'+(s.id===it.spool?" selected":"")+'>'+h(s.label)+'</option>'}).join("");
-  return '<tr><td>'+sw(it.colour)+' '+h(it.type)+'</td><td>'+h(it.trayName)+'</td><td><input class="g pct" type="number" min="0" step="0.1" value="'+it.g+'"> g in full</td><td><select data-i="'+i+'">'+opts+'</select></td></tr>'}).join("")
- +(e.items.length?"":'<tr><td class="muted">No filament details. Skip this one, or log it in Spool Stock from the sliced file.</td></tr>')+'</table>'
- +'<div class="row" style="margin-top:8px"><button class="go" data-a="confirm">Take it off</button><button data-a="skip">Skip</button></div></div>'}).join(""),
- JSON.stringify([d.pending.map(function(e){return e.key}),spools.length]));
-set("printers",d.printers.map(function(p,i){var j=p.job;
- return '<div class="card"><b>'+h(p.name)+'</b> <span class="muted">'+h(p.ip)+(p.serial?" · "+h(p.serial):"")+'</span><br>'+h(p.state)
- +(p.linked?' · <span class="muted">Spool Stock printer: '+h(p.linked)+'</span>':(d.signedIn?'<br><span class="muted">Not found in Spool Stock. Add a printer there called '+h(p.name)+(p.serial?', or with serial '+h(p.serial):"")+'.</span>':""))
- +(j&&j.warnings.length?j.warnings.map(function(w){return '<div class="alert">'+h(w)+'</div>'}).join(""):"")
- +(j?(j.warnings.length?'':'<br>')+'Printing '+h(j.name)+(j.percent?" ("+j.percent+"%)":"")+(j.late?' <span class="muted">(joined part way, so the trays come from what it fed)</span>':"")
-   +(j.trays.length?'<table>'+j.trays.map(function(t){return '<tr><td>'+sw(t.colour)+' '+h(t.type)+'</td><td>'+t.g+' g</td><td>'+h(t.tray)+'</td><td>'+(t.spool?h(t.spool):'<span class="muted">no spool matched</span>')+'</td></tr>'}).join("")+'</table>':'<br><span class="muted">Grams come from the job file once printing starts.</span>'):"")
- +'<div class="row" style="margin-top:6px"><button data-a="connect">Connect</button><button data-a="remove" data-i="'+i+'">Remove</button></div></div>'}).join("")||'<p class="muted">None yet.</p>',JSON.stringify(d.printers));
-set("recent",d.recent.map(function(r){return h(r.when)+": "+h(r.text)}).join("<br>")||"Nothing yet.",JSON.stringify(d.recent));
-paint();
+var camFitKey = "";
+function camFit() {
+  var grid = document.getElementById("camgrid"),
+    tiles = grid.children,
+    n = tiles.length;
+  if (view !== "cameras" || !n || !grid.clientWidth) return;
+  var t = tiles[0],
+    v = t.querySelector(".vid"),
+    chromeH = t.offsetHeight - v.offsetHeight,
+    chromeW = t.offsetWidth - v.offsetWidth,
+    gap = 10;
+  // everything on the page that isn't the cameras (heading, tabs, the folded Add a camera, margins), as it is now
+  var add = document.getElementById("camadd"),
+    open = add.open ? add.offsetHeight - add.querySelector("summary").offsetHeight : 0;
+  var rest = document.body.offsetHeight - grid.offsetHeight - open,
+    H = Math.max(200, window.innerHeight - rest - 1),
+    W = grid.clientWidth;
+  var ar = 0;
+  Object.keys(CAMS).forEach(function (k) {
+    var x = CAMS[k].video;
+    if (!ar && x.videoWidth && x.videoHeight) ar = x.videoWidth / x.videoHeight;
+  });
+  ar = ar || 16 / 9;
+  var best = 0,
+    cols = 1;
+  for (var c = 1; c <= n; c++) {
+    var r = Math.ceil(n / c),
+      w = Math.min((W - gap * (c - 1)) / c, ((H - gap * (r - 1)) / r - chromeH) * ar + chromeW);
+    if (w > best + 1) {
+      best = w;
+      cols = c;
+    }
+  }
+  best = Math.max(160, Math.floor(best));
+  var key = [cols, best, ar.toFixed(3)].join();
+  if (key === camFitKey) return;
+  camFitKey = key;
+  grid.style.setProperty("--ar", ar);
+  grid.style.gridTemplateColumns = "repeat(" + cols + "," + best + "px)";
+}
+function camFitSoon() {
+  camFitKey = "";
+  requestAnimationFrame(camFit);
+}
+function camTiles() {
+  var list = D.cameras || [],
+    grid = document.getElementById("camgrid"),
+    names = D.printers
+      .map(function (p) {
+        return p.name;
+      })
+      .filter(Boolean);
+  document.getElementById("camnone").hidden = !!list.length;
+  var add = document.getElementById("camadd");
+  if (!list.length && !add.dataset.auto) {
+    add.open = true;
+    add.dataset.auto = "1";
+  }
+  if (list.length && add.dataset.auto === "1") {
+    add.open = false;
+    add.dataset.auto = "2";
+  }
+  var count = grid.children.length;
+  var opts = function (sel) {
+    return (
+      '<option value="">No printer</option>' +
+      names
+        .concat(sel && names.indexOf(sel) < 0 ? [sel] : [])
+        .map(function (n) {
+          return "<option" + (n === sel ? " selected" : "") + ">" + h(n) + "</option>";
+        })
+        .join("")
+    );
+  };
+  set("cprinter", opts(document.getElementById("cprinter").value), JSON.stringify(names));
+  Object.keys(CAMS).forEach(function (id) {
+    if (
+      !list.some(function (c) {
+        return c.id === id;
+      })
+    ) {
+      CAMS[id].el.remove();
+      delete CAMS[id];
+    }
+  });
+  list.forEach(function (c) {
+    var C = CAMS[c.id];
+    if (!C) {
+      var el = document.createElement("div");
+      el.className = "cam";
+      el.dataset.id = c.id;
+      el.innerHTML =
+        '<div class="camhead"><b></b><select class="campr"></select><button data-a="cam_remove">Remove</button></div><div class="vid"><video muted autoplay playsinline></video><div class="camst">Connecting</div></div><div class="muted camjob"></div>';
+      grid.appendChild(el);
+      C = CAMS[c.id] = {
+        id: c.id,
+        el: el,
+        video: el.querySelector("video"),
+        st: el.querySelector(".camst"),
+        gen: 0,
+        seq: -1,
+        q: [],
+        bad: "",
+      };
+      C.video.addEventListener("loadedmetadata", camFitSoon);
+      el.querySelector(".campr").addEventListener("change", function (ev) {
+        send({type: "cam_edit", id: c.id, printer: ev.target.value});
+      });
+    }
+    C.el.querySelector("b").textContent = c.name;
+    C.el.querySelector("b").title = c.name + " (" + c.host + ")";
+    var key = JSON.stringify([c.printer, names]);
+    if (C.pk !== key) {
+      C.pk = key;
+      C.el.querySelector(".campr").innerHTML = opts(c.printer);
+    }
+    var p = D.printers.filter(function (x) {
+        return x.name === c.printer;
+      })[0],
+      j = p && p.job;
+    C.el.querySelector(".camjob").textContent = !c.printer
+      ? ""
+      : !p
+        ? c.printer + ": not added under Prints"
+        : j
+          ? c.printer + ": printing " + j.name + (j.percent ? ", " + j.percent + "%" : "")
+          : c.printer + ": " + p.state;
+  });
+  if (grid.children.length !== count) camFitSoon();
+  else camFit();
+}
+function camPoll() {
+  if (view !== "cameras" || !D || !(D.cameras || []).length) return;
+  if (camAsk && Date.now() - camAsk < 3000) return;
+  camAsk = Date.now();
+  send({
+    type: "cams",
+    want: Object.keys(CAMS).map(function (k) {
+      var C = CAMS[k];
+      return {id: k, gen: C.gen, seq: C.seq};
+    }),
+  });
+}
+function camGot(d) {
+  camAsk = 0;
+  (d.cams || []).forEach(function (r) {
+    var C = CAMS[r.id];
+    if (!C) return;
+    if (r.init) {
+      C.gen = r.gen;
+      C.seq = -1;
+      camReset(C, r.mime);
+      if (!C.bad) C.q.push(b64(r.init));
+    }
+    if (r.chunks && r.gen === C.gen && !C.bad) {
+      r.chunks.forEach(function (x) {
+        C.q.push(b64(x));
+      });
+      if (r.seq != null) C.seq = r.seq;
+      if (C.q.length > 200) C.q.splice(1, C.q.length - 60);
+    }
+    camPump(C);
+    camStatus(
+      C,
+      C.bad ||
+        (r.status === "Live" && C.video.buffered.length ? "" : r.status === "Live" ? "Starting the picture" : r.status),
+    );
+  });
+}
+function fill(s) {
+  var c = s.cols.length ? s.cols : ["#9AA5AB"];
+  if (c.length < 2) return c[0];
+  if (s.pattern === "gradient") return "linear-gradient(135deg," + c.join(",") + ")";
+  var n = c.length;
+  return (
+    "conic-gradient(" +
+    c
+      .map(function (x, i) {
+        return x + " " + (i * 360) / n + "deg " + ((i + 1) * 360) / n + "deg";
+      })
+      .join(",") +
+    ")"
+  );
+}
+function barCol(s) {
+  return s.cols.length
+    ? s.pattern === "solid"
+      ? s.cols[0]
+      : "linear-gradient(90deg," + s.cols.join(",") + ")"
+    : "#9AA5AB";
+}
+function card(s) {
+  var pc = s.net && s.left != null ? Math.max(0, Math.min(100, Math.round((s.left * 100) / s.net))) : 100;
+  return (
+    '<div class="sp' +
+    (s.low ? " low" : "") +
+    '" title="' +
+    h(s.code + " " + s.brand + " " + s.material + " " + s.colour) +
+    '"><span class="disc" style="background:' +
+    h(fill(s)) +
+    '"></span><div style="min-width:0">' +
+    '<div class="name"><b>' +
+    h(s.code) +
+    "</b> " +
+    h([s.brand, s.material].filter(Boolean).join(" ")) +
+    "</div>" +
+    '<div class="muted name">' +
+    h([s.colour, s.where].filter(Boolean).join(", ")) +
+    "</div>" +
+    '<div class="bar"><i style="width:' +
+    pc +
+    "%;background:" +
+    h(barCol(s)) +
+    '"></i></div>' +
+    '<div class="muted">' +
+    (s.left != null ? s.left + " g left" + (s.net ? " of " + s.net + " g" : "") : "Weight not known") +
+    (s.low ? '<span class="tag lowt">Low</span>' : "") +
+    (s.printer ? '<span class="tag" title="' + h(s.printer) + ' feeds from it">' + h(s.printer) + "</span>" : "") +
+    "</div></div></div>"
+  );
+}
+function paintStock() {
+  var st = D.stock;
+  if (!D.signedIn) {
+    set("stock", '<p class="muted">Sign in on the Prints page to see your stock here.</p>', "out");
+    set("stockinfo", "", "");
+    return;
+  }
+  if (!st) {
+    set("stock", '<p class="muted">Loading your stock.</p>', "wait");
+    return;
+  }
+  var q = document.getElementById("q").value.trim().toLowerCase(),
+    g = document.getElementById("grp").value,
+    lo = document.getElementById("lowonly").checked;
+  var words = q.split(/\s+/).filter(Boolean),
+    list = st.spools.filter(function (s) {
+      if (lo && !s.low) return false;
+      var hay = (
+        s.code +
+        " " +
+        s.brand +
+        " " +
+        s.material +
+        " " +
+        s.colour +
+        " " +
+        s.finish +
+        " " +
+        s.where +
+        " " +
+        s.group +
+        " " +
+        s.printer
+      ).toLowerCase();
+      return words.every(function (w) {
+        return hay.indexOf(w) >= 0;
+      });
+    });
+  var kg =
+      list.reduce(function (a, s) {
+        return a + (s.left || 0);
+      }, 0) / 1000,
+    low = list.filter(function (s) {
+      return s.low;
+    }).length;
+  set(
+    "stockinfo",
+    list.length +
+      " spool" +
+      (list.length === 1 ? "" : "s") +
+      ", " +
+      kg.toFixed(1) +
+      " kg" +
+      (low ? ", " + low + " low" : "") +
+      (st.at ? ". Updated " + h(st.at) + "." : ""),
+    [list.length, kg, low, st.at].join(),
+  );
+  var groups = [],
+    at = {};
+  list.forEach(function (s) {
+    var k =
+      g === "loc"
+        ? (s.group ? s.group + ": " : "") + s.where.replace(/, space \d+$/, "")
+        : g === "mat"
+          ? s.material || "Unknown material"
+          : g === "brand"
+            ? s.brand || "Unknown brand"
+            : "";
+    if (!(k in at)) {
+      at[k] = groups.length;
+      groups.push({k: k, s: []});
+    }
+    groups[at[k]].s.push(s);
+  });
+  if (g === "mat" || g === "brand")
+    groups.sort(function (a, b) {
+      return a.k.localeCompare(b.k);
+    });
+  var html = list.length
+    ? groups
+        .map(function (gr) {
+          var t = gr.s.reduce(function (a, s) {
+            return a + (s.left || 0);
+          }, 0);
+          return (
+            (gr.k
+              ? "<h3>" +
+                h(gr.k) +
+                ' <span class="muted">' +
+                gr.s.length +
+                (gr.s.length === 1 ? " spool, " : " spools, ") +
+                (t >= 1000 ? (t / 1000).toFixed(1) + " kg" : Math.round(t) + " g") +
+                "</span></h3>"
+              : "") +
+            '<div class="grid">' +
+            gr.s.map(card).join("") +
+            "</div>"
+          );
+        })
+        .join("")
+    : '<p class="muted">' +
+      (st.spools.length ? "Nothing matches." : "No spools yet. Add them in Spool Stock.") +
+      "</p>";
+  set("stock", html, JSON.stringify([st.spools, q, g, lo]));
+}
+function paintPresets() {
+  var p = D.presets;
+  if (!D.signedIn) {
+    set("presets", '<p class="muted">Sign in on the Prints page first.</p>', "out");
+    return;
+  }
+  var intro =
+    "<p>Adds a Spool Stock group to Orca's filament list, with one preset for each filament you own. Ones Orca already has a profile for use it unchanged. The rest build on Orca's closest generic profile, with the temperatures from your stickers. The group updates by itself as your stock changes.</p>";
+  if (!p) {
+    set("presets", intro + '<p class="muted">Loading your stock.</p>', "wait");
+    return;
+  }
+  if (!p.have) {
+    set(
+      "presets",
+      intro + '<p class="muted">Open Spool Stock on your phone or PC once, so it can send your filament list here.</p>',
+      "none",
+    );
+    return;
+  }
+  var st = p.on
+    ? p.behind
+      ? "Updating."
+      : p.how === "live"
+        ? "In Orca's filament list under Spool Stock. Updated " + h(p.when) + "."
+        : p.how === "restart"
+          ? "Saved. Restart Orca to see them, as this version of Orca can't add them while it's open."
+          : "Saved, but Orca didn't load them (" + h(p.detail) + "). Restart Orca to see them."
+    : "";
+  var html =
+    intro +
+    (p.on
+      ? '<div class="card' +
+        (p.how === "error" ? " warn" : "") +
+        '">' +
+        st +
+        '<div class="row" style="margin-top:6px"><button data-a="presets_now">Update now</button><button data-a="presets_off">Remove them from Orca</button></div></div>'
+      : '<div class="row"><button class="go" data-a="presets_on">Add them to Orca</button></div>') +
+    (p.skipped.length
+      ? '<div class="alert">Couldn\'t add ' +
+        h(p.skipped.join(", ")) +
+        ", as Orca has none of the profiles they build on.</div>"
+      : "") +
+    (p.moved
+      ? '<p class="muted">Moved ' +
+        p.moved +
+        " older cop" +
+        (p.moved === 1 ? "y" : "ies") +
+        " from the Windows app to the old-presets folder, next to the log, so nothing shows twice. Restart Orca once to clear " +
+        (p.moved === 1 ? "it" : "them") +
+        " from the list.</p>"
+      : "") +
+    '<h3>Your filaments <span class="muted">' +
+    p.feed.length +
+    '</span></h3><div class="card list">' +
+    (p.feed
+      .map(function (f) {
+        return (
+          "<div>" +
+          h(f.label) +
+          ' <span class="muted">' +
+          (f.own ? "Orca's own profile" : "on a generic profile, with your temperatures") +
+          "</span></div>"
+        );
+      })
+      .join("") || '<div class="muted">No spools yet.</div>') +
+    "</div>";
+  set("presets", html, JSON.stringify(p));
+}
+function paint() {
+  if (view === "stock") paintStock();
+  else if (view === "presets") paintPresets();
+  camTiles();
+}
+o.onMessage(function (d) {
+  if (d && d.type === "cams") {
+    camGot(d);
+    return;
+  }
+  if (!d || d.type !== "state") return;
+  D = d;
+  spools = d.spools || [];
+  document.documentElement.dataset.theme = d.dark === true ? "dark" : d.dark === false ? "light" : "";
+  document.getElementById("ver").textContent = "Version " + d.version + ".";
+  document.getElementById("hint").textContent = d.hint || "";
+  document.getElementById("nb").textContent = d.pending.length ? " (" + d.pending.length + ")" : "";
+  set(
+    "acct",
+    d.signedIn
+      ? '<div class="card">' +
+          h(d.cloud) +
+          (d.outbox ? " " + d.outbox + " waiting to send." : "") +
+          '<div class="row" style="margin-top:6px"><button data-a="signout">Sign out</button></div></div>'
+      : '<div class="card' +
+          (d.cloud && d.cloud !== "Not signed in" ? " warn" : "") +
+          '"><p>' +
+          h(d.cloud) +
+          '</p><p class="muted">In Spool Stock, open Setup, then Orca plugin, and press Copy sign-in code. Paste it here.</p><textarea id="codein"></textarea><div class="row"><button class="go" data-a="signin">Sign in</button></div></div>',
+    JSON.stringify([d.signedIn, d.cloud, d.outbox]),
+  );
+  document.getElementById("pendwrap").style.display = d.pending.length ? "" : "none";
+  set(
+    "pending",
+    d.pending
+      .map(function (e) {
+        var stop =
+          e.result === "finished"
+            ? ""
+            : e.layers
+              ? " at " + e.percent + "%, layer " + e.layer + " of " + e.layers
+              : " at " + e.percent + "%";
+        return (
+          '<div class="card warn" data-key="' +
+          h(e.key) +
+          '"><b>' +
+          h(e.printer) +
+          ": " +
+          h(e.name) +
+          '</b><br><span class="muted">' +
+          h(e.why) +
+          (e.result !== "finished" && e.result ? h(stop) + "." : "") +
+          "</span>" +
+          '<div class="row" style="margin-top:6px">How much printed <input class="pct" type="number" min="0" max="100" value="' +
+          (e.result === "finished" ? 100 : Math.round(e.percent || 0)) +
+          '">%</div>' +
+          "<table>" +
+          e.items
+            .map(function (it, i) {
+              var opts =
+                '<option value="">Not from a spool in Spool Stock</option>' +
+                spools
+                  .map(function (s) {
+                    return (
+                      '<option value="' +
+                      h(s.id) +
+                      '"' +
+                      (s.id === it.spool ? " selected" : "") +
+                      ">" +
+                      h(s.label) +
+                      "</option>"
+                    );
+                  })
+                  .join("");
+              return (
+                "<tr><td>" +
+                sw(it.colour) +
+                " " +
+                h(it.type) +
+                "</td><td>" +
+                h(it.trayName) +
+                '</td><td><input class="g pct" type="number" min="0" step="0.1" value="' +
+                it.g +
+                '"> g in full</td><td><select data-i="' +
+                i +
+                '">' +
+                opts +
+                "</select></td></tr>"
+              );
+            })
+            .join("") +
+          (e.items.length
+            ? ""
+            : '<tr><td class="muted">No filament details. Skip this one, or log it in Spool Stock from the sliced file.</td></tr>') +
+          "</table>" +
+          '<div class="row" style="margin-top:8px"><button class="go" data-a="confirm">Take it off</button><button data-a="skip">Skip</button></div></div>'
+        );
+      })
+      .join(""),
+    JSON.stringify([
+      d.pending.map(function (e) {
+        return e.key;
+      }),
+      spools.length,
+    ]),
+  );
+  set(
+    "printers",
+    d.printers
+      .map(function (p, i) {
+        var j = p.job;
+        return (
+          '<div class="card"><b>' +
+          h(p.name) +
+          '</b> <span class="muted">' +
+          h(p.ip) +
+          (p.serial ? " · " + h(p.serial) : "") +
+          "</span><br>" +
+          h(p.state) +
+          (p.linked
+            ? ' · <span class="muted">Spool Stock printer: ' + h(p.linked) + "</span>"
+            : d.signedIn
+              ? '<br><span class="muted">Not found in Spool Stock. Add a printer there called ' +
+                h(p.name) +
+                (p.serial ? ", or with serial " + h(p.serial) : "") +
+                ".</span>"
+              : "") +
+          (j && j.warnings.length
+            ? j.warnings
+                .map(function (w) {
+                  return '<div class="alert">' + h(w) + "</div>";
+                })
+                .join("")
+            : "") +
+          (j
+            ? (j.warnings.length ? "" : "<br>") +
+              "Printing " +
+              h(j.name) +
+              (j.percent ? " (" + j.percent + "%)" : "") +
+              (j.late ? ' <span class="muted">(joined part way, so the trays come from what it fed)</span>' : "") +
+              (j.trays.length
+                ? "<table>" +
+                  j.trays
+                    .map(function (t) {
+                      return (
+                        "<tr><td>" +
+                        sw(t.colour) +
+                        " " +
+                        h(t.type) +
+                        "</td><td>" +
+                        t.g +
+                        " g</td><td>" +
+                        h(t.tray) +
+                        "</td><td>" +
+                        (t.spool ? h(t.spool) : '<span class="muted">no spool matched</span>') +
+                        "</td></tr>"
+                      );
+                    })
+                    .join("") +
+                  "</table>"
+                : '<br><span class="muted">Grams come from the job file once printing starts.</span>')
+            : "") +
+          '<div class="row" style="margin-top:6px"><button data-a="connect">Connect</button><button data-a="remove" data-i="' +
+          i +
+          '">Remove</button></div></div>'
+        );
+      })
+      .join("") || '<p class="muted">None yet.</p>',
+    JSON.stringify(d.printers),
+  );
+  set(
+    "recent",
+    d.recent
+      .map(function (r) {
+        return h(r.when) + ": " + h(r.text);
+      })
+      .join("<br>") || "Nothing yet.",
+    JSON.stringify(d.recent),
+  );
+  paint();
 });
-document.querySelector("nav").addEventListener("click",function(ev){var b=ev.target.closest("[data-v]");if(b)show(b.dataset.v)});
-["q","grp","lowonly"].forEach(function(id){var el=document.getElementById(id);el.addEventListener(el.type==="checkbox"||el.tagName==="SELECT"?"change":"input",function(){kept("ss."+id,el.type==="checkbox"?(el.checked?"1":""):el.value);if(D)paintStock()})});
-(function(){var g=kept("ss.grp");if(g)document.getElementById("grp").value=g;document.getElementById("lowonly").checked=kept("ss.lowonly")==="1";var v=kept("ss.view");if(v==="stock"||v==="presets"||v==="cameras")show(v)})();
-document.getElementById("cadd").onclick=function(){var u=document.getElementById("curl");if(!u.value.trim()){u.focus();return}send({type:"cam_add",name:document.getElementById("cname").value.trim(),url:u.value.trim(),printer:document.getElementById("cprinter").value});u.value="";document.getElementById("cname").value="";document.getElementById("camadd").open=false};
-document.getElementById("camadd").addEventListener("toggle",camFitSoon);window.addEventListener("resize",camFitSoon);
-setInterval(camPoll,300);
-document.body.addEventListener("click",function(ev){var b=ev.target.closest("[data-a]");if(!b)return;var a=b.dataset.a;
- if(a==="signin")send({type:"signin",code:document.getElementById("codein").value});
- else if(a==="signout")send({type:"signout"});
- else if(a==="connect")send({type:"connect"});
- else if(a==="remove")send({type:"remove",index:+b.dataset.i});
- else if(a==="cam_remove"){if(b.dataset.sure){send({type:"cam_remove",id:b.closest(".cam").dataset.id})}else{b.dataset.sure="1";b.textContent="Remove it";setTimeout(function(){delete b.dataset.sure;b.textContent="Remove"},4000)}}
- else if(a==="refresh"||a==="presets_on"||a==="presets_now"||a==="presets_off"){if(a!=="refresh")last.presets=null;send({type:a})}
- else if(a==="confirm"||a==="skip"){var c=b.closest("[data-key]"),items=[];
-  c.querySelectorAll("tr").forEach(function(tr){var s=tr.querySelector("select"),g=tr.querySelector("input.g");if(s)items.push({spool:s.value,g:parseFloat(g.value)||0})});
-  send({type:a,key:c.dataset.key,pct:parseFloat(c.querySelector("input.pct").value)||0,items:items});last.pending=null}});
-document.getElementById("add").onclick=function(){send({type:"add",name:document.getElementById("n").value.trim(),ip:document.getElementById("ip").value.trim(),code:document.getElementById("code").value.trim()});document.getElementById("code").value=""};
-document.getElementById("openlog").onclick=function(){send({type:"openlog"})};
-send({type:"ready"});setInterval(function(){send({type:"poll"})},2000);
+document.querySelector("nav").addEventListener("click", function (ev) {
+  var b = ev.target.closest("[data-v]");
+  if (b) show(b.dataset.v);
+});
+["q", "grp", "lowonly"].forEach(function (id) {
+  var el = document.getElementById(id);
+  el.addEventListener(el.type === "checkbox" || el.tagName === "SELECT" ? "change" : "input", function () {
+    kept("ss." + id, el.type === "checkbox" ? (el.checked ? "1" : "") : el.value);
+    if (D) paintStock();
+  });
+});
+(function () {
+  var g = kept("ss.grp");
+  if (g) document.getElementById("grp").value = g;
+  document.getElementById("lowonly").checked = kept("ss.lowonly") === "1";
+  var v = kept("ss.view");
+  if (v === "stock" || v === "presets" || v === "cameras") show(v);
+})();
+document.getElementById("cadd").onclick = function () {
+  var u = document.getElementById("curl");
+  if (!u.value.trim()) {
+    u.focus();
+    return;
+  }
+  send({
+    type: "cam_add",
+    name: document.getElementById("cname").value.trim(),
+    url: u.value.trim(),
+    printer: document.getElementById("cprinter").value,
+  });
+  u.value = "";
+  document.getElementById("cname").value = "";
+  document.getElementById("camadd").open = false;
+};
+document.getElementById("camadd").addEventListener("toggle", camFitSoon);
+window.addEventListener("resize", camFitSoon);
+setInterval(camPoll, 300);
+document.body.addEventListener("click", function (ev) {
+  var b = ev.target.closest("[data-a]");
+  if (!b) return;
+  var a = b.dataset.a;
+  if (a === "signin") send({type: "signin", code: document.getElementById("codein").value});
+  else if (a === "signout") send({type: "signout"});
+  else if (a === "connect") send({type: "connect"});
+  else if (a === "remove") send({type: "remove", index: +b.dataset.i});
+  else if (a === "cam_remove") {
+    if (b.dataset.sure) {
+      send({type: "cam_remove", id: b.closest(".cam").dataset.id});
+    } else {
+      b.dataset.sure = "1";
+      b.textContent = "Remove it";
+      setTimeout(function () {
+        delete b.dataset.sure;
+        b.textContent = "Remove";
+      }, 4000);
+    }
+  } else if (a === "refresh" || a === "presets_on" || a === "presets_now" || a === "presets_off") {
+    if (a !== "refresh") last.presets = null;
+    send({type: a});
+  } else if (a === "confirm" || a === "skip") {
+    var c = b.closest("[data-key]"),
+      items = [];
+    c.querySelectorAll("tr").forEach(function (tr) {
+      var s = tr.querySelector("select"),
+        g = tr.querySelector("input.g");
+      if (s) items.push({spool: s.value, g: parseFloat(g.value) || 0});
+    });
+    send({type: a, key: c.dataset.key, pct: parseFloat(c.querySelector("input.pct").value) || 0, items: items});
+    last.pending = null;
+  }
+});
+document.getElementById("add").onclick = function () {
+  send({
+    type: "add",
+    name: document.getElementById("n").value.trim(),
+    ip: document.getElementById("ip").value.trim(),
+    code: document.getElementById("code").value.trim(),
+  });
+  document.getElementById("code").value = "";
+};
+document.getElementById("openlog").onclick = function () {
+  send({type: "openlog"});
+};
+send({type: "ready"});
+setInterval(function () {
+  send({type: "poll"});
+}, 2000);
 </script></body></html>"""
 
 
@@ -2288,7 +3616,15 @@ def _presets(force: bool = False) -> str:
     except Exception as e:
         log("presets.error", trace=traceback.format_exc())
         return f"Couldn't write the presets: {type(e).__name__}: {e}"
-    return {"live": "", "restart": "Saved. Restart Orca to see them.", "error": "Saved, but Orca didn't load them. Restart Orca to see them."}[r["how"]] if force else ""
+    return (
+        {
+            "live": "",
+            "restart": "Saved. Restart Orca to see them.",
+            "error": "Saved, but Orca didn't load them. Restart Orca to see them.",
+        }[r["how"]]
+        if force
+        else ""
+    )
 
 
 def handle(d: dict) -> dict:
@@ -2329,7 +3665,14 @@ def handle(d: dict) -> dict:
         else:
             items = load_cameras()
             cid = "c" + os.urandom(3).hex()
-            items.append({"id": cid, "name": (d.get("name") or "").strip() or u["host"], "url": d["url"].strip(), "printer": d.get("printer") or ""})
+            items.append(
+                {
+                    "id": cid,
+                    "name": (d.get("name") or "").strip() or u["host"],
+                    "url": d["url"].strip(),
+                    "printer": d.get("printer") or "",
+                }
+            )
             _secrets.update({u["password"], d["url"].strip()})
             save_cameras(items)
             log("camera.added", name=items[-1]["name"], host=u["host"])
@@ -2426,6 +3769,7 @@ def handle(d: dict) -> dict:
 Pages = getattr(getattr(orca, "pages", None), "PagesPluginCapabilityBase", None)
 
 if Pages is not None:
+
     class SpoolStockPage(Pages):
         def get_name(self):
             return NAME

@@ -4,6 +4,6 @@ contextBridge.exposeInMainWorld("spoolStockDesktop", {
   orca: {
     version: 3,
     write: (files, opts) => ipcRenderer.invoke("orca-write", files, opts),
-    restore: () => ipcRenderer.invoke("orca-restore")
-  }
+    restore: () => ipcRenderer.invoke("orca-restore"),
+  },
 });

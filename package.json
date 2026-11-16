@@ -1,0 +1,13 @@
+{
+  "name": "spool-stock",
+  "private": true,
+  "description": "Developer tools for Spool Stock: formatting and the test suites. The app itself needs no build step.",
+  "scripts": {
+    "format": "node tools/format.mjs",
+    "format:check": "node tools/format.mjs --check",
+    "test": "node tools/test-all.mjs"
+  },
+  "devDependencies": {
+    "prettier": "3.6.2"
+  }
+}
