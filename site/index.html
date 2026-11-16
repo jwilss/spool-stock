@@ -1175,10 +1175,38 @@ input[type="color"] {
 <script src="vendor/firebase-firestore-compat.js"></script>
 <script>
 "use strict";
+/* Spool Stock: the whole app, in this one file, with no build step.
+
+   How it fits together
+   - Data lives in Firestore under users/<uid>/ and is mirrored into S (see "State"). Each snapshot from
+     Firestore replaces the matching part of S and calls dataChanged(), which redraws the page.
+   - The part of the address after # picks the view: #stock, #s0012 (a spool), #loc-top-shelf (a storage),
+     #setup and so on. route() reads it, and render() draws the view by setting #main's HTML from one of the
+     v...() functions. Views are plain HTML strings with no handlers of their own.
+   - Buttons carry data-go="view" to open a view, or data-act="name" to run actions.name(). One click
+     listener near the end handles both.
+   - Writes go straight to Firestore, as col("spools").doc(id).update(...). They land in the local copy at
+     once, so the app keeps working with no signal and syncs later.
+
+   Order of this file
+     Reference data, helpers, state, storages and spools, the catalogue and print settings, stickers,
+     live data, moving and scanning, printers, routing, then each view with the code behind it, dialogs,
+     the event listeners and start-up.
+
+   Words used throughout
+   - A "storage" (location, loc) is anywhere filament is kept. One with "spaces" holds one spool per numbered
+     space, like an AMS or a dryer. A "loose" one is a shelf or box, with its spools in an order you choose.
+   - Every spool is a 1 kg spool: netG is always 1000 and remainG is what's left on it.
+
+   ROADMAP.md has the wider picture, including the Orca plugin and Spool Reader. */
 const CFG = window.SPOOL_CONFIG || {};
 const PAGE_URL = CFG.siteUrl || location.origin + location.pathname;
 const IS_APP = /SpoolStockApp/.test(navigator.userAgent);
 
+/* ==========================================================================================================
+   Reference data
+   Fixed lists the app starts from. Your own values always win over these.
+   ========================================================================================================== */
 /* Typical starting settings per material (bed values for a smooth PEI or high temperature plate). */
 const MATERIALS = [
   {key: "PETG-CF", re: /PETG[\s-]*(CF|GF)/i, n: [240, 270], b: [60, 80], d: [70, 8]},
@@ -1331,22 +1359,31 @@ const STORE_TYPES = {
   other: {label: "Something else", hint: "Set it up however you like", name: "Storage", spaces: false, cap: null},
 };
 
-/* ---------- helpers ---------- */
+/* ==========================================================================================================
+   Helpers
+   Small functions used everywhere.
+   ========================================================================================================== */
+/* The first element matching a CSS selector. */
 const $ = s => document.querySelector(s);
+/* Makes any value safe to put into HTML. Everything that came from the user or a file goes through this. */
 const esc = v =>
   String(v ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+/* "Bambu Lab" to "bambu-lab": the form used for document ids. */
 const slug = s =>
   String(s || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "") || "x";
+/* A number, or null when the text isn't one. */
 const num = v => {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : null;
 };
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+/* "190-230" from a low and a high, or just the one value when there is only one. */
 const range = (a, b) =>
   a == null && b == null ? "" : a == null || b == null || a === b ? String(a ?? b) : a + "-" + b;
+/* Small values kept on this device only (which storage to scan into, a spool waiting to be filed). */
 const local = {
   get(k) {
     try {
@@ -1366,6 +1403,7 @@ const local = {
     } catch {}
   },
 };
+/* "today", "3 days ago", or the date once it is over two months back. */
 const ago = t => {
   if (!t) return "";
   const d = Math.floor((Date.now() - t) / 864e5);
@@ -1374,36 +1412,45 @@ const ago = t => {
   if (d < 60) return d + " days ago";
   return new Date(t).toLocaleDateString("en-GB", {day: "numeric", month: "short", year: "numeric"});
 };
+/* "14 Nov, 22:35" */
 const when = t =>
   new Date(t).toLocaleString("en-GB", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"});
 
-/* ---------- state ---------- */
+/* ==========================================================================================================
+   State
+   S is everything the app knows. The first six parts mirror Firestore collections, keyed by document id,
+   and are replaced whole each time Firestore sends a snapshot. The rest is what's on screen.
+   ========================================================================================================== */
 const S = {
-  spools: {},
-  locs: {},
-  printers: {},
-  jobs: {},
-  brands: {},
-  profiles: {},
-  settings: {},
-  ready: 0,
-  view: "stock",
-  param: null,
-  filter: {q: "", mat: "", loc: "", tab: "active"},
-  stale: false,
+  spools: {}, // every spool, used up ones included
+  locs: {}, // storages (the "locations" collection)
+  printers: {}, // printers and what feeds each one
+  jobs: {}, // prints taken off spools, kept for the print list and Undo
+  brands: {}, // manufacturers: logo and empty spool weight
+  profiles: {}, // print settings remembered per brand and material
+  settings: {}, // config/main: sticker sheet, last spool number and other choices
+  ready: 0, // set once the first data has arrived
+  view: "stock", // the view on screen
+  param: null, // that view's spool or storage id, if it has one
+  filter: {q: "", mat: "", loc: "", tab: "active"}, // the stock list's search box and chips
+  stale: false, // showing the saved copy because the server hasn't answered yet
 };
-let PF = null;
-let db = null,
-  fs = null,
-  uid = null,
-  F = null,
-  LF = null,
-  crop = null,
-  Imp = null;
-let internal = false,
-  booted = false,
-  started = false;
+
+/* What's being worked on right now. Each is null while its screen isn't in use. */
+let spoolEdit = null; // the add or edit spool form
+let storeEdit = null; // the storage editor
+let printerEdit = null; // the printer editor
+let crop = null; // a logo being cropped out of a photo
+let importJob = null; // spools read from a Spool Reader file, waiting to be imported
+
+let db = null; // this user's part of Firestore (users/<uid>/), once signed in
+let fs = null; // Firestore itself
+let uid = null; // the signed-in user's id
+let internal = false; // the next address change came from go(), not from a scanned link
+let booted = false; // the first route has run
+let started = false; // Firebase has started, or isn't set up
 const SOURCE_NOTE = `<div class="card"><h2>Almost set up</h2><p>Add your Firebase details to config.js, as described in SETUP.md, then reload.</p></div>`;
+/* A collection in this user's data: col("spools").doc("s0012").update({...}) */
 const col = n => db.collection(n);
 
 /* Firestore keeps working with no signal: a write lands in the local copy at once and its promise only settles when the server answers, so the app never waits on it. */
@@ -1445,13 +1492,21 @@ const downloads = {
     return {status: "saved"};
   },
 };
+/* ==========================================================================================================
+   Storages and spools
+   Where each spool is, in what order, and how full each storage is.
+   ========================================================================================================== */
+/* Spools that haven't been used up. */
 const liveSpools = () => Object.values(S.spools).filter(s => s.status !== "used");
+/* A storage's full name, with its group in front: "Rack Shelf 1F". */
 const locName = id => {
   const l = S.locs[id];
   return !id ? "No storage set" : !l ? "Removed storage" : l.group ? l.group + " " + l.name : l.name;
 };
+/* Storages in the order set in Setup. */
 const orderedLocs = () =>
   Object.values(S.locs).sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || a.name.localeCompare(b.name));
+/* Storages gathered under their group names, as [group, storages] pairs. Ungrouped ones come under "". */
 const groups = () => {
   const m = new Map();
   for (const l of orderedLocs()) {
@@ -1464,6 +1519,8 @@ const groups = () => {
 const inLoc = id => liveSpools().filter(s => s.loc === id);
 /* A storage with spaces is one storage holding a fixed number of spools, one per numbered space. */
 const spaced = l => !!(l && l.spaces && l.capacity > 0);
+/* The spool in each space of a storage, as an array with null for empty spaces. A spool whose space is
+   taken or out of range is given the first free one. */
 function seated(l) {
   const seats = Array(l.capacity).fill(null),
     rest = [];
@@ -1484,15 +1541,18 @@ const looseOrder = l =>
   );
 const nextPos = id => Math.max(0, ...inLoc(id).map(s => s.pos ?? 0)) + 1;
 const freeSpaces = l => seated(l).flatMap((s, i) => (s ? [] : [i + 1]));
+/* The space number a spool sits in, or null in a loose storage. */
 const spaceOf = s => {
   const l = S.locs[s.loc];
   return spaced(l) ? seated(l).findIndex(x => x && x.id === s.id) + 1 || null : null;
 };
+/* Where a spool is, in words: "AMS-B, space 2". */
 const spotName = s => {
   const n = spaceOf(s);
   return locName(s.loc) + (n && S.locs[s.loc].capacity > 1 ? ", space " + n : "");
 };
 const isFull = l => !!l.capacity && inLoc(l.id).length >= l.capacity;
+/* <option> tags for every storage. With roomOnly, full ones are greyed out. */
 const locOptions = (sel, roomOnly) =>
   orderedLocs()
     .map(l => {
@@ -1500,7 +1560,9 @@ const locOptions = (sel, roomOnly) =>
       return `<option value="${l.id}" ${sel === l.id ? "selected" : ""} ${off ? "disabled" : ""}>${esc(locName(l.id))}${off ? " (full)" : ""}</option>`;
     })
     .join("");
+/* Materials a storage warns about, as typed in Setup ("TPU, PET-CF"), or the default for its type. */
 const warnOf = l => l.warn ?? STORE_TYPES[l.kind]?.warn ?? "";
+/* The warning-list entry a spool's material matches for a storage, if any. */
 function warnHit(sp, l) {
   const key = (baseMat(sp.material)?.key || "").toLowerCase(),
     words = ` ${sp.material.toLowerCase().replace(/[^a-z0-9-]+/g, " ")} `;
@@ -1510,6 +1572,7 @@ function warnHit(sp, l) {
     .filter(Boolean)
     .find(t => t.toLowerCase() === key || words.includes(` ${t.toLowerCase()} `));
 }
+/* A new, unused id for a storage, made from its name. */
 function newLocId(name) {
   const base = slug(name).slice(0, 24).replace(/-$/, "") || "storage";
   let id = base,
@@ -1517,6 +1580,8 @@ function newLocId(name) {
   while (S.locs[id] || id === "new") id = base + "-" + n++;
   return id;
 }
+/* For adding several spools to one storage: returns a function that hands out the next free place each
+   time it is called, or no storage once a storage with spaces is full. */
 const placer = id => {
   const l = S.locs[id],
     open = spaced(l) ? freeSpaces(l) : null;
@@ -1532,6 +1597,7 @@ const leftOf = v => {
   const n = num(v);
   return n == null ? FULL_G : clamp(Math.round(n), 0, FULL_G);
 };
+/* A complete new spool document from the form's values and the place it goes. */
 const newSpool = (body, now, spot) => ({
   ...body,
   ...spot,
@@ -1542,13 +1608,16 @@ const newSpool = (body, now, spot) => ({
   addedAt: now,
   history: spot.loc ? [{at: now, from: null, to: spot.loc}] : [],
 });
+/* A valid #rrggbb colour, or grey. */
 const hexOK = h => (/^#[0-9a-f]{6}$/i.test(h || "") ? h : "#9AA5AB");
+/* A spool's colours: one for a plain spool, several for a split or gradient one. */
 const colourList = s => {
   const c = Array.isArray(s.colours) ? s.colours.filter(x => /^#[0-9a-f]{6}$/i.test(x)) : [];
   return c.length ? c : [hexOK(s.hex)];
 };
 const patternOf = s =>
   colourList(s).length > 1 && (s.pattern === "split" || s.pattern === "gradient") ? s.pattern : "solid";
+/* How full a spool is, from 0 to 1. */
 const pct = s => (s.netG ? clamp((s.remainG ?? s.netG) / s.netG, 0, 1) : 1);
 const isLow = s => (s.remainG ?? s.netG ?? 9999) <= LOW_G;
 
@@ -1564,6 +1633,8 @@ function rollR(s) {
   const r = Math.sqrt(CORE_R * CORE_R + f * (ROLL_R * ROLL_R - CORE_R * CORE_R));
   return g > 0 ? Math.max(r, CORE_R + 1.5) : CORE_R;
 }
+/* The spool drawing used all over the app: an SVG reel with the filament in its colour, sized by what's left.
+   disc(null) draws an empty reel. */
 function disc(s, size = 44) {
   const r = s ? rollR(s) : 0;
   let fill = "",
@@ -1591,11 +1662,16 @@ function disc(s, size = 44) {
   return `<svg class="disc" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true">${def}<circle class="fl" cx="50" cy="50" r="48"/>${s ? `<circle class="fil" cx="50" cy="50" r="${r.toFixed(1)}" fill="${fill}"/>` : ""}<circle class="hub" cx="50" cy="50" r="22"/><circle class="hole" cx="50" cy="50" r="9"/></svg>`;
 }
 
-/* ---------- print settings lookup ---------- */
+/* ==========================================================================================================
+   The catalogue and print settings
+   Print settings for a filament come from, in order: your own saved settings for that brand and material
+   (S.profiles), the filament catalogue, then a typical table per material (MATERIALS).
+   ========================================================================================================== */
 /* Filament catalogue: manufacturers and their own product names, from SpoolmanDB. Fetched once and kept for offline use. */
 let CAT = null,
   ORCA_GENERIC = [],
   ORCA_VARIANTS = {};
+/* Text reduced to lower case words, for comparing names. */
 const norm = s =>
   String(s || "")
     .toLowerCase()
@@ -1610,6 +1686,7 @@ const ALIASES = [
   ["glass fibre", "gf"],
   ["glass fiber", "gf"],
 ];
+/* The text a catalogue line is searched by, with short forms added both ways (HS and high speed). */
 function searchText(...parts) {
   let t = norm(parts.join(" "));
   for (const [a, b] of ALIASES) {
@@ -1618,6 +1695,7 @@ function searchText(...parts) {
   }
   return t;
 }
+/* True when every word of the search is somewhere in the text. */
 const matches = (hay, q) =>
   norm(q)
     .split(" ")
@@ -1641,14 +1719,19 @@ async function loadCatalogue() {
     orcaFeedSync();
   } catch {}
 }
+/* A manufacturer's catalogue entry, by name or any of its other names. */
 const catBrand = name =>
   CAT?.[slug(name)] || Object.values(CAT || {}).find(c => c.aka.some(a => slug(a) === slug(name)));
+/* The catalogue line for one of a manufacturer's filaments, by its name or other names. */
 const catLine = (brand, material) => {
   const q = norm(material);
   return catBrand(brand)?.lines.find(l => norm(l.n) === q || [].concat(l.a || []).some(a => norm(a) === q));
 };
+/* The id your saved settings for a brand and material are kept under. */
 const profileId = (b, m) => slug(b) + "__" + slug(m);
+/* The basic material a filament name belongs to: "PLA Silk+" is PLA. */
 const baseMat = m => MATERIALS.find(x => x.re.test(m || ""));
+/* Print settings for a filament, and where they came from (src): saved, catalogue, typical or none. */
 function lookup(brand, material) {
   const p = S.profiles[profileId(brand, material)];
   if (p) return {nMin: p.nMin, nMax: p.nMax, bMin: p.bMin, bMax: p.bMax, dT: p.dT, dH: p.dH, src: "saved"};
@@ -1678,6 +1761,7 @@ function lookup(brand, material) {
     };
   return {nMin: null, nMax: null, bMin: null, bMax: null, dT: null, dH: null, src: "none"};
 }
+/* The line under the form's print settings saying where they came from. */
 const srcText = i =>
   ({
     saved: "Saved from the last spool of this filament.",
@@ -1687,9 +1771,13 @@ const srcText = i =>
     none: "I don't know this material, so fill these in and they will be kept for this filament.",
   })[i.src] || "";
 
-/* ---------- QR ---------- */
+/* ==========================================================================================================
+   QR codes
+   A sticker's code is the site address plus #s0012 or #loc-top-shelf, so any phone camera opens it.
+   ========================================================================================================== */
 const qrUrl = code => PAGE_URL + "#" + code;
 const qrCache = new Map();
+/* A QR code as rows of true and false, worked out once per text. */
 function qrMatrix(text) {
   if (qrCache.has(text)) return qrCache.get(text);
   const q = qrcode(0, "M");
@@ -1706,8 +1794,14 @@ function qrMatrix(text) {
   return m;
 }
 
-/* ---------- sticker layout, in mm ---------- */
+/* ==========================================================================================================
+   Stickers
+   A sticker is laid out once, in millimetres, as a list of drawing steps ("ops": text, rect, tri, img, qr).
+   opsToSVG() draws that list for the on-screen preview and opsToPDF() draws the same list into the PDF,
+   so the preview always matches the print.
+   ========================================================================================================== */
 let measurer = null;
+/* The width of some text in mm, measured with the PDF's own fonts so the preview matches the print. */
 function tw(text, pt, font, bold) {
   if (!measurer && window.jspdf) measurer = new jspdf.jsPDF({unit: "mm", format: "a4"});
   if (measurer) {
@@ -1716,6 +1810,7 @@ function tw(text, pt, font, bold) {
   }
   return (text.length * pt * 0.54 * 25.4) / 72;
 }
+/* Shrinks text to fit a width, down to minPt, then shortens it with a full stop if it still doesn't. */
 function fit(text, maxW, pt, minPt, font, bold) {
   let s = pt;
   while (s > minPt && tw(text, s, font, bold) > maxW) s -= 0.25;
@@ -1723,7 +1818,9 @@ function fit(text, maxW, pt, minPt, font, bold) {
   while (t.length > 2 && tw(t, s, font, bold) > maxW) t = t.slice(0, -2).trimEnd() + ".";
   return {text: t, pt: s};
 }
+/* The PDF's built-in fonts only cover Latin-1, so anything else is dropped. */
 const safe = t => String(t ?? "").replace(/[^\x20-\x7E\xA0-\xFF]/g, "");
+/* A manufacturer's logo, sized to fit a box while keeping its shape. Null when there isn't one. */
 function logoFit(b, boxW, boxH) {
   const l = logoData(b);
   if (!l) return null;
@@ -1894,6 +1991,7 @@ function wideLocOps(l, W, H) {
   }
   return ops;
 }
+/* The drawing steps for a spool's sticker, W by H mm. */
 function spoolOps(sp, W, H) {
   if (isWide(W, H)) return wideSpoolOps(sp, W, H);
   const m = 2.2,
@@ -1948,6 +2046,7 @@ function spoolOps(sp, W, H) {
   });
   return ops;
 }
+/* The drawing steps for a storage's sticker. */
 function locOps(l, W, H) {
   if (isWide(W, H)) return wideLocOps(l, W, H);
   const m = 2.2,
@@ -1967,6 +2066,7 @@ function locOps(l, W, H) {
 }
 const itemOps = (it, W, H) => (it.kind === "loc" ? locOps(it.data, W, H) : spoolOps(it.data, W, H));
 
+/* Draws a sticker's steps as an SVG, for the preview on screen. */
 function opsToSVG(ops, W, H) {
   let o = "";
   for (const p of ops) {
@@ -1997,6 +2097,7 @@ function opsToSVG(ops, W, H) {
   return `<svg class="sticker" viewBox="0 0 ${W} ${H}" width="${W * 4}" height="${H * 4}" role="img" aria-label="Sticker preview"><rect width="${W}" height="${H}" fill="#fff"/>${o}</svg>`;
 }
 const imgFormat = src => (/^data:image\/jpe?g/i.test(src) ? "JPEG" : "PNG");
+/* Draws a sticker's steps into the PDF, with its top left corner at ox, oy mm. */
 function opsToPDF(doc, ops, ox, oy) {
   for (const p of ops) {
     const x = ox + p.x,
@@ -2048,11 +2149,14 @@ function opsToPDF(doc, ops, ox, oy) {
     }
   }
 }
+/* The sticker sheet chosen on the Stickers page: one of SHEETS, or the custom size. */
 function curSheet() {
   const st = S.settings.sheet || {};
   if (st.id === "custom" && st.custom) return {id: "custom", name: "Custom", ...st.custom};
   return SHEETS.find(s => s.id === st.id) || SHEETS[0];
 }
+/* Lays the queued stickers out on A4 pages, starting at the sheet's next free label. Returns the PDF and
+   which label comes next. */
 function buildPDF(items, start, opts) {
   const sh = curSheet(),
     doc = new jspdf.jsPDF({unit: "mm", format: "a4", compress: true});
@@ -2085,7 +2189,12 @@ function buildPDF(items, start, opts) {
   return {doc, next: i % per};
 }
 
-/* ---------- data ---------- */
+/* ==========================================================================================================
+   Live data
+   watch() subscribes to this user's collections. Firestore answers first from its local copy and again
+   when the server replies, so the page appears straight away and then catches up.
+   ========================================================================================================== */
+/* Subscribes to this user's data. Runs once, after sign-in. */
 function watch() {
   loadCatalogue();
   const timer = setTimeout(() => {
@@ -2194,6 +2303,7 @@ function kiloSpools() {
     col("spools").doc(sp.id).update({netG: FULL_G, remainG});
   }
 }
+/* Called after every snapshot. Redraws the page, unless that would wipe something being typed. */
 function dataChanged() {
   kiloSpools();
   orcaFeedSync();
@@ -2221,6 +2331,7 @@ function dataChanged() {
     render();
   }, 60);
 }
+/* Says why a save failed, in terms that help. */
 const fail = (e, what) =>
   toast(
     e && e.code === "resource-exhausted"
@@ -2229,6 +2340,7 @@ const fail = (e, what) =>
         ? `${what}: sign in again.`
         : `${what}. Check your signal and try again.`,
   );
+/* Saves changes to this user's settings (config/main). */
 async function saveConfig(patch) {
   const next = {...S.settings, ...patch};
   S.settings = next;
@@ -2238,6 +2350,7 @@ async function saveConfig(patch) {
     fail(e, "Couldn't save that setting");
   }
 }
+/* The next n spool codes after the highest ever used: s0025, s0026 and so on. */
 function nextIds(n) {
   let hi = S.settings.lastId || 0;
   for (const id of Object.keys(S.spools)) {
@@ -2249,7 +2362,13 @@ function nextIds(n) {
   return {ids: out, last: hi + n};
 }
 
-/* ---------- moving ---------- */
+/* ==========================================================================================================
+   Moving and scanning
+   tryMove() checks a move (full storage, material warnings) and asks if needed. doMove() then saves it.
+   handleScan() is what a scanned sticker code leads to: a spool is remembered for 5 minutes (MOVE_WINDOW),
+   and a storage scanned in that time gets that spool.
+   ========================================================================================================== */
+/* Saves a move, with Undo. opts.swap is a spool to send the other way when the space is taken. */
 async function doMove(id, to, opts = {}) {
   const sp = S.spools[id];
   if (!sp) return;
@@ -2305,8 +2424,10 @@ async function doMove(id, to, opts = {}) {
     fail(e, "That move didn't save");
   }
 }
+/* A note for the move message when a spool wants hotter drying than a dryer can give. */
 const hotNote = (sp, l) =>
   l && l.maxC && sp.dT > l.maxC ? ` It wants ${sp.dT} °C and this dryer stops at ${l.maxC} °C.` : "";
+/* Moves a spool, asking first when the storage is full or warns about its material. */
 function tryMove(id, to) {
   const sp = S.spools[id],
     l = S.locs[to];
@@ -2344,6 +2465,7 @@ function tryMove(id, to) {
     ]);
   else place();
 }
+/* What a scanned or typed sticker code leads to. source is "page" when the app's own scanner read it. */
 function handleScan(code, source) {
   if (!code) {
     toast("That isn't one of your stickers.");
@@ -2380,9 +2502,11 @@ function handleScan(code, source) {
   }
 }
 
-/* ---------- routing ---------- */
-const VIEWS = ["stock", "add", "scan", "stickers", "setup", "import", "log"];
-/* ---------- printers: what feeds each one ---------- */
+/* ==========================================================================================================
+   Printers: what feeds each one
+   A printer lists its feeds: AMS units and the external spool, each linked to a storage. That is how a
+   print's tray is turned into a spool, here and in the Orca plugin (which follows the same rules).
+   ========================================================================================================== */
 const orderedPrinters = () =>
   Object.values(S.printers).sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || a.name.localeCompare(b.name));
 const feedLabel = f => (f.kind === "external" ? "External spool" : `AMS ${f.unit}`);
@@ -2420,6 +2544,14 @@ function trayToSpool(printer, unit, tray) {
   return spaced(l) ? seated(l)[Number(tray)] || null : null;
 }
 window.SpoolStock = {trayToSpool, feedOf};
+
+/* ==========================================================================================================
+   Routing
+   go(view) changes the address, and the hashchange listener calls route(). A hash that arrives from outside
+   (a sticker scanned with the phone's own camera) is treated as a scan.
+   ========================================================================================================== */
+const VIEWS = ["stock", "add", "scan", "stickers", "setup", "import", "log"];
+/* Opens a view: go("stock"), go("s0012"), go("loc-top-shelf"). */
 function go(v) {
   internal = true;
   if (location.hash === "#" + v) {
@@ -2434,6 +2566,7 @@ addEventListener("hashchange", () => {
   internal = false;
   if (booted) route(ext);
 });
+/* Reads the address into S.view and S.param, then draws. */
 function route(external) {
   const h = location.hash.slice(1).toLowerCase() || "stock";
   if (external && (/^s\d+/.test(h) || h.startsWith("loc-"))) {
@@ -2466,7 +2599,7 @@ function route(external) {
     S.view = "stock";
     S.param = null;
   }
-  if (S.view === "add" && !F) newDraft();
+  if (S.view === "add" && !spoolEdit) newDraft();
   if (S.view === "edit") editDraft(S.param);
   render();
   try {
@@ -2490,7 +2623,11 @@ function handleArrival(code) {
   }
 }
 
-/* ---------- views ---------- */
+/* ==========================================================================================================
+   Views
+   render() picks the view for S.view and sets #main's HTML. Each v...() function returns that HTML as a string.
+   ========================================================================================================== */
+/* Draws the current view. Until signed in and loaded, shows the sign-in form or a waiting message instead. */
 function render() {
   document.querySelectorAll("[data-nav]").forEach(b => {
     if (b.dataset.nav === S.view || (S.view === "edit" && b.dataset.nav === "add"))
@@ -2544,7 +2681,7 @@ function render() {
         : "") + v();
   if (S.view === "scan") Scanner.attach();
   if (S.view === "add" || S.view === "edit") formPreview();
-  if (S.view === "store" && LF) storePreview();
+  if (S.view === "store" && storeEdit) storePreview();
   if (crop) drawCrop();
 }
 
@@ -2578,6 +2715,7 @@ const authErr = e => {
     n.textContent = authMsg(e);
   }
 };
+/* One storage on the stock board: numbered spaces for a unit or dryer, a row of reels for a shelf or box. */
 function rackHTML(l) {
   const here = spaced(l) ? inLoc(l.id) : looseOrder(l),
     head = `<h3><button class="rackname" data-go="loc-${l.id}">${esc(l.name)}</button><span class="mono">${here.length}${l.capacity ? "/" + l.capacity : ""}</span></h3>`;
@@ -2600,6 +2738,7 @@ function rackHTML(l) {
       : `<span class="muted">Empty</span>`
   }</button></section>`;
 }
+/* The stock board, search and spool list. */
 function vStock() {
   const live = liveSpools(),
     kg = live.reduce((a, s) => a + (s.remainG ?? s.netG ?? 0), 0) / 1000,
@@ -2635,11 +2774,30 @@ const emptyList = n =>
   n
     ? `<div class="card">Nothing matches that search.</div>`
     : `<div class="card"><h3>No spools yet</h3><p>Add your first one and it joins the sticker queue.</p><div class="btns"><button class="btn go" data-go="add">Add a spool</button></div></div>`;
+/* One spool as a row in a list. */
 function rowHTML(s) {
   const p = Math.round(pct(s) * 100);
   return `<button class="row" data-go="${s.id}">${disc(s)}<span style="min-width:0"><b>${esc(s.material)} ${esc(s.colour || "")}</b><span class="sub">${esc(s.brand)}, ${esc(s.status === "used" ? "used up" : spotName(s))}</span></span><span class="end"><span class="mono">${esc(s.id.toUpperCase())}</span><br>${isLow(s) && s.status !== "used" ? `<span class="pill low">Low</span>` : `<span class="mono">${s.remainG ?? s.netG ?? "?"} g</span>`}</span></button>`;
 }
 
+/* The spool list under the board, after the search box and chips have been applied. */
+function stockRows() {
+  const f = S.filter,
+    q = f.q.toLowerCase(),
+    live = liveSpools();
+  const rows = (f.tab === "used" ? Object.values(S.spools).filter(s => s.status === "used") : live)
+    .filter(s => {
+      if (f.tab === "low" && !isLow(s)) return false;
+      if (f.mat && (baseMat(s.material)?.key || s.material) !== f.mat) return false;
+      if (q && ![s.id, s.brand, s.material, s.colour, s.finish, spotName(s)].join(" ").toLowerCase().includes(q))
+        return false;
+      return true;
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return rows.map(rowHTML).join("") || emptyList(live.length);
+}
+
+/* A spool's page: move it, set its weight, see its settings, prints and moves. */
 function vSpool() {
   const s = S.spools[S.param];
   if (!s)
@@ -2725,6 +2883,7 @@ function vSpool() {
   <div class="btns"><button class="btn bad" data-act="delSpool">Delete spool</button></div>`;
 }
 
+/* A storage's page: what's in it, and arranging the spools inside. */
 function vLoc() {
   const l = S.locs[S.param];
   if (!l)
@@ -2760,6 +2919,7 @@ function vLoc() {
   <div class="btns">${here.length > (sp ? 0 : 1) && !arranging ? `<button class="btn" data-act="arrStart">Arrange</button>` : ""}<button class="btn" data-go="store-${l.id}">Edit storage</button><button class="btn" data-act="printLoc">Add sticker to queue</button></div>`;
 }
 
+/* The Scan page. The camera itself is run by Scanner. */
 function vScan() {
   const t = local.get("scanTarget") || "";
   const opts = locOptions(t);
@@ -2927,7 +3087,10 @@ const Scanner = {
   },
 };
 
-/* form */
+/* ==========================================================================================================
+   The add and edit spool form
+   spoolEdit holds the form's values while it's open. readForm() copies the inputs into it.
+   ========================================================================================================== */
 function blankDraft() {
   return {
     brand: "",
@@ -2953,15 +3116,16 @@ function blankDraft() {
   };
 }
 function newDraft() {
-  F = blankDraft();
-  F.editId = null;
+  spoolEdit = blankDraft();
+  spoolEdit.editId = null;
 }
+/* Fills the form from an existing spool. */
 function editDraft(id) {
-  if (F && F.editId === id) return;
+  if (spoolEdit && spoolEdit.editId === id) return;
   const s = S.spools[id];
-  F = blankDraft();
+  spoolEdit = blankDraft();
   if (!s) return;
-  Object.assign(F, {
+  Object.assign(spoolEdit, {
     editId: id,
     brand: s.brand,
     material: s.material,
@@ -2985,57 +3149,58 @@ function editDraft(id) {
   });
 }
 function colourRow() {
-  const multi = F.pattern !== "solid",
-    n = multi ? F.colours.length : 1;
-  let h = `<input type="color" id="f_hex" value="${esc(F.colours[0])}" aria-label="Filament colour">`;
+  const multi = spoolEdit.pattern !== "solid",
+    n = multi ? spoolEdit.colours.length : 1;
+  let h = `<input type="color" id="f_hex" value="${esc(spoolEdit.colours[0])}" aria-label="Filament colour">`;
   for (let i = 1; i < n; i++)
-    h += `<input type="color" data-colour="${i}" value="${esc(F.colours[i])}" aria-label="Colour ${i + 1}">`;
+    h += `<input type="color" data-colour="${i}" value="${esc(spoolEdit.colours[i])}" aria-label="Colour ${i + 1}">`;
   if (multi)
     h += `${n < 6 ? `<button type="button" class="btn sm" data-act="colourAdd">Add colour</button>` : ""}${n > 2 ? `<button type="button" class="btn sm" data-act="colourDrop">Remove last</button>` : ""}`;
   return h;
 }
+/* The add and edit spool form. */
 function vForm() {
-  const e = !!F.editId;
-  const opts = locOptions(F.loc, true);
-  return `<div><h1>${e ? "Edit " + esc(F.editId.toUpperCase()) : "Add a spool"}</h1></div>
+  const e = !!spoolEdit.editId;
+  const opts = locOptions(spoolEdit.loc, true);
+  return `<div><h1>${e ? "Edit " + esc(spoolEdit.editId.toUpperCase()) : "Add a spool"}</h1></div>
   ${e ? "" : `<div class="btns"><button class="btn" data-go="import">Import from Spool Reader</button></div>`}
   ${crop ? cropHTML() : ""}
   <div class="split">
     <form class="card" id="spoolForm">
-      <label class="field"><span>Manufacturer</span><input type="text" id="f_brand" autocomplete="off" placeholder="Search manufacturers" value="${esc(F.brand)}" required></label>
+      <label class="field"><span>Manufacturer</span><input type="text" id="f_brand" autocomplete="off" placeholder="Search manufacturers" value="${esc(spoolEdit.brand)}" required></label>
       <div class="picks" id="brandPick" aria-label="Manufacturers" hidden></div>
-      <label class="field"><span>Filament</span><input type="text" id="f_material" autocomplete="off" placeholder="Search their filaments, or type your own" value="${esc(F.material)}" required></label>
+      <label class="field"><span>Filament</span><input type="text" id="f_material" autocomplete="off" placeholder="Search their filaments, or type your own" value="${esc(spoolEdit.material)}" required></label>
       <div class="picks" id="linePick" aria-label="Filaments" hidden></div>
       <div class="g2">
-        <label class="field"><span>Colour name</span><input type="text" id="f_colour" list="colourList" autocomplete="off" value="${esc(F.colour)}"></label>
-        <label class="field"><span>Finish</span><select id="f_finish">${FINISH.map(x => `<option ${F.finish === x ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+        <label class="field"><span>Colour name</span><input type="text" id="f_colour" list="colourList" autocomplete="off" value="${esc(spoolEdit.colour)}"></label>
+        <label class="field"><span>Finish</span><select id="f_finish">${FINISH.map(x => `<option ${spoolEdit.finish === x ? "selected" : ""}>${x}</option>`).join("")}</select></label>
       </div>
       <datalist id="colourList"></datalist>
       <div class="catcols" id="catColours" hidden></div>
-      <label class="field"><span>Colour type</span><select id="f_pattern">${PATTERNS.map(([k, t]) => `<option value="${k}" ${F.pattern === k ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+      <label class="field"><span>Colour type</span><select id="f_pattern">${PATTERNS.map(([k, t]) => `<option value="${k}" ${spoolEdit.pattern === k ? "selected" : ""}>${t}</option>`).join("")}</select></label>
       <div class="swatches" id="colourRow">${colourRow()}</div>
       <div class="swatches">${COLOURS.map(c => `<button type="button" class="sw" style="background:${c}" data-act="hex" data-v="${c}" aria-label="Use colour ${c}"></button>`).join("")}</div>
       <div class="g2">
-        <label class="field"><span>Filament left (g, of 1000)</span><input type="number" inputmode="numeric" min="0" max="1000" id="f_left" value="${esc(F.left)}"></label>
-        <label class="field"><span>Empty spool (g)</span><input type="number" inputmode="numeric" id="f_tareG" value="${esc(F.tareG)}"></label>
+        <label class="field"><span>Filament left (g, of 1000)</span><input type="number" inputmode="numeric" min="0" max="1000" id="f_left" value="${esc(spoolEdit.left)}"></label>
+        <label class="field"><span>Empty spool (g)</span><input type="number" inputmode="numeric" id="f_tareG" value="${esc(spoolEdit.tareG)}"></label>
       </div>
       <div class="g2">
         <label class="field"><span>Goes in</span><select id="f_loc"><option value="">No storage yet</option>${opts}</select></label>
-        ${e ? `<label class="field"><span>Diameter (mm)</span><input type="number" step="0.01" id="f_dia" value="${esc(F.dia)}"></label>` : `<label class="field"><span>How many identical spools</span><input type="number" inputmode="numeric" min="1" max="20" id="f_qty" value="${esc(F.qty)}"></label>`}
+        ${e ? `<label class="field"><span>Diameter (mm)</span><input type="number" step="0.01" id="f_dia" value="${esc(spoolEdit.dia)}"></label>` : `<label class="field"><span>How many identical spools</span><input type="number" inputmode="numeric" min="1" max="20" id="f_qty" value="${esc(spoolEdit.qty)}"></label>`}
       </div>
       <h3>Print settings</h3>
       <div class="g4">
-        <label class="field"><span>Nozzle min</span><input type="number" inputmode="numeric" id="f_nMin" value="${esc(F.nMin)}"></label>
-        <label class="field"><span>Nozzle max</span><input type="number" inputmode="numeric" id="f_nMax" value="${esc(F.nMax)}"></label>
-        <label class="field"><span>Bed min</span><input type="number" inputmode="numeric" id="f_bMin" value="${esc(F.bMin)}"></label>
-        <label class="field"><span>Bed max</span><input type="number" inputmode="numeric" id="f_bMax" value="${esc(F.bMax)}"></label>
+        <label class="field"><span>Nozzle min</span><input type="number" inputmode="numeric" id="f_nMin" value="${esc(spoolEdit.nMin)}"></label>
+        <label class="field"><span>Nozzle max</span><input type="number" inputmode="numeric" id="f_nMax" value="${esc(spoolEdit.nMax)}"></label>
+        <label class="field"><span>Bed min</span><input type="number" inputmode="numeric" id="f_bMin" value="${esc(spoolEdit.bMin)}"></label>
+        <label class="field"><span>Bed max</span><input type="number" inputmode="numeric" id="f_bMax" value="${esc(spoolEdit.bMax)}"></label>
       </div>
       <div class="g2">
-        <label class="field"><span>Dry at (°C)</span><input type="number" inputmode="numeric" id="f_dT" value="${esc(F.dT)}"></label>
-        <label class="field"><span>Dry for (hours)</span><input type="number" inputmode="numeric" id="f_dH" value="${esc(F.dH)}"></label>
+        <label class="field"><span>Dry at (°C)</span><input type="number" inputmode="numeric" id="f_dT" value="${esc(spoolEdit.dT)}"></label>
+        <label class="field"><span>Dry for (hours)</span><input type="number" inputmode="numeric" id="f_dH" value="${esc(spoolEdit.dH)}"></label>
       </div>
       <p id="srcNote"></p>
-      <div class="btns"><button class="btn go" type="submit" id="saveSpool">${e ? "Save changes" : "Add to stock"}</button>${e ? `<button type="button" class="btn" data-go="${F.editId}">Cancel</button>` : ""}</div>
+      <div class="btns"><button class="btn go" type="submit" id="saveSpool">${e ? "Save changes" : "Add to stock"}</button>${e ? `<button type="button" class="btn" data-go="${spoolEdit.editId}">Cancel</button>` : ""}</div>
     </form>
     <div class="card"><h3>Sticker</h3><div id="preview"></div><div id="logoHint"></div></div>
   </div>`;
@@ -3062,40 +3227,42 @@ const fields = [
 function readForm() {
   for (const k of fields) {
     const el = $("#f_" + k);
-    if (el) F[k] = el.value;
+    if (el) spoolEdit[k] = el.value;
   }
-  F.colours[0] = F.hex;
+  spoolEdit.colours[0] = spoolEdit.hex;
 }
 function writePrint() {
   for (const k of ["nMin", "nMax", "bMin", "bMax", "dT", "dH"]) {
     const el = $("#f_" + k);
-    if (el) el.value = F[k] ?? "";
+    if (el) el.value = spoolEdit[k] ?? "";
   }
 }
+/* The form's values as a spool, for the sticker preview. */
 function draftSpool() {
   return {
-    id: F.editId || nextIds(1).ids[0],
-    brand: F.brand,
-    material: F.material,
-    colour: F.colour,
-    hex: F.colours[0],
-    colours: F.pattern === "solid" ? [F.colours[0]] : F.colours,
-    pattern: F.pattern,
-    nMin: num(F.nMin),
-    nMax: num(F.nMax),
-    bMin: num(F.bMin),
-    bMax: num(F.bMax),
-    dT: num(F.dT),
-    dH: num(F.dH),
+    id: spoolEdit.editId || nextIds(1).ids[0],
+    brand: spoolEdit.brand,
+    material: spoolEdit.material,
+    colour: spoolEdit.colour,
+    hex: spoolEdit.colours[0],
+    colours: spoolEdit.pattern === "solid" ? [spoolEdit.colours[0]] : spoolEdit.colours,
+    pattern: spoolEdit.pattern,
+    nMin: num(spoolEdit.nMin),
+    nMax: num(spoolEdit.nMax),
+    bMin: num(spoolEdit.bMin),
+    bMax: num(spoolEdit.bMax),
+    dT: num(spoolEdit.dT),
+    dH: num(spoolEdit.dH),
   };
 }
+/* Redraws the sticker preview beside the form. */
 function formPreview() {
   const sh = curSheet(),
     box = $("#preview");
   if (!box) return;
   box.innerHTML = opsToSVG(spoolOps(draftSpool(), sh.w, sh.h), sh.w, sh.h);
   const n = $("#srcNote");
-  if (n) n.textContent = srcText(F);
+  if (n) n.textContent = srcText(spoolEdit);
   const hint = $("#logoHint");
   if (hint) hint.innerHTML = "";
 }
@@ -3145,7 +3312,7 @@ function lineOptions(brand, q) {
 }
 function showPicks(id) {
   const box = $(id === "f_brand" ? "#brandPick" : "#linePick");
-  if (!box || !F) return;
+  if (!box || !spoolEdit) return;
   const rows = [],
     val = $("#" + id).value;
   if (id === "f_brand") {
@@ -3157,7 +3324,7 @@ function showPicks(id) {
     );
     if (!rows.length) rows.push(`<div class="picknone">Not listed, but you can still use this name.</div>`);
   } else {
-    const {list} = lineOptions(F.brand, val);
+    const {list} = lineOptions(spoolEdit.brand, val);
     Picks.lines = list;
     list.forEach((l, i) => {
       const sub = l.saved
@@ -3173,7 +3340,7 @@ function showPicks(id) {
     });
     if (!rows.length)
       rows.push(
-        `<div class="picknone">Not listed for ${esc(F.brand || "this manufacturer")}. Keep typing, and it'll be saved here for next time.</div>`,
+        `<div class="picknone">Not listed for ${esc(spoolEdit.brand || "this manufacturer")}. Keep typing, and it'll be saved here for next time.</div>`,
       );
   }
   box.innerHTML = rows.join("");
@@ -3189,8 +3356,8 @@ const hidePicks = () => {
 function showColours() {
   const box = $("#catColours"),
     list = $("#colourList");
-  if (!box || !F) return;
-  const l = catLine(F.brand, F.material),
+  if (!box || !spoolEdit) return;
+  const l = catLine(spoolEdit.brand, spoolEdit.material),
     cols = l?.c || [];
   if (list) list.innerHTML = cols.map(c => `<option value="${esc(c[0])}">`).join("");
   box.hidden = !cols.length;
@@ -3205,30 +3372,31 @@ function showColours() {
     : "";
 }
 function useColour(c) {
-  F.colour = c[0];
+  spoolEdit.colour = c[0];
   const h = []
     .concat(c[1])
     .slice(0, 6)
     .map(x => "#" + x);
-  F.colours = h;
-  F.hex = h[0];
-  F.pattern = h.length > 1 ? c[2] || "split" : "solid";
-  F.hexTouched = true;
+  spoolEdit.colours = h;
+  spoolEdit.hex = h[0];
+  spoolEdit.pattern = h.length > 1 ? c[2] || "split" : "solid";
+  spoolEdit.hexTouched = true;
   const n = $("#f_colour");
   if (n && n.value !== c[0]) n.value = c[0];
   const p = $("#f_pattern");
-  if (p) p.value = F.pattern;
+  if (p) p.value = spoolEdit.pattern;
   $("#colourRow").innerHTML = colourRow();
   formPreview();
 }
+/* Fills in print settings for the brand and material typed so far, unless you've changed them yourself. */
 function refreshLookup() {
   showColours();
-  if (F.touched) {
+  if (spoolEdit.touched) {
     formPreview();
     return;
   }
-  const i = lookup(F.brand, F.material);
-  Object.assign(F, {
+  const i = lookup(spoolEdit.brand, spoolEdit.material);
+  Object.assign(spoolEdit, {
     nMin: i.nMin,
     nMax: i.nMax,
     bMin: i.bMin,
@@ -3238,45 +3406,46 @@ function refreshLookup() {
     src: i.src,
     base: i.base,
   });
-  const b = S.brands[slug(F.brand)];
-  if (b && b.tareG && !F.tareG) {
-    F.tareG = b.tareG;
+  const b = S.brands[slug(spoolEdit.brand)];
+  if (b && b.tareG && !spoolEdit.tareG) {
+    spoolEdit.tareG = b.tareG;
     const t = $("#f_tareG");
     if (t) t.value = b.tareG;
   }
   writePrint();
   formPreview();
 }
+/* Saves the form: one spool when editing, or as many identical new ones as asked for. */
 async function submitForm() {
   readForm();
-  if (!F.brand.trim() || !F.material.trim()) {
+  if (!spoolEdit.brand.trim() || !spoolEdit.material.trim()) {
     toast("Add the manufacturer and material name.");
     return;
   }
   const btn = $("#saveSpool");
   if (btn) btn.disabled = true;
   const now = Date.now(),
-    brand = F.brand.trim(),
-    material = F.material.trim();
-  const list = F.pattern === "solid" ? [F.colours[0]] : F.colours;
+    brand = spoolEdit.brand.trim(),
+    material = spoolEdit.material.trim();
+  const list = spoolEdit.pattern === "solid" ? [spoolEdit.colours[0]] : spoolEdit.colours;
   const body = {
     brand,
     material,
-    colour: F.colour.trim(),
+    colour: spoolEdit.colour.trim(),
     hex: list[0],
     colours: list,
-    pattern: list.length > 1 ? F.pattern : "solid",
-    finish: F.finish,
+    pattern: list.length > 1 ? spoolEdit.pattern : "solid",
+    finish: spoolEdit.finish,
     netG: FULL_G,
-    remainG: leftOf(F.left),
-    tareG: num(F.tareG),
-    dia: num(F.dia) || 1.75,
-    nMin: num(F.nMin),
-    nMax: num(F.nMax),
-    bMin: num(F.bMin),
-    bMax: num(F.bMax),
-    dT: num(F.dT),
-    dH: num(F.dH),
+    remainG: leftOf(spoolEdit.left),
+    tareG: num(spoolEdit.tareG),
+    dia: num(spoolEdit.dia) || 1.75,
+    nMin: num(spoolEdit.nMin),
+    nMax: num(spoolEdit.nMax),
+    bMin: num(spoolEdit.bMin),
+    bMax: num(spoolEdit.bMax),
+    dT: num(spoolEdit.dT),
+    dH: num(spoolEdit.dH),
   };
   try {
     const bId = slug(brand),
@@ -3296,31 +3465,31 @@ async function submitForm() {
     });
     let first,
       noRoom = 0;
-    if (F.editId) {
-      first = F.editId;
-      const old = S.spools[F.editId];
+    if (spoolEdit.editId) {
+      first = spoolEdit.editId;
+      const old = S.spools[spoolEdit.editId];
       const spot =
-        (F.loc || null) === (old.loc || null)
+        (spoolEdit.loc || null) === (old.loc || null)
           ? {loc: old.loc || null, slot: old.slot ?? null}
-          : placer(F.loc || null)();
+          : placer(spoolEdit.loc || null)();
       await col("spools")
-        .doc(F.editId)
+        .doc(spoolEdit.editId)
         .update({...body, ...spot, labelled: false});
     } else {
-      const n = clamp(parseInt(F.qty) || 1, 1, 20),
+      const n = clamp(parseInt(spoolEdit.qty) || 1, 1, 20),
         {ids, last} = nextIds(n);
       first = ids[0];
-      const spot = placer(F.loc || null);
+      const spot = placer(spoolEdit.loc || null);
       for (const id of ids) {
         const doc = newSpool(body, now, spot());
-        if (!doc.loc && F.loc) noRoom++;
+        if (!doc.loc && spoolEdit.loc) noRoom++;
         await col("spools").doc(id).set(doc);
         S.spools[id] = {...doc, id};
       }
       await saveConfig({lastId: last});
     }
-    const added = F.editId ? null : parseInt(F.qty) || 1;
-    F = null;
+    const added = spoolEdit.editId ? null : parseInt(spoolEdit.qty) || 1;
+    spoolEdit = null;
     crop = null;
     autoLogo(brand).then(ok => {
       if (ok) toast(brand + " logo added.");
@@ -3337,7 +3506,11 @@ async function submitForm() {
   }
 }
 
-/* stickers */
+/* ==========================================================================================================
+   The sticker queue and PDF
+   New spools, and storages asked for a sticker, wait in the queue until a PDF is downloaded.
+   ========================================================================================================== */
+/* Everything waiting for a sticker: spools not yet printed, and storages asked for one. */
 function queue() {
   const a = [];
   for (const s of Object.values(S.spools))
@@ -3345,14 +3518,16 @@ function queue() {
   for (const l of orderedLocs()) if (l.wantLabel) a.push({kind: "loc", data: l, key: "l:" + l.id});
   return a;
 }
-const Q = {skip: new Set(), nx: null, ny: null, outline: false};
+/* Choices on the Stickers page that last only until the page is reloaded. */
+const queueOpts = {skip: new Set(), nx: null, ny: null, outline: false};
+/* The Stickers page: the queue, the sheet, and where on a part-used sheet to start. */
 function vStickers() {
   const sh = curSheet(),
     st = S.settings.sheet || {},
     per = sh.cols * sh.rows,
     start = (st.start || 0) % per;
   const q = queue(),
-    chosen = q.filter(i => !Q.skip.has(i.key));
+    chosen = q.filter(i => !queueOpts.skip.has(i.key));
   const cells = [];
   for (let i = 0; i < per; i++) {
     const k = i < start ? "used" : i - start < chosen.length ? "next" : "";
@@ -3365,7 +3540,7 @@ function vStickers() {
   <div class="split">
     <div class="card queuecard">
       <h2>Next to print</h2>
-      ${q.length ? `<div class="tiles">${q.map(i => `<label class="tile"><input type="checkbox" data-act="pick" data-v="${esc(i.key)}" aria-label="Print this sticker" ${Q.skip.has(i.key) ? "" : "checked"}>${opsToSVG(itemOps(i, sh.w, sh.h), sh.w, sh.h)}</label>`).join("")}</div>` : `<p>Nothing waiting. New spools land here automatically, and you can reprint any sticker from its spool page.</p>`}
+      ${q.length ? `<div class="tiles">${q.map(i => `<label class="tile"><input type="checkbox" data-act="pick" data-v="${esc(i.key)}" aria-label="Print this sticker" ${queueOpts.skip.has(i.key) ? "" : "checked"}>${opsToSVG(itemOps(i, sh.w, sh.h), sh.w, sh.h)}</label>`).join("")}</div>` : `<p>Nothing waiting. New spools land here automatically, and you can reprint any sticker from its spool page.</p>`}
     </div>
     <div class="card sheetfirst">
       <h2>Sheet</h2>
@@ -3395,7 +3570,7 @@ function vStickers() {
         <label class="field"><span>Nudge right (mm)</span><input type="number" step="0.1" id="nudgeX" value="${esc(st.nx ?? 0)}"></label>
         <label class="field"><span>Nudge down (mm)</span><input type="number" step="0.1" id="nudgeY" value="${esc(st.ny ?? 0)}"></label>
       </div>
-      <label class="check"><input type="checkbox" id="outline" ${Q.outline ? "checked" : ""}><span>Print sticker outlines, for a test on plain paper</span></label>
+      <label class="check"><input type="checkbox" id="outline" ${queueOpts.outline ? "checked" : ""}><span>Print sticker outlines, for a test on plain paper</span></label>
       ${
         IS_APP
           ? `<p>Print stickers from your PC or a browser. The Android app can't save PDFs.</p>`
@@ -3405,8 +3580,9 @@ function vStickers() {
     </div>
   </div>`;
 }
+/* Builds and saves the sticker PDF, then marks those stickers as printed. */
 async function makePDF() {
-  const items = queue().filter(i => !Q.skip.has(i.key));
+  const items = queue().filter(i => !queueOpts.skip.has(i.key));
   if (!items.length) return;
   const st = S.settings.sheet || {},
     sh = curSheet(),
@@ -3415,7 +3591,7 @@ async function makePDF() {
     toast("The PDF maker didn't load. Reload the page and try again.");
     return;
   }
-  const {doc, next} = buildPDF(items, start, {nx: num(st.nx) || 0, ny: num(st.ny) || 0, outline: Q.outline});
+  const {doc, next} = buildPDF(items, start, {nx: num(st.nx) || 0, ny: num(st.ny) || 0, outline: queueOpts.outline});
   try {
     await downloads.save({
       filename: "spool-stickers.pdf",
@@ -3425,7 +3601,7 @@ async function makePDF() {
     toast("Couldn't save the PDF here. Try from a computer.");
     return;
   }
-  if (Q.outline) {
+  if (queueOpts.outline) {
     toast("Test sheet saved. Stickers stay in the queue.");
     return;
   }
@@ -3441,7 +3617,10 @@ async function makePDF() {
   }
 }
 
-/* image helpers */
+/* ==========================================================================================================
+   Images
+   Loading, scaling and reading photos.
+   ========================================================================================================== */
 const loadImg = blob =>
   new Promise((res, rej) => {
     const i = new Image();
@@ -3458,6 +3637,7 @@ function toCanvas(img, max) {
   return c;
 }
 const canvasBlob = (c, type = "image/jpeg", q = 0.85) => new Promise(r => c.toBlob(r, type, q));
+/* Finds a QR code in a photo, trying smaller copies of it until one reads. */
 async function decodeQR(file) {
   const img = await loadImg(file);
   if ("BarcodeDetector" in window) {
@@ -3474,12 +3654,13 @@ async function decodeQR(file) {
   }
   return null;
 }
+/* The spool or storage code at the end of a scanned link: "s0012" or "loc-top-shelf". */
 const parseCode = t => {
   const m = /(?:#|^)\s*(s\d{4,}|loc-[a-z0-9-]+)\s*$/i.exec(String(t || "").trim());
   return m ? m[1].toLowerCase() : null;
 };
 
-/* logo crop */
+/* Cropping a logo out of a photo */
 function openCrop(url, w, h, brand, box, back) {
   const bx =
     box && box.length === 4 && box.every(v => typeof v === "number")
@@ -3613,7 +3794,11 @@ async function saveLogo() {
   toast(brand + " logo saved.");
   render();
 }
-/* automatic logo lookup */
+/* ==========================================================================================================
+   Logos
+   Logos are kept per manufacturer in your own data (S.brands), never in this repository. Whatever the source,
+   a logo is turned solid black on a transparent background so it prints cleanly on a black and white sticker.
+   ========================================================================================================== */
 const logoData = b => (b && b.logo ? {src: b.logo, w: b.logoW, h: b.logoH, key: "logo-" + slug(b.name)} : null);
 const loadCross = url =>
   new Promise((res, rej) => {
@@ -3723,7 +3908,10 @@ async function autoLogo(name) {
   const icon = await iconCandidate(name);
   return icon ? useCandidate(name, icon) : false;
 }
-/* import from Spool Reader */
+/* ==========================================================================================================
+   Import from Spool Reader
+   Spool Reader hands spools over as a spool-stock-import JSON file. Each batch is only imported once.
+   ========================================================================================================== */
 function parseImport(text) {
   let j;
   try {
@@ -3739,9 +3927,10 @@ function parseImport(text) {
   if (!items.length && !Object.keys(logos).length) throw "That file has nothing in it to import.";
   return {batch: String(j.batch || ""), items, logos, loc: ""};
 }
+/* The import page: paste or choose a Spool Reader file, tick what to bring in. */
 function vImport() {
-  const opts = locOptions(Imp && Imp.loc, true);
-  if (!Imp)
+  const opts = locOptions(importJob && importJob.loc, true);
+  if (!importJob)
     return `<div><h1>Import from Spool Reader</h1></div>
   <div class="card">
     <div class="btns"><label class="btn go" for="pickImport">Choose the file</label></div>
@@ -3749,39 +3938,40 @@ function vImport() {
     <div class="btns"><button class="btn" data-act="importPaste">Check it</button></div>
     <p class="authbad" id="importErr" hidden></p>
   </div>`;
-  if (!Imp.items.length)
+  if (!importJob.items.length)
     return `<div><h1>Import logos</h1></div>
-  <div class="card"><div class="list">${Object.entries(Imp.logos)
+  <div class="card"><div class="list">${Object.entries(importJob.logos)
     .map(
       ([n, l]) =>
         `<div class="brandrow" style="grid-template-columns:auto minmax(0,1fr)"><img class="logo" src="${esc(l.src)}" alt="${esc(n)} logo"><b>${esc(n)}</b></div>`,
     )
     .join("")}</div>
-    <div class="btns"><button class="btn go" data-act="importGo">Add ${Object.keys(Imp.logos).length} logos</button><button class="btn" data-act="importCancel">Cancel</button></div></div>`;
-  const done = (S.settings.imported || []).includes(Imp.batch) && Imp.batch;
-  const n = Imp.items.filter(i => i.on).reduce((a, i) => a + i.qty, 0);
+    <div class="btns"><button class="btn go" data-act="importGo">Add ${Object.keys(importJob.logos).length} logos</button><button class="btn" data-act="importCancel">Cancel</button></div></div>`;
+  const done = (S.settings.imported || []).includes(importJob.batch) && importJob.batch;
+  const n = importJob.items.filter(i => i.on).reduce((a, i) => a + i.qty, 0);
   return `<div><h1>Import from Spool Reader</h1></div>
   ${done ? `<div class="note warn">You've already imported this file. Importing it again adds the spools a second time.</div>` : ""}
   <div class="card">
     <label class="field"><span>Put them all in</span><select id="importLoc"><option value="">No storage yet</option>${opts}</select></label>
-    <div class="list">${Imp.items
+    <div class="list">${importJob.items
       .map(i => {
         const t = i.nMin == null ? lookup(i.brand, i.material) : i;
-        return `<label class="check"><input type="checkbox" data-imp="${i.key}" ${i.on ? "checked" : ""}><span><b>${esc(i.material)} ${esc(i.colour || "")}</b>${i.qty > 1 ? ` x ${i.qty}` : ""}<br>${esc(i.brand)}, nozzle ${esc(range(t.nMin, t.nMax)) || "not set"}${Imp.logos[i.brand] ? ", with logo" : ""}</span></label>`;
+        return `<label class="check"><input type="checkbox" data-imp="${i.key}" ${i.on ? "checked" : ""}><span><b>${esc(i.material)} ${esc(i.colour || "")}</b>${i.qty > 1 ? ` x ${i.qty}` : ""}<br>${esc(i.brand)}, nozzle ${esc(range(t.nMin, t.nMax)) || "not set"}${importJob.logos[i.brand] ? ", with logo" : ""}</span></label>`;
       })
       .join("")}</div>
     <div class="btns"><button class="btn go" data-act="importGo" ${n ? "" : "disabled"}>Add ${n} spool${n === 1 ? "" : "s"}</button><button class="btn" data-act="importCancel">Cancel</button></div>
   </div>`;
 }
+/* Adds the ticked spools, with their logos and settings, and queues their stickers. */
 async function runImport() {
   const now = Date.now(),
-    rows = Imp.items.filter(i => i.on),
+    rows = importJob.items.filter(i => i.on),
     total = rows.reduce((a, i) => a + i.qty, 0);
   const {ids, last} = nextIds(total),
-    spot = placer(Imp.loc || null);
+    spot = placer(importJob.loc || null);
   let n = 0;
-  const logosOnly = !Imp.items.length;
-  for (const [name, l] of Object.entries(Imp.logos)) {
+  const logosOnly = !importJob.items.length;
+  for (const [name, l] of Object.entries(importJob.logos)) {
     if (!(logosOnly || rows.some(r => r.brand === name)) || !l || !/^data:image\/png/.test(l.src || "")) continue;
     const id = slug(name),
       old = S.brands[id] || {};
@@ -3823,7 +4013,7 @@ async function runImport() {
       dH: v("dH"),
     };
     const bId = slug(r.brand);
-    if (!S.brands[bId] && !Imp.logos[r.brand])
+    if (!S.brands[bId] && !importJob.logos[r.brand])
       col("brands")
         .doc(bId)
         .set({name: r.brand, tareG: body.tareG || null});
@@ -3844,19 +4034,20 @@ async function runImport() {
       S.spools[id] = {...doc, id};
     }
   }
-  saveConfig({lastId: last, imported: [...(S.settings.imported || []).slice(-40), Imp.batch].filter(Boolean)});
-  for (const name of new Set(rows.map(r => r.brand))) if (!Imp.logos[name]) autoLogo(name);
+  saveConfig({lastId: last, imported: [...(S.settings.imported || []).slice(-40), importJob.batch].filter(Boolean)});
+  for (const name of new Set(rows.map(r => r.brand))) if (!importJob.logos[name]) autoLogo(name);
   if (logosOnly) {
-    const n = Object.keys(Imp.logos).length;
-    Imp = null;
+    const n = Object.keys(importJob.logos).length;
+    importJob = null;
     toast(`Added ${n} logos.`);
     go("setup");
     return;
   }
-  Imp = null;
+  importJob = null;
   toast(`Added ${total} spool${total === 1 ? "" : "s"}. Stickers are in the queue.`);
   go("stickers");
 }
+/* The stock list Spool Reader checks photos against. */
 function stockExport() {
   const spools = liveSpools().map(s => ({
     id: s.id,
@@ -3870,23 +4061,26 @@ function stockExport() {
   return JSON.stringify({format: "spool-stock-list", version: 1, exported: new Date().toISOString(), spools});
 }
 
-/* setup */
-let P = null; /* logo picker */
+/* ==========================================================================================================
+   Setup
+   Storages, printers, logos, Orca, Spool Reader, the account and backups.
+   ========================================================================================================== */
+let logoPicker = null; /* logo picker */
 function logoPanel() {
-  return `<div class="card" id="logoPanel"><h3>${esc(P.name)} logo</h3>
-    ${P.busy ? `<div class="busy"><span class="spin"></span>Looking</div>` : P.items.length ? `<div class="tiles">${P.items.map((c, i) => `<button class="tile logoPick" data-act="logoUse" data-v="${i}"><img src="${esc(c.preview || c.url || "")}" alt="Option ${i + 1}"><span>${esc(c.label)}</span></button>`).join("")}</div>` : `<p>Nothing found for ${esc(P.name)}. Upload it once as an SVG or PNG and it stays in your account.</p>`}
-    <div class="btns"><label class="btn" for="pickLogo" data-act="logoFor" data-v="${esc(P.name)}">Upload logo</label><button class="btn" data-act="logoClose">Close</button></div>
+  return `<div class="card" id="logoPanel"><h3>${esc(logoPicker.name)} logo</h3>
+    ${logoPicker.busy ? `<div class="busy"><span class="spin"></span>Looking</div>` : logoPicker.items.length ? `<div class="tiles">${logoPicker.items.map((c, i) => `<button class="tile logoPick" data-act="logoUse" data-v="${i}"><img src="${esc(c.preview || c.url || "")}" alt="Option ${i + 1}"><span>${esc(c.label)}</span></button>`).join("")}</div>` : `<p>Nothing found for ${esc(logoPicker.name)}. Upload it once as an SVG or PNG and it stays in your account.</p>`}
+    <div class="btns"><label class="btn" for="pickLogo" data-act="logoFor" data-v="${esc(logoPicker.name)}">Upload logo</label><button class="btn" data-act="logoClose">Close</button></div>
   </div>`;
 }
 async function openPicker(name) {
-  P = {name, items: [], busy: true};
+  logoPicker = {name, items: [], busy: true};
   render();
   const items = await findLogos(name);
   for (const c of items)
     if (c.kind === "svg") c.preview = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(c.text);
-  if (P && P.name === name) {
-    P.items = items;
-    P.busy = false;
+  if (logoPicker && logoPicker.name === name) {
+    logoPicker.items = items;
+    logoPicker.busy = false;
     render();
   }
 }
@@ -3903,6 +4097,7 @@ function storeSummary(l) {
     .filter(Boolean)
     .join(", ");
 }
+/* The Setup page. */
 function vSetup() {
   const ls = orderedLocs();
   const rows = ls
@@ -3939,7 +4134,7 @@ function vSetup() {
         .join("") || "<p>Manufacturers appear here when you add a spool.</p>"
     }
     ${crop ? cropHTML() : ""}
-    ${P ? logoPanel() : ""}
+    ${logoPicker ? logoPanel() : ""}
 
   </div>
   ${pluginCard()}
@@ -3952,8 +4147,13 @@ function vSetup() {
   <div class="card"><h2>Backup</h2><div class="btns"><button class="btn" data-act="csv">Download spool list (CSV)</button><button class="btn" data-act="json">Download full backup (JSON)</button></div></div>`;
 }
 
-/* logging a print from a sliced file (Orca or Bambu Studio .gcode.3mf, or plain G-code) */
-let LP = null;
+/* ==========================================================================================================
+   Logging a print by hand
+   Reads a sliced file (an Orca or Bambu Studio .gcode.3mf, or plain G-code) for the grams each filament used,
+   suggests a spool for each, and takes the grams off. The Orca plugin does the same without being asked.
+   ========================================================================================================== */
+let printLog = null;
+/* Reads one file out of a zip (a .3mf is a zip) without a library. */
 async function unzipEntry(file, want) {
   const buf = new Uint8Array(await file.arrayBuffer()),
     dv = new DataView(buf.buffer);
@@ -3983,6 +4183,7 @@ async function unzipEntry(file, want) {
   }
   return null;
 }
+/* Filament used, from the comments a slicer leaves at the end of plain G-code. */
 function gcodeUse(text) {
   const grab = re => {
     const m = re.exec(text);
@@ -4005,6 +4206,7 @@ function gcodeUse(text) {
     }))
     .filter(f => f.g > 0);
 }
+/* The plates of a sliced file, each with the grams of every filament it uses. */
 async function readSliced(file) {
   const name = file.name.replace(/\.(gcode\.3mf|3mf|gcode|gco|bgcode)$/i, "");
   if (/\.3mf$/i.test(file.name)) {
@@ -4054,6 +4256,8 @@ const loaded = s => {
   const l = S.locs[s.loc];
   return !!l && (spaced(l) || ["ams", "holder", "dryer"].includes(l.kind));
 };
+/* Spools ranked as the likely source of one of a print's filaments: loaded ones first, then the same
+   material, then the nearest colour. A lower score is a better match. */
 function spoolChoices(f) {
   const want = baseMat(f.type)?.key || f.type.toUpperCase();
   return liveSpools()
@@ -4068,53 +4272,56 @@ function spoolChoices(f) {
 }
 function startLog(r) {
   const key = r.name + "|" + r.plates.map(p => p.fil.map(f => f.g).join(",")).join("/");
-  LP = {...r, key, plate: 0, pct: 100};
+  printLog = {...r, key, plate: 0, pct: 100};
   pickSpools();
   go("log");
   render();
 }
+/* Chooses the best spool for each filament of the plate, never the same spool twice. */
 function pickSpools() {
   const taken = new Set();
-  LP.pick = LP.plates[LP.plate].fil.map(f => {
+  printLog.pick = printLog.plates[printLog.plate].fil.map(f => {
     const c = spoolChoices(f).find(c => !taken.has(c.s.id) && c.score < 3);
     if (c) taken.add(c.s.id);
     return c ? c.s.id : "";
   });
 }
+/* The Log a print page. */
 function vLog() {
-  if (!LP)
+  if (!printLog)
     return `<div><h1>Log a print</h1></div>
   <div class="card"><p>In Orca, use <b>Export plate sliced file</b>, then drop the file here or choose it. Plain G-code works too.</p>
     <div class="btns"><label class="btn go" for="pickPrint">Choose the file</label></div>
     <p class="hint">You can also drop it anywhere on this page.</p></div>`;
-  const pl = LP.plates[LP.plate],
-    done = (S.settings.logged || []).includes(LP.key);
+  const pl = printLog.plates[printLog.plate],
+    done = (S.settings.logged || []).includes(printLog.key);
   const rows = pl.fil
     .map((f, i) => {
       const ch = spoolChoices(f),
         opt = c =>
-          `<option value="${c.s.id}" ${LP.pick[i] === c.s.id ? "selected" : ""}>${esc(c.s.id.toUpperCase() + " " + c.s.material + " " + (c.s.colour || "") + ", " + (c.s.remainG ?? c.s.netG ?? "?") + " g" + (loaded(c.s) ? ", " + spotName(c.s) : ""))}</option>`;
+          `<option value="${c.s.id}" ${printLog.pick[i] === c.s.id ? "selected" : ""}>${esc(c.s.id.toUpperCase() + " " + c.s.material + " " + (c.s.colour || "") + ", " + (c.s.remainG ?? c.s.netG ?? "?") + " g" + (loaded(c.s) ? ", " + spotName(c.s) : ""))}</option>`;
       return `<div class="useRow"><span class="sw" style="background:${esc(f.hex || "#9AA5AB")}" aria-hidden="true"></span><div class="field"><span>Filament ${f.id}: ${esc(f.type || "Unknown")}, ${Math.round(f.g * 10) / 10} g</span>
       <select data-lp="${i}"><option value="">Don't take this off a spool</option><optgroup label="Best matches">${ch.slice(0, 6).map(opt).join("")}</optgroup><optgroup label="Everything else">${ch.slice(6).map(opt).join("")}</optgroup></select></div></div>`;
     })
     .join("");
-  return `<div><div class="code">Log a print</div><h1>${esc(LP.name)}</h1></div>
+  return `<div><div class="code">Log a print</div><h1>${esc(printLog.name)}</h1></div>
   ${done ? `<div class="note warn">You've already logged this print. Logging it again takes the filament off twice.</div>` : ""}
   <div class="card">
-    ${LP.plates.length > 1 ? `<label class="field"><span>Plate</span><select id="lpPlate">${LP.plates.map((p, i) => `<option value="${i}" ${i === LP.plate ? "selected" : ""}>Plate ${esc(p.plate)}</option>`).join("")}</select></label>` : ""}
+    ${printLog.plates.length > 1 ? `<label class="field"><span>Plate</span><select id="lpPlate">${printLog.plates.map((p, i) => `<option value="${i}" ${i === printLog.plate ? "selected" : ""}>Plate ${esc(p.plate)}</option>`).join("")}</select></label>` : ""}
     ${rows}
-    <label class="field"><span>How much of it printed (%)</span><input type="number" inputmode="numeric" min="1" max="100" id="lpPct" value="${LP.pct}"><span class="hint">Lower this for a print that failed or was cancelled.</span></label>
+    <label class="field"><span>How much of it printed (%)</span><input type="number" inputmode="numeric" min="1" max="100" id="lpPct" value="${printLog.pct}"><span class="hint">Lower this for a print that failed or was cancelled.</span></label>
     <div class="btns"><button class="btn go" data-act="logSave">Take it off</button><button class="btn" data-act="logCancel">Cancel</button></div>
   </div>`;
 }
+/* Takes a logged print off its spools, with Undo. */
 async function saveLog() {
-  const pl = LP.plates[LP.plate],
-    pct = clamp(num(LP.pct) || 100, 1, 100) / 100,
+  const pl = printLog.plates[printLog.plate],
+    pct = clamp(num(printLog.pct) || 100, 1, 100) / 100,
     now = Date.now(),
     before = {},
     use = {};
   pl.fil.forEach((f, i) => {
-    const id = LP.pick[i];
+    const id = printLog.pick[i];
     if (id) use[id] = (use[id] || 0) + f.g * pct;
   });
   if (!Object.keys(use).length) {
@@ -4125,16 +4332,16 @@ async function saveLog() {
     const s = S.spools[id];
     before[id] = {remainG: s.remainG ?? s.netG ?? null, prints: s.prints || []};
     const left = Math.max(0, Math.round((s.remainG ?? s.netG ?? 0) - g)),
-      prints = [{at: now, name: LP.name, g: Math.round(g * 10) / 10}, ...(s.prints || [])].slice(0, 30);
+      prints = [{at: now, name: printLog.name, g: Math.round(g * 10) / 10}, ...(s.prints || [])].slice(0, 30);
     col("spools").doc(id).update({remainG: left, prints});
     S.spools[id] = {...s, remainG: left, prints};
   }
-  saveConfig({logged: [...(S.settings.logged || []).slice(-60), LP.key]});
+  saveConfig({logged: [...(S.settings.logged || []).slice(-60), printLog.key]});
   const n = Object.keys(use).length,
     low = Object.keys(use)
       .filter(id => isLow(S.spools[id]))
       .map(id => id.toUpperCase());
-  LP = null;
+  printLog = null;
   go("stock");
   toast(
     `Taken off ${n} spool${n === 1 ? "" : "s"}.${low.length ? ` ${low.join(", ")} ${low.length === 1 ? "is" : "are"} now low.` : ""}`,
@@ -4152,7 +4359,11 @@ async function takePrintFile(f) {
   }
 }
 
-/* The Orca plugin: takes each print off the spools in the trays it used, and records it in jobs for Undo */
+/* ==========================================================================================================
+   Orca
+   The plugin's card in Setup, the presets for the filaments you own, and the list the plugin builds on.
+   ========================================================================================================== */
+/* The Orca plugin takes each print off the spools in the trays it used, and records it in jobs for Undo. */
 function pluginCard() {
   const jobs = Object.values(S.jobs)
     .sort((a, b) => (b.at || 0) - (a.at || 0))
@@ -4166,6 +4377,7 @@ function pluginCard() {
     ${jobs.length ? `<h3>Prints from Orca</h3><div class="hist">${jobs.map(j => `<div class="jobrow"><span>${when(j.at)}: ${esc(j.printer || "")}, ${esc(j.job || "print")}<br><span class="sub">${(j.items || []).map(i => `${i.g} g off ${esc(String(i.spool || "").toUpperCase())}`).join(", ")}${j.pct && j.pct < 100 ? `, ${j.pct}% printed` : ""}${j.undone ? ". Undone" : ""}</span></span>${j.undone ? "" : `<button class="btn sm" data-act="jobUndo" data-v="${esc(j.id)}">Undo</button>`}</div>`).join("")}</div>` : ""}
   </div>`;
 }
+/* Puts a print's grams back on its spools and marks it undone. */
 async function undoJob(id) {
   const j = S.jobs[id];
   if (!j || j.undone) return;
@@ -4185,6 +4397,7 @@ async function undoJob(id) {
 
 /* Orca filament presets for the filaments you own */
 const ORCA_VERSION = "2.4.0.0";
+/* The generic Orca profile closest to a filament, such as Generic PLA Silk or Generic PETG HF. */
 function orcaGenericFor(material, finish) {
   const t = ` ${String(material).toUpperCase()} ${String(finish || "").toUpperCase()} `,
     k = baseMat(material)?.key || "";
@@ -4216,6 +4429,7 @@ function orcaGenericFor(material, finish) {
   const has = n => (ORCA_GENERIC.includes(`Generic ${n} @System`) ? `Generic ${n} @System` : null);
   return has(want) || has(k) || "Generic PLA @System";
 }
+/* The different filaments you own (brand and material), each with its spools. */
 function ownedFilaments() {
   const m = new Map();
   for (const s of liveSpools()) {
@@ -4230,6 +4444,7 @@ const orcaName = f =>
     .replace(/[\\/:*?"<>|]+/g, "-")
     .replace(/\s+/g, " ")
     .trim();
+/* What a filament becomes in Orca: Orca's own profile when it has one, or a new preset on a generic one. */
 function orcaPreset(f) {
   const line = catLine(f.brand, f.material),
     v = lookup(f.brand, f.material),
@@ -4285,6 +4500,7 @@ const CRC = (() => {
   }
   return t;
 })();
+/* A zip of text files, built without a library (stored, not compressed). */
 function makeZip(files) {
   const enc = new TextEncoder(),
     parts = [],
@@ -4327,6 +4543,7 @@ function makeZip(files) {
   end.setUint32(16, off, true);
   return new Blob([...parts, ...central, end], {type: "application/zip"});
 }
+/* The bridge the Windows app adds, for writing presets into Orca's folder. Missing everywhere else. */
 const DESK = () => window.spoolStockDesktop?.orca;
 function orcaPlan() {
   const all = ownedFilaments().map(orcaPreset),
@@ -4403,22 +4620,24 @@ function orcaFeedSync() {
   }, 1500);
 }
 
-/* printer editor */
+/* ==========================================================================================================
+   The printer editor
+   ========================================================================================================== */
 function printerDraft(id) {
-  if (PF && PF.id === id) return;
+  if (printerEdit && printerEdit.id === id) return;
   if (id === "new") {
-    PF = {id, name: "", serial: "", feeds: []};
+    printerEdit = {id, name: "", serial: "", feeds: []};
     return;
   }
   const p = S.printers[id];
-  PF = p ? {id, name: p.name, serial: p.serial || "", feeds: (p.feeds || []).map(f => ({...f}))} : null;
+  printerEdit = p ? {id, name: p.name, serial: p.serial || "", feeds: (p.feeds || []).map(f => ({...f}))} : null;
 }
 function readPrinter() {
   const n = $("#p_name"),
     sn = $("#p_serial");
-  if (n) PF.name = n.value;
-  if (sn) PF.serial = sn.value;
-  PF.feeds.forEach((f, i) => {
+  if (n) printerEdit.name = n.value;
+  if (sn) printerEdit.serial = sn.value;
+  printerEdit.feeds.forEach((f, i) => {
     const u = $(`#pf_unit_${i}`),
       l = $(`#pf_loc_${i}`),
       sp = $(`#pf_space_${i}`);
@@ -4427,10 +4646,11 @@ function readPrinter() {
     if (sp) f.space = +sp.value;
   });
 }
+/* The printer editor page. */
 function vPrinter() {
-  if (!PF)
+  if (!printerEdit)
     return `<div class="card"><h2>That printer is gone</h2><div class="btns"><button class="btn" data-go="setup">Back to Setup</button></div></div>`;
-  const isNew = PF.id === "new",
+  const isNew = printerEdit.id === "new",
     spacedLocs = orderedLocs().filter(spaced),
     allLocs = orderedLocs();
   const opt = (ls, sel) =>
@@ -4441,7 +4661,7 @@ function vPrinter() {
           `<option value="${l.id}" ${sel === l.id ? "selected" : ""}>${esc(locName(l.id))}${spaced(l) ? ` (${l.capacity} space${l.capacity === 1 ? "" : "s"})` : ""}</option>`,
       )
       .join("");
-  const rows = PF.feeds
+  const rows = printerEdit.feeds
     .map((f, i) => {
       const l = S.locs[f.loc];
       if (f.kind === "ams")
@@ -4456,11 +4676,11 @@ function vPrinter() {
       <button type="button" class="btn sm" data-act="pfDrop" data-v="${i}">Remove</button></div>`;
     })
     .join("");
-  const hasExt = PF.feeds.some(f => f.kind === "external");
-  return `<div><h1>${isNew ? "Add a printer" : "Edit " + esc(S.printers[PF.id]?.name || "printer")}</h1></div>
+  const hasExt = printerEdit.feeds.some(f => f.kind === "external");
+  return `<div><h1>${isNew ? "Add a printer" : "Edit " + esc(S.printers[printerEdit.id]?.name || "printer")}</h1></div>
   <form class="card" id="printerForm">
-    <label class="field"><span>Name</span><input type="text" id="p_name" value="${esc(PF.name)}" placeholder="Printer 1" required></label>
-    <label class="field"><span>Serial number</span><input type="text" id="p_serial" value="${esc(PF.serial)}" autocomplete="off" autocapitalize="characters" placeholder="Optional"><span class="hint">On the printer under Settings, Device. The Orca plugin uses it to tell your printers apart, and can show it for you.</span></label>
+    <label class="field"><span>Name</span><input type="text" id="p_name" value="${esc(printerEdit.name)}" placeholder="Printer 1" required></label>
+    <label class="field"><span>Serial number</span><input type="text" id="p_serial" value="${esc(printerEdit.serial)}" autocomplete="off" autocapitalize="characters" placeholder="Optional"><span class="hint">On the printer under Settings, Device. The Orca plugin uses it to tell your printers apart, and can show it for you.</span></label>
     <h3>What feeds it</h3>
     <p class="hint">AMS 1 is the first unit on the printer. Its trays match the storage's spaces in order, so tray 1 is space 1.</p>
     ${rows || `<p class="muted">Nothing yet.</p>`}
@@ -4470,13 +4690,13 @@ function vPrinter() {
 }
 async function savePrinter() {
   readPrinter();
-  const name = PF.name.trim(),
-    serial = PF.serial.trim().toUpperCase().replace(/\s+/g, "");
+  const name = printerEdit.name.trim(),
+    serial = printerEdit.serial.trim().toUpperCase().replace(/\s+/g, "");
   if (!name) {
     toast("Give the printer a name.");
     return;
   }
-  const feeds = PF.feeds.map(f =>
+  const feeds = printerEdit.feeds.map(f =>
     f.kind === "ams"
       ? {kind: "ams", unit: f.unit || 1, loc: f.loc || ""}
       : {kind: "external", loc: f.loc || "", space: f.space || 1},
@@ -4495,13 +4715,13 @@ async function savePrinter() {
     toast("Each storage can only be one AMS.");
     return;
   }
-  const other = orderedPrinters().find(p => p.id !== PF.id && serial && p.serial === serial);
+  const other = orderedPrinters().find(p => p.id !== printerEdit.id && serial && p.serial === serial);
   if (other) {
     toast(`${other.name} already has that serial number.`);
     return;
   }
   const body = {name, serial, feeds};
-  if (PF.id === "new") {
+  if (printerEdit.id === "new") {
     let id = slug(name) || "printer",
       n = 2;
     while (S.printers[id]) id = slug(name) + "-" + n++;
@@ -4509,27 +4729,29 @@ async function savePrinter() {
     S.printers[id] = {...body, id};
     col("printers").doc(id).set(body);
   } else {
-    S.printers[PF.id] = {...S.printers[PF.id], ...body};
-    col("printers").doc(PF.id).update(body);
+    S.printers[printerEdit.id] = {...S.printers[printerEdit.id], ...body};
+    col("printers").doc(printerEdit.id).update(body);
   }
   toast(`${name} saved.`);
-  PF = null;
+  printerEdit = null;
   go("setup");
 }
 
-/* storage editor */
+/* ==========================================================================================================
+   The storage editor
+   ========================================================================================================== */
 function storeDefaults(kind) {
   const t = STORE_TYPES[kind];
   return {kind, spaces: t.spaces, capacity: t.cap ?? "", warn: t.warn || ""};
 }
 function storeDraft(id) {
-  if (LF && LF.id === id) return;
+  if (storeEdit && storeEdit.id === id) return;
   if (id === "new") {
-    LF = {id, kind: "", name: "", group: "", spaces: false, capacity: "", maxC: "", warn: "", qty: 1};
+    storeEdit = {id, kind: "", name: "", group: "", spaces: false, capacity: "", maxC: "", warn: "", qty: 1};
     return;
   }
   const l = S.locs[id];
-  LF = l
+  storeEdit = l
     ? {
         id,
         kind: STORE_TYPES[l.kind] ? l.kind : "other",
@@ -4549,30 +4771,31 @@ const storeAutoName = kind =>
 function readStore() {
   for (const k of ["name", "group", "capacity", "maxC", "warn", "qty"]) {
     const el = $("#s_" + k);
-    if (el) LF[k] = el.value;
+    if (el) storeEdit[k] = el.value;
   }
   const sp = $("#s_spaces");
-  if (sp) LF.spaces = sp.value === "1";
+  if (sp) storeEdit.spaces = sp.value === "1";
 }
 function storePreview() {
   const box = $("#storePreview");
-  if (!box || !LF.kind) return;
+  if (!box || !storeEdit.kind) return;
   box.innerHTML = rackHTML({
-    id: LF.id,
-    name: LF.name.trim() || storeAutoName(LF.kind),
-    spaces: LF.spaces,
-    capacity: capOf(LF.capacity),
+    id: storeEdit.id,
+    name: storeEdit.name.trim() || storeAutoName(storeEdit.kind),
+    spaces: storeEdit.spaces,
+    capacity: capOf(storeEdit.capacity),
   });
 }
+/* The storage editor page. */
 function vStore() {
-  if (!LF)
+  if (!storeEdit)
     return `<div class="card"><h2>That storage is gone</h2><div class="btns"><button class="btn" data-go="setup">Back to Setup</button></div></div>`;
-  const isNew = LF.id === "new",
-    t = STORE_TYPES[LF.kind];
+  const isNew = storeEdit.id === "new",
+    t = STORE_TYPES[storeEdit.kind];
   const tiles = Object.entries(STORE_TYPES)
     .map(
       ([k, v]) =>
-        `<label class="typepick"><input type="radio" name="s_kind" value="${k}" ${LF.kind === k ? "checked" : ""}><span><b>${esc(v.label)}</b><small>${esc(v.hint)}</small></span></label>`,
+        `<label class="typepick"><input type="radio" name="s_kind" value="${k}" ${storeEdit.kind === k ? "checked" : ""}><span><b>${esc(v.label)}</b><small>${esc(v.hint)}</small></span></label>`,
     )
     .join("");
   const known = [
@@ -4582,22 +4805,22 @@ function vStore() {
         .filter(Boolean),
     ),
   ];
-  return `<div><h1>${isNew ? "Add a storage" : "Edit " + esc(S.locs[LF.id]?.name || "storage")}</h1></div>
+  return `<div><h1>${isNew ? "Add a storage" : "Edit " + esc(S.locs[storeEdit.id]?.name || "storage")}</h1></div>
   <div class="card"><h2>What is it?</h2><div class="types">${tiles}</div></div>
   ${
     t
       ? `<div class="split"><form class="card" id="storeForm">
-    <label class="field"><span>Name</span><input type="text" id="s_name" value="${esc(LF.name)}" placeholder="${esc(storeAutoName(LF.kind))}"></label>
-    <label class="field"><span>Group</span><input type="text" id="s_group" list="groupList" value="${esc(LF.group)}" placeholder="None"><span class="hint">Storages in a group sit together, such as a printer and what feeds it.</span></label>
+    <label class="field"><span>Name</span><input type="text" id="s_name" value="${esc(storeEdit.name)}" placeholder="${esc(storeAutoName(storeEdit.kind))}"></label>
+    <label class="field"><span>Group</span><input type="text" id="s_group" list="groupList" value="${esc(storeEdit.group)}" placeholder="None"><span class="hint">Storages in a group sit together, such as a printer and what feeds it.</span></label>
     <datalist id="groupList">${known.map(g => `<option value="${esc(g)}">`).join("")}</datalist>
     <div class="g2">
-      <label class="field"><span>Spools sit</span><select id="s_spaces"><option value="1" ${LF.spaces ? "selected" : ""}>Numbered</option><option value="0" ${LF.spaces ? "" : "selected"}>Loose</option></select></label>
-      <label class="field"><span>${LF.spaces ? "Spaces" : "Most it can hold"}</span><input type="number" inputmode="numeric" min="1" id="s_capacity" value="${esc(LF.capacity)}" placeholder="${LF.spaces ? "" : "No limit"}"></label>
+      <label class="field"><span>Spools sit</span><select id="s_spaces"><option value="1" ${storeEdit.spaces ? "selected" : ""}>Numbered</option><option value="0" ${storeEdit.spaces ? "" : "selected"}>Loose</option></select></label>
+      <label class="field"><span>${storeEdit.spaces ? "Spaces" : "Most it can hold"}</span><input type="number" inputmode="numeric" min="1" id="s_capacity" value="${esc(storeEdit.capacity)}" placeholder="${storeEdit.spaces ? "" : "No limit"}"></label>
     </div>
-    <p class="hint">${LF.spaces ? "One spool per space. It gets one sticker, and a scanned spool takes the next free space." : "Any number of spools in any order, up to the limit if you set one."}</p>
-    ${LF.kind === "dryer" ? `<label class="field"><span>Top temperature (°C)</span><input type="number" inputmode="numeric" id="s_maxC" value="${esc(LF.maxC)}" placeholder="Not set"><span class="hint">Warns you when a spool wants hotter than this.</span></label>` : ""}
-    <label class="field"><span>Warn before adding</span><input type="text" id="s_warn" value="${esc(LF.warn)}" placeholder="Nothing"><span class="hint">Materials that shouldn't go in here, split with commas.</span></label>
-    ${isNew ? `<label class="field"><span>How many like this</span><input type="number" inputmode="numeric" min="1" max="12" id="s_qty" value="${esc(LF.qty)}"></label>` : ""}
+    <p class="hint">${storeEdit.spaces ? "One spool per space. It gets one sticker, and a scanned spool takes the next free space." : "Any number of spools in any order, up to the limit if you set one."}</p>
+    ${storeEdit.kind === "dryer" ? `<label class="field"><span>Top temperature (°C)</span><input type="number" inputmode="numeric" id="s_maxC" value="${esc(storeEdit.maxC)}" placeholder="Not set"><span class="hint">Warns you when a spool wants hotter than this.</span></label>` : ""}
+    <label class="field"><span>Warn before adding</span><input type="text" id="s_warn" value="${esc(storeEdit.warn)}" placeholder="Nothing"><span class="hint">Materials that shouldn't go in here, split with commas.</span></label>
+    ${isNew ? `<label class="field"><span>How many like this</span><input type="number" inputmode="numeric" min="1" max="12" id="s_qty" value="${esc(storeEdit.qty)}"></label>` : ""}
     <div class="btns"><button class="btn go" type="submit" id="saveStore">${isNew ? "Add storage" : "Save changes"}</button><button type="button" class="btn" data-act="storeCancel">Cancel</button>${isNew ? "" : `<button type="button" class="btn bad" data-act="storeDel">Delete</button>`}</div>
   </form>
   <div class="card"><h3>On your stock page</h3><div id="storePreview" inert></div></div></div>`
@@ -4606,24 +4829,24 @@ function vStore() {
 }
 async function saveStore() {
   readStore();
-  const isNew = LF.id === "new",
-    cap = capOf(LF.capacity),
-    name = LF.name.trim() || storeAutoName(LF.kind);
-  if (LF.spaces && !cap) {
+  const isNew = storeEdit.id === "new",
+    cap = capOf(storeEdit.capacity),
+    name = storeEdit.name.trim() || storeAutoName(storeEdit.kind);
+  if (storeEdit.spaces && !cap) {
     toast("Say how many spaces it has.");
     return;
   }
   const body = {
     name,
-    group: LF.group.trim(),
-    kind: LF.kind,
-    spaces: LF.spaces,
+    group: storeEdit.group.trim(),
+    kind: storeEdit.kind,
+    spaces: storeEdit.spaces,
     capacity: cap,
-    warn: LF.warn.trim(),
-    maxC: LF.kind === "dryer" ? num(LF.maxC) : null,
+    warn: storeEdit.warn.trim(),
+    maxC: storeEdit.kind === "dryer" ? num(storeEdit.maxC) : null,
   };
   if (isNew) {
-    const n = clamp(parseInt(LF.qty) || 1, 1, 12),
+    const n = clamp(parseInt(storeEdit.qty) || 1, 1, 12),
       m = /^(.*?)\s*(\d+)$/.exec(name);
     let order = Math.max(0, ...Object.values(S.locs).map(l => l.order ?? 0));
     const names =
@@ -4638,23 +4861,25 @@ async function saveStore() {
       n === 1 ? `${name} added. Its sticker is in the queue.` : `${n} storages added. Their stickers are in the queue.`,
     );
   } else {
-    const held = inLoc(LF.id).length,
-      old = S.locs[LF.id];
+    const held = inLoc(storeEdit.id).length,
+      old = S.locs[storeEdit.id];
     if (cap && held > cap) {
       toast(`It has ${held} spools in it, so it needs room for at least ${held}.`);
       return;
     }
     const renamed = old.name !== name || (old.group || "") !== body.group;
     col("locations")
-      .doc(LF.id)
+      .doc(storeEdit.id)
       .update(renamed ? {...body, wantLabel: true} : body);
     toast(renamed ? "Saved. Its sticker is back in the queue." : "Saved.");
   }
-  LF = null;
+  storeEdit = null;
   go("setup");
 }
 
-/* ---------- modal + toast ---------- */
+/* ==========================================================================================================
+   Dialogs, messages and the clipboard
+   ========================================================================================================== */
 /* Copy text. The Windows and Android apps refuse the newer clipboard call, so fall back to the older one. */
 async function copyText(t) {
   try {
@@ -4676,6 +4901,7 @@ async function copyText(t) {
   }
 }
 let toastT = null;
+/* A message at the bottom of the screen, with an optional button such as Undo. */
 function toast(msg, label, fn) {
   const t = $("#toast");
   t.hidden = false;
@@ -4697,6 +4923,7 @@ function toast(msg, label, fn) {
     label ? 9000 : 4500,
   );
 }
+/* A dialog with buttons, each given as [label, what to do, extra class]. */
 function ask(title, msg, btns) {
   const m = $("#modal");
   m.hidden = false;
@@ -4713,7 +4940,11 @@ function ask(title, msg, btns) {
   });
 }
 
-/* ---------- events ---------- */
+/* ==========================================================================================================
+   Events
+   actions holds what each data-act button does, in the order the views appear. The listeners after it
+   cover everything else: typing, choosing files, dropping and pasting.
+   ========================================================================================================== */
 const actions = {
   async authCreate() {
     const e = $("#authEmail").value.trim(),
@@ -4744,7 +4975,7 @@ const actions = {
   },
   importPaste() {
     try {
-      Imp = parseImport($("#importText").value);
+      importJob = parseImport($("#importText").value);
       render();
     } catch (m) {
       const n = $("#importErr");
@@ -4754,11 +4985,11 @@ const actions = {
   },
   importGo() {
     const l = $("#importLoc");
-    Imp.loc = l ? l.value : "";
+    importJob.loc = l ? l.value : "";
     runImport();
   },
   importCancel() {
-    Imp = null;
+    importJob = null;
     render();
   },
   logoFind(el) {
@@ -4779,15 +5010,15 @@ const actions = {
     undoJob(el.dataset.v);
   },
   logoClose() {
-    P = null;
+    logoPicker = null;
     render();
   },
   async logoUse(el) {
-    const c = P.items[+el.dataset.v],
-      name = P.name;
+    const c = logoPicker.items[+el.dataset.v],
+      name = logoPicker.name;
     const ok = await useCandidate(name, c);
     if (ok) {
-      P = null;
+      logoPicker = null;
       toast(name + " logo saved.");
       render();
     } else toast("That image wouldn't load here. Try another, or save it and upload it.");
@@ -4895,22 +5126,22 @@ const actions = {
     );
   },
   hex(el) {
-    F.hex = el.dataset.v;
-    F.colours[0] = F.hex;
-    F.hexTouched = true;
+    spoolEdit.hex = el.dataset.v;
+    spoolEdit.colours[0] = spoolEdit.hex;
+    spoolEdit.hexTouched = true;
     const h = $("#f_hex");
-    if (h) h.value = F.hex;
+    if (h) h.value = spoolEdit.hex;
     formPreview();
   },
   colourAdd() {
     readForm();
-    F.colours.push("#FFFFFF");
+    spoolEdit.colours.push("#FFFFFF");
     $("#colourRow").innerHTML = colourRow();
     formPreview();
   },
   colourDrop() {
     readForm();
-    F.colours.pop();
+    spoolEdit.colours.pop();
     $("#colourRow").innerHTML = colourRow();
     formPreview();
   },
@@ -4923,8 +5154,8 @@ const actions = {
     else toast("Codes look like S0012.");
   },
   pick(el) {
-    if (el.checked) Q.skip.delete(el.dataset.v);
-    else Q.skip.add(el.dataset.v);
+    if (el.checked) queueOpts.skip.delete(el.dataset.v);
+    else queueOpts.skip.add(el.dataset.v);
     render();
   },
   cell(el) {
@@ -4937,10 +5168,10 @@ const actions = {
   pickBrand(el) {
     const b = Picks.brands[+el.dataset.v];
     if (!b) return;
-    F.brand = b.name;
+    spoolEdit.brand = b.name;
     $("#f_brand").value = b.name;
     hidePicks();
-    if (F.src === "edited" || F.src === "label") F.touched = false;
+    if (spoolEdit.src === "edited" || spoolEdit.src === "label") spoolEdit.touched = false;
     refreshLookup();
     const m = $("#f_material");
     m.focus();
@@ -4949,58 +5180,58 @@ const actions = {
   pickLine(el) {
     const l = Picks.lines[+el.dataset.v];
     if (!l) return;
-    F.material = l.n;
+    spoolEdit.material = l.n;
     $("#f_material").value = l.n;
-    F.touched = false;
+    spoolEdit.touched = false;
     hidePicks();
     document.activeElement?.blur();
     if (l.s != null) {
-      F.tareG = l.s;
+      spoolEdit.tareG = l.s;
       $("#f_tareG").value = l.s;
     }
     if (l.f) {
-      F.finish = l.f;
+      spoolEdit.finish = l.f;
       $("#f_finish").value = l.f;
     }
     refreshLookup();
   },
   catColour(el) {
-    const c = catLine(F.brand, F.material)?.c[+el.dataset.v];
+    const c = catLine(spoolEdit.brand, spoolEdit.material)?.c[+el.dataset.v];
     if (c) useColour(c);
   },
   storeCancel() {
-    LF = null;
+    storeEdit = null;
     go("setup");
   },
   pfAms() {
     readPrinter();
-    const used = PF.feeds.filter(f => f.kind === "ams").map(f => f.unit);
-    PF.feeds.push({kind: "ams", unit: [1, 2, 3, 4].find(n => !used.includes(n)) || 1, loc: ""});
+    const used = printerEdit.feeds.filter(f => f.kind === "ams").map(f => f.unit);
+    printerEdit.feeds.push({kind: "ams", unit: [1, 2, 3, 4].find(n => !used.includes(n)) || 1, loc: ""});
     render();
   },
   pfExt() {
     readPrinter();
-    PF.feeds.push({kind: "external", loc: "", space: 1});
+    printerEdit.feeds.push({kind: "external", loc: "", space: 1});
     render();
   },
   pfDrop(el) {
     readPrinter();
-    PF.feeds.splice(+el.dataset.v, 1);
+    printerEdit.feeds.splice(+el.dataset.v, 1);
     render();
   },
   pfCancel() {
-    PF = null;
+    printerEdit = null;
     go("setup");
   },
   pfDel() {
-    const p = S.printers[PF.id];
+    const p = S.printers[printerEdit.id];
     ask(`Delete ${p.name}?`, "Your storages and spools aren't touched.", [
       [
         "Delete",
         async () => {
           await col("printers").doc(p.id).delete();
           delete S.printers[p.id];
-          PF = null;
+          printerEdit = null;
           toast(p.name + " deleted.");
           go("setup");
         },
@@ -5010,7 +5241,7 @@ const actions = {
     ]);
   },
   storeDel() {
-    const l = S.locs[LF.id],
+    const l = S.locs[storeEdit.id],
       here = inLoc(l.id);
     ask(
       `Delete ${l.name}?`,
@@ -5023,7 +5254,7 @@ const actions = {
           async () => {
             for (const s of here) await col("spools").doc(s.id).update({loc: null, slot: null});
             await col("locations").doc(l.id).delete();
-            LF = null;
+            storeEdit = null;
             toast(l.name + " deleted.");
             go("setup");
           },
@@ -5109,11 +5340,11 @@ const actions = {
   },
   logSave() {
     const p = $("#lpPct");
-    if (p) LP.pct = p.value;
+    if (p) printLog.pct = p.value;
     saveLog();
   },
   logCancel() {
-    LP = null;
+    printLog = null;
     go("stock");
   },
   arrStart() {
@@ -5251,6 +5482,7 @@ const actions = {
   },
 };
 let pendingLogo = null;
+/* Saves a file to the device, or says where to do it from when this app can't. */
 async function saveFile(filename, data) {
   try {
     await downloads.save({filename, data});
@@ -5262,7 +5494,7 @@ document.addEventListener("click", e => {
   const g = e.target.closest("[data-go]");
   if (g) {
     e.preventDefault();
-    if (F && F.editId && S.view === "edit" && g.dataset.go !== S.view) F = null;
+    if (spoolEdit && spoolEdit.editId && S.view === "edit" && g.dataset.go !== S.view) spoolEdit = null;
     go(g.dataset.go);
     return;
   }
@@ -5302,17 +5534,17 @@ document.addEventListener("change", async e => {
     return;
   }
   if (t.id === "outline") {
-    Q.outline = t.checked;
+    queueOpts.outline = t.checked;
     return;
   }
-  if (t.id && /^pf_loc_\d+$/.test(t.id) && PF) {
+  if (t.id && /^pf_loc_\d+$/.test(t.id) && printerEdit) {
     readPrinter();
     render();
     return;
   }
   if (t.name === "s_kind") {
     readStore();
-    Object.assign(LF, storeDefaults(t.value));
+    Object.assign(storeEdit, storeDefaults(t.value));
     render();
     return;
   }
@@ -5348,36 +5580,36 @@ document.addEventListener("change", async e => {
     takePrintFile(f);
     return;
   }
-  if (t.dataset && t.dataset.lp != null && LP) {
-    LP.pick[+t.dataset.lp] = t.value;
+  if (t.dataset && t.dataset.lp != null && printLog) {
+    printLog.pick[+t.dataset.lp] = t.value;
     return;
   }
-  if (t.id === "lpPlate" && LP) {
-    LP.plate = +t.value;
+  if (t.id === "lpPlate" && printLog) {
+    printLog.plate = +t.value;
     pickSpools();
     render();
     return;
   }
-  if (t.id === "lpPct" && LP) {
-    LP.pct = t.value;
+  if (t.id === "lpPct" && printLog) {
+    printLog.pct = t.value;
     return;
   }
   if (t.id === "pickImport" && t.files[0]) {
     const f = t.files[0];
     t.value = "";
     try {
-      Imp = parseImport(await f.text());
+      importJob = parseImport(await f.text());
       render();
     } catch (m) {
       toast(String(m));
     }
     return;
   }
-  if (t.dataset && t.dataset.imp != null && Imp) {
-    const it = Imp.items.find(i => String(i.key) === t.dataset.imp);
+  if (t.dataset && t.dataset.imp != null && importJob) {
+    const it = importJob.items.find(i => String(i.key) === t.dataset.imp);
     if (it) it.on = t.checked;
     const l = $("#importLoc");
-    Imp.loc = l ? l.value : "";
+    importJob.loc = l ? l.value : "";
     render();
     return;
   }
@@ -5388,7 +5620,7 @@ document.addEventListener("change", async e => {
     if (/svg/.test(f.type)) {
       const cv = await svgInk(await f.text()).catch(() => null);
       if (cv && (await storeInk(pendingLogo, cv, {from: "Your vector"}))) {
-        P = null;
+        logoPicker = null;
         toast(pendingLogo + " logo saved.");
         render();
       } else toast("That vector file wouldn't open.");
@@ -5397,14 +5629,14 @@ document.addEventListener("change", async e => {
     const img = await loadImg(f),
       c = toCanvas(img, 1600),
       blob = await canvasBlob(c, "image/png");
-    P = null;
+    logoPicker = null;
     openCrop(URL.createObjectURL(blob), c.width, c.height, pendingLogo || "Logo", [0, 0, 1, 1], S.view);
     render();
     return;
   }
 });
 document.addEventListener("focusin", e => {
-  if (F && (e.target.id === "f_brand" || e.target.id === "f_material")) {
+  if (spoolEdit && (e.target.id === "f_brand" || e.target.id === "f_material")) {
     hidePicks();
     showPicks(e.target.id);
   }
@@ -5421,13 +5653,13 @@ document.addEventListener("mousedown", e => {
 });
 document.addEventListener("input", e => {
   const t = e.target;
-  if (t.id && t.id.startsWith("s_") && LF) {
+  if (t.id && t.id.startsWith("s_") && storeEdit) {
     readStore();
     storePreview();
     return;
   }
-  if (t.dataset && t.dataset.colour && F) {
-    F.colours[+t.dataset.colour] = t.value;
+  if (t.dataset && t.dataset.colour && spoolEdit) {
+    spoolEdit.colours[+t.dataset.colour] = t.value;
     formPreview();
     return;
   }
@@ -5437,57 +5669,42 @@ document.addEventListener("input", e => {
     if (box) box.innerHTML = stockRows();
     return;
   }
-  if (t.id && t.id.startsWith("f_") && F) {
+  if (t.id && t.id.startsWith("f_") && spoolEdit) {
     readForm();
     if (["f_nMin", "f_nMax", "f_bMin", "f_bMax", "f_dT", "f_dH"].includes(t.id)) {
-      F.touched = true;
-      F.src = "edited";
+      spoolEdit.touched = true;
+      spoolEdit.src = "edited";
       formPreview();
     } else if (t.id === "f_hex") {
-      F.hexTouched = true;
+      spoolEdit.hexTouched = true;
       formPreview();
     } else if (t.id === "f_pattern") {
-      if (F.pattern !== "solid" && F.colours.length < 2) F.colours.push("#FFFFFF");
+      if (spoolEdit.pattern !== "solid" && spoolEdit.colours.length < 2) spoolEdit.colours.push("#FFFFFF");
       $("#colourRow").innerHTML = colourRow();
       formPreview();
     } else if (t.id === "f_colour") {
-      const known = catLine(F.brand, F.material)?.c.find(c => norm(c[0]) === norm(F.colour));
+      const known = catLine(spoolEdit.brand, spoolEdit.material)?.c.find(c => norm(c[0]) === norm(spoolEdit.colour));
       if (known) {
         useColour(known);
         return;
       }
-      const n = F.hexTouched ? null : NAMED.find(([re]) => re.test(F.colour));
+      const n = spoolEdit.hexTouched ? null : NAMED.find(([re]) => re.test(spoolEdit.colour));
       if (n) {
-        F.hex = n[1];
-        F.colours[0] = n[1];
+        spoolEdit.hex = n[1];
+        spoolEdit.colours[0] = n[1];
         const h = $("#f_hex");
         if (h) h.value = n[1];
       }
       formPreview();
     } else if (t.id === "f_brand" || t.id === "f_material") {
-      if (F.src === "edited" || F.src === "label") {
-        F.touched = false;
+      if (spoolEdit.src === "edited" || spoolEdit.src === "label") {
+        spoolEdit.touched = false;
       }
       showPicks(t.id);
       refreshLookup();
     } else formPreview();
   }
 });
-function stockRows() {
-  const f = S.filter,
-    q = f.q.toLowerCase(),
-    live = liveSpools();
-  const rows = (f.tab === "used" ? Object.values(S.spools).filter(s => s.status === "used") : live)
-    .filter(s => {
-      if (f.tab === "low" && !isLow(s)) return false;
-      if (f.mat && (baseMat(s.material)?.key || s.material) !== f.mat) return false;
-      if (q && ![s.id, s.brand, s.material, s.colour, s.finish, spotName(s)].join(" ").toLowerCase().includes(q))
-        return false;
-      return true;
-    })
-    .sort((a, b) => a.id.localeCompare(b.id));
-  return rows.map(rowHTML).join("") || emptyList(live.length);
-}
 document.addEventListener("submit", async e => {
   e.preventDefault();
   if (e.target.id === "spoolForm") submitForm();
@@ -5526,8 +5743,8 @@ addEventListener("drop", e => {
 addEventListener("paste", e => {
   const f = [...(e.clipboardData?.files || [])].find(x => x.type.startsWith("image/"));
   if (!f) return;
-  if ((S.view === "add" || S.view === "edit") && F && F.brand) {
-    pendingLogo = F.brand;
+  if ((S.view === "add" || S.view === "edit") && spoolEdit && spoolEdit.brand) {
+    pendingLogo = spoolEdit.brand;
     readForm();
     const dt = new DataTransfer();
     dt.items.add(f);
@@ -5557,7 +5774,10 @@ document.addEventListener("pointerdown", e => {
   b.addEventListener("pointerup", up);
 });
 
-/* ---------- start ---------- */
+/* ==========================================================================================================
+   Start
+   Starts Firebase, waits for sign-in, then watches this user's data.
+   ========================================================================================================== */
 (async () => {
   render();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
