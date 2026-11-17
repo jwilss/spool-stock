@@ -5635,7 +5635,14 @@ const actions = {
     const code =
       "SS1." +
       btoa(
-        JSON.stringify({k: CFG.firebase.apiKey, p: CFG.firebase.projectId, u: u.uid, e: u.email, t: u.refreshToken}),
+        JSON.stringify({
+          k: CFG.firebase.apiKey,
+          p: CFG.firebase.projectId,
+          u: u.uid,
+          e: u.email,
+          t: u.refreshToken,
+          s: PAGE_URL, // where the plugin opens spools, and looks for its own updates
+        }),
       );
     if (await copyText(code)) toast("Sign-in code copied. Paste it into Orca's Spool Stock tab.");
     else ask("Copy this sign-in code", code, [["Done", null]]);

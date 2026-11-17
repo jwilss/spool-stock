@@ -10,10 +10,17 @@ Takes each print's filament off the right spools in Spool Stock, for Bambu print
 4. When the print **finishes**, the grams come off those spools straight away. Each spool gets the print in its list, and **Setup > Orca plugin** in the app lists it with an **Undo** button.
 5. When a print **fails or is cancelled**, it waits under **Needs you** in Orca's Spool Stock tab. It shows how far the printer got, with that percentage filled in, and the spool it used. Change anything that's wrong, then press **Take it off**, or **Skip**.
 
+## Updates
+
+A few times a day the plugin looks at the Spool Stock site for a newer version of itself. When there is one, the tab shows **Version x is ready** with an **Update** button. Nothing changes until you press it. It then replaces its own file, keeps the old one beside it as `spool_stock.py.bak`, and asks you to restart Orca. If Orca won't let it replace the file, it says so, and you can install the download from **Setup > Orca plugin** as before.
+
+It knows which site to ask from the sign-in code. Codes copied before version 1.4.0 don't carry the address, so it uses the original site until you sign in with a fresh code.
+
 ## Stock and presets
 
 The tab has four views: **Prints** (the printers, prints waiting for you and recent results), **Stock**, **Presets** and **Cameras**.
 
+- Click a spool in **Stock** to open its page in Spool Stock, in your browser.
 - **Stock** shows every spool that isn't used up: its colour, a bar for what's left, and its storage and space. Search by code, brand, material, colour or storage, show only low spools (150 g or less, as in the app), and group by storage, material or brand. A spool a printer feeds from has that printer's name on it. It refreshes about once a minute, or press **Refresh**.
 - **Presets** adds a **Spool Stock** group to Orca's filament list, with one preset for each filament you own. Ones Orca already has a profile for build on it unchanged. The rest build on Orca's closest generic profile with the temperatures from your stickers, the same as **Setup > Orca presets** in the app. Press **Add them to Orca** once. After that the group follows your stock: Spool Stock sends the list whenever your filaments change, and the plugin picks it up within a minute or two, or straight away with **Update now**. **Remove them from Orca** takes the group out again.
 

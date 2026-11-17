@@ -7,7 +7,7 @@
 # name = "Spool Stock"
 # description = "Takes each print's filament off the right spools in Spool Stock, shows your stock and cameras, and keeps a Spool Stock group of your filaments in Orca's filament list."
 # author = "jwilss"
-# version = "1.3.2"
+# version = "1.4.0"
 # ///
 """Spool Stock for OrcaSlicer 2.5.
 
@@ -24,6 +24,25 @@ cameras such as Tapo ones, relayed by the plugin, with nothing else to install.
 
 The only thing sent to a printer is Bambu's standard request for its status. Printer IPs and access
 codes stay in this plugin's folder on this PC and are never sent to Spool Stock or written to the log.
+
+How this file is laid out (Orca needs a plugin to be one file, so everything is here):
+
+    files                 where settings, the log and saved state live, and how they're read and written
+    jobs                  Store: what's printing, what's waiting to be sent, what needs you
+    Spool Stock           Cloud: signing in and reading and writing Firestore over its REST interface
+    trays to spools       the same rules as the app for which spool sits in which tray
+    the job file          grams per filament, read from the .3mf on the printer
+    printers              Link: one status connection per printer, and the job it's printing
+    taking it off         booking a print's grams against its spools
+    the site              opening spools in the app, and updating this plugin
+    permission            how Orca is asked to allow each connection, without ever waiting on it
+    stock, presets,       what the tab's Stock, Presets and Cameras views are built from
+    cameras
+    the tab               _state() (what the page is sent), PAGE (the page itself: HTML, CSS and script),
+                          handle() (what each message from the page does), then the classes Orca loads
+
+Rules that matter: nothing on Orca's main thread may wait on the network (printers are switched off at night),
+secrets are redacted from the log, and a print is never taken off twice.
 """
 
 import base64
@@ -52,7 +71,7 @@ from pathlib import Path
 import orca
 
 NAME = "Spool Stock"
-VERSION = "1.3.2"
+VERSION = "1.4.0"
 MQTT_PORT, FTP_PORT = 8883, 990
 RETRY_MAX = 60  # seconds between tries at most, for a printer or camera that's switched off
 PUSHALL = '{"pushing": {"sequence_id": "0", "command": "pushall"}}'
@@ -261,7 +280,7 @@ class Cloud:
     def sign_in(self, code: str):
         d = decode_code(code)
         with self.lock:
-            self.acct = {"k": d["k"], "p": d["p"], "u": d["u"], "e": d.get("e", ""), "t": d["t"]}
+            self.acct = {"k": d["k"], "p": d["p"], "u": d["u"], "e": d.get("e", ""), "t": d["t"], "s": d.get("s", "")}
             self._secret_parts()
             self.id_token, self.snap = "", None
             _write_json(ACCOUNT, self.acct, private=True)
@@ -1206,8 +1225,83 @@ def worker():
             continue
         try:
             tick()
+            if CLOUD.signed_in:
+                check_update()
         except PermissionError:
             pass
+
+
+# ---------- the Spool Stock site: opening spools there, and this plugin's own updates ----------
+#
+# The site that hands out the sign-in code also serves the newest spool_stock.py. The plugin looks there a few
+# times a day and, when a newer version is waiting, offers an Update button in the tab. Nothing is replaced
+# until that button is pressed. The new file must be this plugin, newer, and valid Python before it's written
+# over this one, and the old file is kept beside it as spool_stock.py.bak. Orca loads it on its next start.
+
+DEFAULT_SITE = "https://jwilss.github.io/spool-stock/"
+SELF = Path(__file__).resolve()
+UPDATE_EVERY = 6 * 3600
+_update = {"at": 0.0, "version": "", "source": "", "done": ""}
+
+
+def site_url() -> str:
+    """The Spool Stock site this plugin belongs to: from the sign-in code, or the original site."""
+    s = str(CLOUD.acct.get("s") or DEFAULT_SITE)
+    return (s if s.endswith("/") else s + "/") if re.match(r"https?://[\w.-]+(:\d+)?/", s + "/") else DEFAULT_SITE
+
+
+def _version_tuple(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", v)[:4])
+
+
+def check_update(force: bool = False) -> None:
+    """Fetch the site's copy of the plugin and remember it if it's newer. Never raises, apart from Orca's
+    PermissionError when it won't allow the connection from this thread."""
+    if not force and time.time() - _update["at"] < UPDATE_EVERY:
+        return
+    _update["at"] = time.time()
+    try:
+        req = urllib.request.Request(site_url() + "spool_stock.py", headers={"Cache-Control": "no-cache"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            source = r.read(4 * 1024 * 1024).decode("utf-8")
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, PermissionError):
+            raise e.reason
+        log("update.unreachable", error=str(e))
+        return
+    except Exception as e:
+        log("update.unreachable", error=f"{type(e).__name__}: {e}")
+        return
+    m = re.search(r'^VERSION = "([\d.]+)"', source, re.M)
+    if m and 'id = "spool-stock"' in source and _version_tuple(m.group(1)) > _version_tuple(VERSION):
+        _update.update(version=m.group(1), source=source)
+        log("update.available", version=m.group(1))
+    else:
+        _update.update(version="", source="")
+
+
+def install_update() -> str:
+    """Replace this file with the newer one already fetched. Returns what to tell the user."""
+    source, version = _update["source"], _update["version"]
+    if not source:
+        return "There's no newer version to install."
+    try:
+        compile(source, "spool_stock.py", "exec")
+    except SyntaxError as e:
+        log("update.refused", error=str(e))
+        return "The new version didn't download properly, so nothing was changed. Try again later."
+    try:
+        backup = SELF.with_name(SELF.name + ".bak")
+        backup.write_bytes(SELF.read_bytes())
+        tmp = SELF.with_name(SELF.name + ".new")
+        tmp.write_text(source, encoding="utf-8", newline="\n")
+        tmp.replace(SELF)
+    except OSError as e:
+        log("update.failed", error=str(e))
+        return f"Orca wouldn't let the plugin replace its own file ({e}). Download it from Setup > Orca plugin in Spool Stock instead."
+    _update.update(version="", source="", done=version)
+    log("update.installed", version=version)
+    return f"Version {version} is installed. Restart Orca to start using it."
 
 
 # ---------- Orca's permission to reach the network ----------
@@ -1305,7 +1399,8 @@ def connect_all() -> list[str]:
                 continue
         _links[key] = Link(p)
     if CLOUD.signed_in:
-        for h in CLOUD_HOSTS:
+        site_host = urllib.parse.urlparse(site_url()).hostname
+        for h in (*CLOUD_HOSTS, *([site_host] if site_host and CLOUD_HOSTS else [])):
             if h not in _allowed:
                 why = authorise(h, (443,))
                 if why:
@@ -2426,6 +2521,9 @@ def _state(hint: str = "") -> dict:
         "stock": stock_view(snap) if CLOUD.signed_in else None,
         "presets": presets_view(snap.get("orca")) if (CLOUD.signed_in and snap) else None,
         "cameras": cameras_view(),
+        "update": _update["version"],
+        "updated": _update["done"],
+        "site": site_url() if CLOUD.signed_in else "",
     }
 
 
@@ -2617,6 +2715,14 @@ td {
   padding: 8px 10px;
   background: var(--card);
 }
+.sp[data-a] {
+  cursor: pointer;
+}
+.sp[data-a]:hover,
+.sp[data-a]:focus-visible {
+  border-color: var(--go);
+  outline: none;
+}
 .sp.low {
   border-color: var(--warn);
 }
@@ -2774,6 +2880,7 @@ input.wide {
 <h1>Spool Stock</h1>
 <nav><button data-v="prints" aria-current="page">Prints<span id="nb"></span></button><button data-v="stock">Stock</button><button data-v="presets">Presets</button><button data-v="cameras">Cameras</button></nav>
 <div id="hint" class="muted"></div>
+<div id="upd"></div>
 <section id="v-prints">
 <p class="muted">Takes each print's filament off the spools in the trays it used. <span id="ver"></span></p>
 <h2>Account</h2><div id="acct"></div>
@@ -2799,6 +2906,11 @@ input.wide {
 <p class="muted">Cameras only stream while this page is open.</p></div></details>
 </section>
 <script>
+// The tab's page. It keeps no data of its own: every two seconds it sends {type: "poll"} to the plugin, which
+// answers with the whole state (see _state in the Python), and the page redraws whatever part has changed.
+// Buttons carry data-a="action", handled by one click listener near the end, which sends the plugin a message.
+// set(id, html, key) only touches the page when key has changed, so typing in a box isn't interrupted.
+// Written in plain older JavaScript, as Orca's built-in browser may not be a recent one.
 var o = window.orca,
   last = {},
   spools = [],
@@ -3111,8 +3223,10 @@ function card(s) {
   return (
     '<div class="sp' +
     (s.low ? " low" : "") +
+    '" role="button" tabindex="0" data-a="open" data-id="' +
+    h(s.id) +
     '" title="' +
-    h(s.code + " " + s.brand + " " + s.material + " " + s.colour) +
+    h("Open " + s.code + " in Spool Stock: " + s.brand + " " + s.material + " " + s.colour) +
     '"><span class="disc" style="background:' +
     h(fill(s)) +
     '"></span><div style="min-width:0">' +
@@ -3325,6 +3439,17 @@ o.onMessage(function (d) {
   spools = d.spools || [];
   document.documentElement.dataset.theme = d.dark === true ? "dark" : d.dark === false ? "light" : "";
   document.getElementById("ver").textContent = "Version " + d.version + ".";
+  set(
+    "upd",
+    d.updated
+      ? '<div class="card">Version ' + h(d.updated) + " is installed. Restart Orca to start using it.</div>"
+      : d.update
+        ? '<div class="card warn"><div class="row"><span>Version ' +
+          h(d.update) +
+          ' of this plugin is ready.</span><button class="go" data-a="update">Update</button></div></div>'
+        : "",
+    d.update + "|" + d.updated,
+  );
   document.getElementById("hint").textContent = d.hint || "";
   document.getElementById("nb").textContent = d.pending.length ? " (" + d.pending.length + ")" : "";
   set(
@@ -3547,6 +3672,11 @@ document.body.addEventListener("click", function (ev) {
         b.textContent = "Remove";
       }, 4000);
     }
+  } else if (a === "open") {
+    send({type: "open", id: b.dataset.id});
+  } else if (a === "update") {
+    b.disabled = true;
+    send({type: "update"});
   } else if (a === "refresh" || a === "presets_on" || a === "presets_now" || a === "presets_off") {
     if (a !== "refresh") last.presets = null;
     send({type: a});
@@ -3574,6 +3704,13 @@ document.getElementById("add").onclick = function () {
 document.getElementById("openlog").onclick = function () {
   send({type: "openlog"});
 };
+// Spool cards act as buttons, so Enter and Space press them
+document.body.addEventListener("keydown", function (ev) {
+  if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches && ev.target.matches('[role="button"]')) {
+    ev.preventDefault();
+    ev.target.click();
+  }
+});
 send({type: "ready"});
 setInterval(function () {
   send({type: "poll"});
@@ -3758,6 +3895,18 @@ def handle(d: dict) -> dict:
                 pass
         else:
             _wake.set()
+    elif t == "update":
+        hint = install_update()
+    elif t == "open":
+        # Opens a spool's page in Spool Stock, in the default browser
+        code = str(d.get("id") or "")
+        if re.fullmatch(r"s\d{4,}", code) and CLOUD.signed_in:
+            try:
+                import webbrowser
+
+                webbrowser.open(site_url() + "#" + code)
+            except Exception as e:
+                hint = f"Couldn't open the browser: {e}"
     elif t == "openlog":
         try:
             os.startfile(str(DATA))  # type: ignore[attr-defined]

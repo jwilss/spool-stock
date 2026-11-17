@@ -439,6 +439,14 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         calls.append(("GET", u.path, threading.current_thread().name))
+        if u.path == "/site/spool_stock.py":
+            # The site's copy of the plugin: the same file, at whatever version the test is offering
+            body = SITE["source"].encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if not self.authed():
             return
         path = u.path.split(f"/v1/{ROOT}/", 1)[1]
@@ -458,6 +466,9 @@ hs = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
 threading.Thread(target=hs.serve_forever, daemon=True).start()
 HTTP = f"http://127.0.0.1:{hs.server_address[1]}"
 
+PLUGIN_FILE = Path(__file__).resolve().parent.parent / "orca-plugin" / "spoolstock" / "spool_stock.py"
+SITE = {"source": PLUGIN_FILE.read_text(encoding="utf-8")}
+
 # ---- load the plugin ----
 spec = importlib.util.spec_from_file_location(
     "spool_stock", Path(__file__).resolve().parent.parent / "orca-plugin" / "spoolstock" / "spool_stock.py"
@@ -466,6 +477,10 @@ plug = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plug)
 plug.MQTT_PORT, plug.FTP_PORT = msrv.getsockname()[1], fsrv.getsockname()[1]
 plug.TOKEN_URL, plug.FIRESTORE_URL, plug.CLOUD_HOSTS = HTTP + "/token", HTTP + "/v1", ()
+plug.DEFAULT_SITE = HTTP + "/site/"
+plug.SELF = tmp / "installed" / "spool_stock.py"
+plug.SELF.parent.mkdir()
+plug.SELF.write_text(SITE["source"], encoding="utf-8")
 
 ok(len(registered) == 1, "registers the Spool Stock tab")
 page = registered[0]()
@@ -1303,6 +1318,63 @@ ok(
 )
 
 
+# ---- updating itself from the site, and opening a spool in the app ----
+plug.check_update(force=True)
+ok(plug.handle({"type": "poll"})["update"] == "", "no update offered when the site has the same version")
+SITE["source"] = re.sub(r'^VERSION = "[\d.]+"', 'VERSION = "9.9.9"', SITE["source"], flags=re.M)
+plug.check_update()
+ok(plug.handle({"type": "poll"})["update"] == "", "the site is only asked a few times a day")
+plug.check_update(force=True)
+st = plug.handle({"type": "poll"})
+ok(
+    st["update"] == "9.9.9" and 'VERSION = "9.9.9"' not in plug.SELF.read_text(),
+    "a newer version is offered, and nothing is replaced yet",
+)
+good = plug._update["source"]
+plug._update["source"] = good[: len(good) // 2] + "\n)(\n"
+st = plug.handle({"type": "update"})
+ok(
+    "nothing was changed" in st["hint"] and 'VERSION = "9.9.9"' not in plug.SELF.read_text(),
+    "a download that isn't valid Python is refused",
+)
+plug._update["source"] = good
+st = plug.handle({"type": "update"})
+ok(
+    'VERSION = "9.9.9"' in plug.SELF.read_text()
+    and f'VERSION = "{plug.VERSION}"' in plug.SELF.with_name("spool_stock.py.bak").read_text()
+    and "Restart Orca" in st["hint"]
+    and st["updated"] == "9.9.9"
+    and st["update"] == "",
+    "Update replaces the plugin's file, keeps the old one beside it, and says to restart Orca",
+)
+SITE["source"] = SITE["source"].replace('id = "spool-stock"', 'id = "something-else"').replace("9.9.9", "99.0.0")
+plug.check_update(force=True)
+ok(plug.handle({"type": "poll"})["update"] == "", "a file that isn't this plugin is never offered")
+import webbrowser
+
+opened = []
+webbrowser.open = lambda url, *a, **k: opened.append(url)
+plug.handle({"type": "open", "id": "s0001"})
+plug.handle({"type": "open", "id": "../evil"})
+ok(opened == [HTTP + "/site/#s0001"], "a spool card opens that spool in Spool Stock, and nothing else: " + str(opened))
+code2 = (
+    "SS1."
+    + base64.b64encode(
+        json.dumps(
+            {
+                "k": "APIKEY",
+                "p": PROJECT,
+                "u": UID,
+                "e": "me@example.com",
+                "t": REFRESH,
+                "s": "https://example.org/stock",
+            }
+        ).encode()
+    ).decode()
+)
+ok(plug.decode_code(code2)["s"] == "https://example.org/stock", "the sign-in code carries the site's address")
+
+
 # ---- printers switched off for the night ----
 def blackhole(ip, port):
     """A port that never answers, like a printer that's switched off: a full queue, so new connections hang."""
@@ -1404,8 +1476,8 @@ ok(
     "saved sign-in and printers are private files",
 )
 ok(
-    all(c[1] in ("/token",) or c[1].startswith(f"/v1/{ROOT}") for c in calls),
-    "talks only to the sign-in and database addresses",
+    all(c[1] in ("/token", "/site/spool_stock.py") or c[1].startswith(f"/v1/{ROOT}") for c in calls),
+    "talks only to the sign-in and database addresses, and the site for updates",
 )
 plug.handle({"type": "signout"})
 ok(not acct.exists() and not plug.handle({"type": "poll"})["signedIn"], "sign out removes the saved sign-in")

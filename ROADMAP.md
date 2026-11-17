@@ -13,6 +13,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - `.github/workflows/`: `site.yml` adds the Firebase key from the `FIREBASE_API_KEY` secret, refreshes the catalogue and publishes the site. `apps.yml` builds the APK and exe.
 - `firestore.rules`: keeps each account to its own data.
 - `docs/`: images for the README, made with `test/shots.js`. The stickers image is the only one it doesn't make.
+- `tools/format.mjs` and `tools/test-all.mjs`: `npm run format` and `npm test`. `package.json` only holds these developer tools; the app has no build step.
 - `test/`: `run.js` for the app, `reader.js` for Spool Reader, `orca.js` for the Windows Orca bridge, `plugin.py` and `probe.py` for the Orca plugins (`plugin.py` also runs `plugin-tab.js`, which checks the tab's Stock and Presets views in Chromium). They use stand-ins for Firebase, Claude, Orca and the printers.
 - `orca-plugin/spoolstock/`: the OrcaSlicer 2.5 plugin that takes each print off the spools it used.
 - `orca-plugin/probe/`: the read-only test plugin used to find out what Orca and the printers report. Its README has what it found.
@@ -36,6 +37,10 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - The app keeps `config/orca` up to date for the plugin: `{v, sig, at, items}`, one item per owned filament with `name`, `label`, `own`, `parents` (Orca profiles it can build on, in order) and `text` (the preset JSON, as the download zip has it). It's rewritten whenever its signature changes, once the catalogue and the live data have loaded.
 - The plugin's Presets view writes those as a local preset bundle, `user/<folder>/_local/spool-stock/` with `bundle_metadata.json` and `filament/<name>.json`, which Orca shows as its own group. The folder comes from a user preset's file path, then `preset_folder` in `OrcaSlicer.conf`. Each preset inherits the first of its `parents` Orca has (`find_preset`), keeps only plain setting keys (nothing that limits printers or reaches one), and then `orca.host.preset.bundles.reload_local("spool-stock")` makes it live. Without that call Orca needs a restart. Same-named presets from the Windows app in `user/<folder>/filament` are moved to `spoolstock/old-presets`. State is in `spoolstock/presets.json`, and each run logs `presets.sync`.
 - The plugin's Cameras view relays RTSP cameras without decoding: an RTSP client over TCP (Digest or Basic sign-in, `interleaved=0-1`, a `GET_PARAMETER` every 25 s), H.264 taken out of the RTP packets (single, STAP-A and FU-A), and each frame rewrapped as a fragmented MP4 `moof`/`mdat` after a `ftyp`/`moov` header built from the SPS and PPS. The tab asks for new fragments every 300 ms and plays them with MediaSource. A camera starts when asked for and stops 10 s after the asking stops. Fragments are kept from the last two keyframes, so a page that opens late starts on a keyframe. Links live in `spoolstock/cameras.json`, and passwords are redacted from the log.
+- Every print taken off a spool is a document in `jobs`: `{at, printer, job, plate, pct, source, items: [{spool, g}], undone}`. The plugin writes `source: "orca"` with the id `<serial>-<ms>`, and Log a print writes `source: "manual"` with the id `m-<ms>`. Each spool also keeps its own `prints` lines. The Usage page (`allPrints`, `usageBins`, `vUsage`) works from jobs, plus older spool-only lines from before hand-logged prints were jobs.
+- The full backup is `{format: "spool-stock-backup", version: 2, saved, spools, locations, brands, profiles, printers, jobs, config}`. `readBackup` checks a file and `runRestore(replace)` writes it back.
+- Per device choices live in localStorage: `theme`, `stockSort`, `usageRange`, `setupOpen`, `scanTarget`.
+- The plugin updates itself: `check_update` fetches `<site>spool_stock.py` every 6 hours (the site address comes from the sign-in code's `s`), and `install_update` replaces its own file only when asked, after checking it's this plugin, newer and valid Python.
 - The Orca plugin (`spool_stock.py`, one Python file) keeps a status connection to each printer (MQTT on 8883, user `bblp` and the access code, subscribed to that printer's own topic, serial read from its certificate). The printer's `project_file` message gives `ams_mapping2` (`{ams_id, slot_id}` per filament, `ams_id` 255 for the external spool). As soon as the job is sent (and again once printing is under way, if that fails) it reads the job's `.3mf` from the printer over implicit FTPS on 990 and takes `used_g` per filament from `slice_info.config`. The same trays-to-spool rules as `trayToSpool` find the spools. A finished print is written in one Firestore commit: each spool's `remainG` and `prints`, checked against the spool's last update, plus `jobs/<serial>-<ms>`, which must not exist yet, so nothing is taken off twice. A failed (`gcode_state` FAILED) or cancelled (`print_error` 50348044) print waits in the tab with the printer's `mc_percent`. The app's Undo puts the grams back and removes the matching print entry.
 - Orca only asks permission for connections started on its main thread, so the plugin starts one to each printer, camera and Google host from the tab. It never waits for an answer (a non-blocking connect), because Orca checks as a connection starts, and a switched off printer would otherwise freeze Orca. The real connections run on background threads, connecting in 0.25 s slices that check for a stop, so closing Orca is never held up. A printer that doesn't answer is retried every 3 s, doubling to once a minute, with one log line per kind of failure. A connected printer that sends nothing for 90 s is treated as gone.
 - The plugin signs in with a code from Setup: `SS1.` and base64 JSON of the web API key, project, user ID and the browser's refresh token. It swaps that for ID tokens and uses Firestore's REST interface. Orca's audit permissions only prompt on its main thread, so the printers and Google's hosts are reached once from the tab first. If background calls are still refused, the tab's two-second poll does the sending. Its state (`jobs.json`) survives a restart of Orca mid-print.
@@ -63,6 +68,14 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Stock view in the Orca plugin's tab: spool cards with colour, weight bar and storage, with search, low only, and grouping by storage, material or brand
 - [x] Live preset sync: the plugin keeps a Spool Stock group in Orca's filament list from the app's list of owned filaments, reloaded while Orca is open
 - [x] Cameras in the Orca plugin's tab: Tapo and other RTSP cameras, relayed by the plugin itself, each linked to a printer
+- [x] Code tidy-up (Nov 2026): everything formatted (`npm run format`), one test command (`npm test`), named state, section headings and comments throughout
+- [x] Usage page: filament used per day, week or month, by material and printer, running low, and every print with Undo. Hand-logged prints are kept as jobs too
+- [x] Restore from a JSON backup: add what's missing, or replace everything. Backups now include printers and prints
+- [x] Running low list, with Copy list (no buying links)
+- [x] Stock list sorting, grams on low spools, two columns on wide screens, notes on spools, / to search
+- [x] Setup's sections fold and remember which are open. Theme choice per device
+- [x] Home screen shortcuts (Scan, Add, Log a print, Usage)
+- [x] Orca plugin 1.4.0: updates itself from the tab, and opens a spool in the app from its Stock view
 - [x] Wide stickers (99.1 x 38.1 mm, 14 per sheet, or any label at least 2.2 times as wide as it's tall): the QR code the full height of the label on the far right, the spool code top right of the text, the finish beside the colour, and diameter, density and empty spool weight beside the print settings. Smaller labels keep their layout.
 - [x] Cameras fill the tab (1.3.2): the tiles pick the column count that gives the biggest picture without scrolling, and Add a camera folds away
 - [x] Every spool is 1 kg: the form asks for filament left out of 1000 g, and existing spools with another full weight were set to 1000 g
@@ -95,6 +108,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Plugin 1.2.0 on the real Orca: **Add them to Orca** loaded the Spool Stock group live, with 22 filaments, and moved 12 Windows app copies aside
 - [ ] Bambu Lab Support for PLA/PETG in the Spool Stock group, after the catalogue fix
 - [ ] Stock view on the real Orca
+- [ ] Plugin 1.4.0 on the real Orca: the Update button when the next version is published (can the plugin replace its own file? `update.installed` or `update.failed` in the log), and clicking a spool opening the browser
 - [ ] Plugin 1.3.1: open Orca with both printers off (no freeze, tab says they may be switched off), then switch them on (they connect without pressing Connect)
 - [ ] Plugin 1.3.0 Cameras with Jack's Tapo cameras: picture appears, keeps up live, and stops when the view is left (`camera.connected`, `camera.video` and `camera.stopped` in the log)
 - [ ] Log a print with a real Orca export from each printer
@@ -108,8 +122,6 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 
 ## Next
 
-- [ ] Restore from a JSON backup
-- [ ] Low stock shopping list
 - [ ] Add drying settings per filament, and fill catalogue gaps by sending additions to SpoolmanDB
 - [ ] Save PDFs from the Android app
 - [ ] Open sticker links straight in the app instead of the browser
@@ -119,6 +131,5 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [ ] Names for spaces in a storage, such as Left and Right
 - [ ] Firebase App Check to cut down junk requests
 - [ ] Show prints waiting in Orca's tab in the app too
-- [ ] Install the plugin from the Windows app
 - [ ] Thermal label printer output
 - [ ] NFC tags as a one tap alternative to QR
