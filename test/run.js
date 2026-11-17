@@ -33,6 +33,10 @@ const cfg =
   'window.SPOOL_CONFIG={siteUrl:"https://jwilss.github.io/spool-stock/",repo:"jwilss/spool-stock",readerUrl:"https://claude.ai/artifact/x",firebase:{projectId:"x"}};';
 const stubs = async ctx => {
   await ctx.addInitScript({path: __dirname + "/mock-firebase.js"});
+  // Setup's sections start folded. The tests work with them all open, apart from the test of folding itself.
+  await ctx.addInitScript(() => {
+    if (!localStorage.getItem("setupOpen")) localStorage.setItem("setupOpen", '"all"');
+  });
   await ctx.route(/vendor\/firebase-/, r => r.fulfill({contentType: "text/javascript", body: ""}));
   await ctx.route(/config\.js/, r => r.fulfill({contentType: "text/javascript", body: cfg}));
   await ctx.route(/fonts\.g/, r => r.abort());
@@ -985,6 +989,130 @@ const dbOf = p => p.evaluate(() => JSON.parse(localStorage.getItem("__fb")));
   );
   await p.evaluate(() => {
     for (const k of ["lo01", "lo02", "lo03"]) col("spools").doc(k).delete();
+    location.hash = "stock";
+  });
+  await p.waitForSelector(".racks");
+
+  // sorting the list, and a note on a spool
+  await p.selectOption("#sortSel", "least");
+  const byLeft = await p.$$eval("#spoolList .row", e =>
+    e.map(x => parseInt(x.querySelectorAll(".end .mono")[1].textContent)),
+  );
+  ok(
+    byLeft.length > 2 && byLeft.every((v, i) => !i || byLeft[i - 1] <= v),
+    "least left first sorts by weight: " + byLeft.slice(0, 5),
+  );
+  await p.reload();
+  await p.waitForSelector("#sortSel");
+  ok((await p.inputValue("#sortSel")) === "least", "the byLeft is remembered");
+  await p.selectOption("#sortSel", "code");
+  const noteId = await p.evaluate(() => liveSpools()[0].id);
+  await p.evaluate(id => {
+    location.hash = "edit-" + id;
+  }, noteId);
+  await p.waitForSelector("#f_note");
+  await p.fill("#f_note", "Brittle, dry before use");
+  await p.click("#saveSpool");
+  await p.waitForSelector(".spoolnote");
+  ok((await p.textContent(".spoolnote")) === "Brittle, dry before use", "a note is kept and shown on the spool");
+  await p.keyboard.press("/");
+  await p.waitForFunction(() => document.activeElement && document.activeElement.id === "q");
+  ok(
+    await p.evaluate(() => document.activeElement.id === "q" && S.view === "stock"),
+    "pressing / jumps to the stock search",
+  );
+  await p.keyboard.type("brittle");
+  ok((await p.$$("#spoolList .row")).length === 1, "notes are searched too");
+  await p.fill("#q", "");
+
+  // Setup folds, and the theme
+  await p.evaluate(() => {
+    localStorage.removeItem("setupOpen");
+    location.hash = "setup";
+  });
+  await p.waitForSelector("[data-sect=storages]");
+  const openNow = () => p.$$eval("[data-sect]", e => e.filter(d => d.open).map(d => d.dataset.sect));
+  ok((await openNow()).join() === "storages,printers", "Setup opens with only storages and printers unfolded");
+  await p.click("[data-sect=backup] summary");
+  await p.click("[data-sect=storages] summary");
+  await p.waitForTimeout(100);
+  await p.reload();
+  await p.waitForSelector("[data-sect=backup]");
+  ok((await openNow()).join() === "printers,backup", "the sections you open and close are remembered");
+  await p.click("[data-sect=look] summary");
+  await p.selectOption("#themeSel", "dark");
+  ok((await p.evaluate(() => document.documentElement.dataset.theme)) === "dark", "the theme can be set to dark");
+  await p.reload();
+  await p.waitForSelector("[data-sect=look]");
+  ok((await p.evaluate(() => document.documentElement.dataset.theme)) === "dark", "and stays set");
+  await p.selectOption("#themeSel", "");
+  ok((await p.evaluate(() => document.documentElement.dataset.theme)) === undefined, "or follows the device again");
+
+  // backup and restore
+  const [bk] = await Promise.all([p.waitForEvent("download"), p.click("[data-act=json]")]);
+  await bk.saveAs(out + "/backup.json");
+  const bkData = JSON.parse(fs.readFileSync(out + "/backup.json", "utf8"));
+  ok(
+    bkData.version === 2 && Object.keys(bkData.printers).length > 0 && Object.keys(bkData.jobs).length > 0,
+    "the full backup includes printers and prints",
+  );
+  const goneId = Object.keys(bkData.spools)[1];
+  await p.evaluate(id => {
+    col("spools").doc(id).delete();
+    col("spools").doc("extra1").set({
+      brand: "X",
+      material: "PLA",
+      colour: "Later",
+      hex: "#111111",
+      netG: 1000,
+      remainG: 500,
+      status: "active",
+      loc: null,
+    });
+    col("spools")
+      .doc(liveSpools().find(s => s.id !== id && s.id !== "extra1").id)
+      .update({remainG: 7});
+  }, goneId);
+  await p.setInputFiles("#pickBackup", {
+    name: "notes.json",
+    mimeType: "application/json",
+    buffer: Buffer.from('{"a":1}'),
+  });
+  await p.waitForFunction(() => /isn't a Spool Stock backup/.test(document.querySelector("#toast").textContent));
+  ok(true, "a file that isn't a backup is refused");
+  await p.setInputFiles("#pickBackup", out + "/backup.json");
+  await p.waitForSelector("[data-act=restoreAdd]");
+  ok(/spools/.test(await p.textContent("[data-sect=backup]")), "choosing a backup says what it holds first");
+  await p.click("[data-act=restoreAdd]");
+  await p.waitForTimeout(200);
+  db = await dbOf(p);
+  const changedOne = Object.entries(db).find(([k, v]) => k.startsWith(uid + "spools/") && v.remainG === 7);
+  ok(
+    db[uid + "spools/" + goneId] && db[uid + "spools/extra1"] && changedOne,
+    "Add what's missing puts a deleted spool backNow and leaves everything else alone",
+  );
+  await p.setInputFiles("#pickBackup", out + "/backup.json");
+  await p.click("[data-act=restoreAll]");
+  await p.waitForSelector("#modal:not([hidden])");
+  await p.keyboard.press("Escape");
+  ok(await p.$eval("#modal", e => e.hidden), "Esc closes the question without doing anything");
+  await p.click("[data-act=restoreAll]");
+  await p.click("#askBtns .bad");
+  await p.waitForTimeout(250);
+  db = await dbOf(p);
+  const backNow = Object.fromEntries(
+    Object.entries(db)
+      .filter(([k]) => k.startsWith(uid + "spools/"))
+      .map(([k, v]) => [k.split("/").pop(), v.remainG]),
+  );
+  ok(
+    !db[uid + "spools/extra1"] &&
+      Object.keys(backNow).length === Object.keys(bkData.spools).length &&
+      Object.entries(bkData.spools).every(([id, v]) => backNow[id] === v.remainG),
+    "Replace everything makes the stock exactly what the backup held",
+  );
+  await p.evaluate(() => {
+    localStorage.setItem("setupOpen", '"all"');
     location.hash = "stock";
   });
   await p.waitForSelector(".racks");

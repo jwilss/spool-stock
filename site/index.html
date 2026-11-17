@@ -153,7 +153,7 @@ p {
   gap: 18px;
   align-content: start;
   min-width: 0;
-  max-width: 980px;
+  max-width: 1180px;
   width: 100%;
   margin-inline: auto;
 }
@@ -1142,6 +1142,53 @@ input[type="color"] {
   color: var(--bad);
   font-weight: 600;
 }
+@media (min-width: 1100px) {
+  .list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.searchrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.searchrow select {
+  width: auto;
+}
+/* Setup's sections fold away, so the page is a short list of headings until one is opened */
+.fold {
+  display: block;
+}
+.fold > summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.fold > summary::-webkit-details-marker {
+  display: none;
+}
+.fold > summary::after {
+  content: "+";
+  font: 700 24px/1 var(--disp);
+  color: var(--muted);
+}
+.fold[open] > summary::after {
+  content: "\2212";
+}
+.fold > summary:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.fold > * + * {
+  margin-top: 12px;
+}
+.spoolnote {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 /* usage */
 .stats {
   display: grid;
@@ -1346,6 +1393,7 @@ input[type="color"] {
 <input type="file" id="pickLogo" accept="image/*" hidden>
 <input type="file" id="pickPrint" accept=".3mf,.gcode,.gco,.bgcode" hidden>
 <input type="file" id="pickImport" accept=".json,application/json,text/plain" hidden>
+<input type="file" id="pickBackup" accept=".json,application/json" hidden>
 
 <script src="config.js"></script>
 <script src="vendor/qrcode.js"></script>
@@ -1383,6 +1431,17 @@ input[type="color"] {
 const CFG = window.SPOOL_CONFIG || {};
 const PAGE_URL = CFG.siteUrl || location.origin + location.pathname;
 const IS_APP = /SpoolStockApp/.test(navigator.userAgent);
+
+/* Light or dark, chosen in Setup and kept on this device. With no choice made, the page follows the device. */
+function applyTheme() {
+  let t = null;
+  try {
+    t = JSON.parse(localStorage.getItem("theme"));
+  } catch {}
+  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
+applyTheme();
 
 /* ==========================================================================================================
    Reference data
@@ -2861,6 +2920,11 @@ function render() {
       : S.stale
         ? `<div class="note warn">Showing your last saved copy. It may be out of date.</div>`
         : "") + v();
+  if (S.view === "stock" && S.focusSearch) {
+    S.focusSearch = false;
+    $("#q")?.focus();
+    $("#q")?.select();
+  }
   if (S.view === "scan") Scanner.attach();
   if (S.view === "add" || S.view === "edit") formPreview();
   if (S.view === "store" && storeEdit) storePreview();
@@ -2936,7 +3000,12 @@ function vStock() {
   return `<div class="cardhead"><div class="summary">${live.length} spool${live.length === 1 ? "" : "s"}, ${kg.toFixed(1)} kg${low ? `, ${low} low` : ""}</div>${live.length ? `<button class="btn sm" data-go="log">Log a print</button>` : ""}</div>
   ${racks || `<div class="racks"><div class="card"><h2>Set up your storage</h2><p>Add each place you keep filament, such as a multi-material unit, a dryer or a shelf.</p><div class="btns"><button class="btn go" data-go="store-new">Add a storage</button></div></div></div>`}
   <div class="tools">
-    <input type="search" id="q" aria-label="Search spools" placeholder="Search brand, material, colour or code" value="${esc(f.q)}">
+    <div class="searchrow">
+      <input type="search" id="q" aria-label="Search spools" placeholder="Search brand, material, colour or code" value="${esc(f.q)}">
+      <select id="sortSel" aria-label="Sort spools">${Object.entries(SORTS)
+        .map(([k, o]) => `<option value="${k}" ${k === stockSort() ? "selected" : ""}>${o.label}</option>`)
+        .join("")}</select>
+    </div>
     <div class="chips">
       ${[
         ["active", "All"],
@@ -2959,9 +3028,22 @@ const emptyList = n =>
 /* One spool as a row in a list. */
 function rowHTML(s) {
   const p = Math.round(pct(s) * 100);
-  return `<button class="row" data-go="${s.id}">${disc(s)}<span style="min-width:0"><b>${esc(s.material)} ${esc(s.colour || "")}</b><span class="sub">${esc(s.brand)}, ${esc(s.status === "used" ? "used up" : spotName(s))}</span></span><span class="end"><span class="mono">${esc(s.id.toUpperCase())}</span><br>${isLow(s) && s.status !== "used" ? `<span class="pill low">Low</span>` : `<span class="mono">${s.remainG ?? s.netG ?? "?"} g</span>`}</span></button>`;
+  return `<button class="row" data-go="${s.id}">${disc(s)}<span style="min-width:0"><b>${esc(s.material)} ${esc(s.colour || "")}</b><span class="sub">${esc(s.brand)}, ${esc(s.status === "used" ? "used up" : spotName(s))}</span></span><span class="end"><span class="mono">${esc(s.id.toUpperCase())}</span><br><span class="mono">${s.remainG ?? s.netG ?? "?"} g</span>${isLow(s) && s.status !== "used" ? ` <span class="pill low">Low</span>` : ""}</span></button>`;
 }
 
+/* The orders the spool list can be put in. Ties fall back to the spool code. */
+const left = s => s.remainG ?? s.netG ?? 0;
+const SORTS = {
+  code: {label: "By code", by: () => 0},
+  least: {label: "Least left first", by: (a, b) => left(a) - left(b)},
+  most: {label: "Most left first", by: (a, b) => left(b) - left(a)},
+  name: {
+    label: "By material",
+    by: (a, b) => `${a.material} ${a.colour}`.localeCompare(`${b.material} ${b.colour}`),
+  },
+  newest: {label: "Newest first", by: (a, b) => (b.addedAt || 0) - (a.addedAt || 0)},
+};
+const stockSort = () => (SORTS[local.get("stockSort")] ? local.get("stockSort") : "code");
 /* The spool list under the board, after the search box and chips have been applied. */
 function stockRows() {
   const f = S.filter,
@@ -2971,11 +3053,14 @@ function stockRows() {
     .filter(s => {
       if (f.tab === "low" && !isLow(s)) return false;
       if (f.mat && (baseMat(s.material)?.key || s.material) !== f.mat) return false;
-      if (q && ![s.id, s.brand, s.material, s.colour, s.finish, spotName(s)].join(" ").toLowerCase().includes(q))
+      if (
+        q &&
+        ![s.id, s.brand, s.material, s.colour, s.finish, s.note, spotName(s)].join(" ").toLowerCase().includes(q)
+      )
         return false;
       return true;
     })
-    .sort((a, b) => a.id.localeCompare(b.id));
+    .sort((a, b) => SORTS[stockSort()].by(a, b) || a.id.localeCompare(b.id));
   return rows.map(rowHTML).join("") || emptyList(live.length);
 }
 
@@ -3028,6 +3113,7 @@ function vSpool() {
     const fd = feedOf(s);
     return fd ? `<div class="note">Feeding ${esc(fd.label)}</div>` : "";
   })()}
+  ${s.note ? `<div class="note spoolnote">${esc(s.note)}</div>` : ""}
   ${scanned ? `<div class="note"><b>Scanned.</b> Tap a storage below, or scan a storage sticker in the next 5 minutes to file it there.</div>` : ""}
   <div class="card"><h2>Move to</h2>${spaces}${moves || `<div class="btns"><button class="btn" data-go="store-new">Add a storage first</button></div>`}</div>
   <div class="split">
@@ -3285,6 +3371,7 @@ function blankDraft() {
     left: 1000,
     dia: 1.75,
     tareG: "",
+    note: "",
     loc: "",
     qty: 1,
     nMin: null,
@@ -3319,6 +3406,7 @@ function editDraft(id) {
     left: Math.min(FULL_G, s.remainG ?? s.netG ?? FULL_G),
     dia: s.dia || 1.75,
     tareG: s.tareG || "",
+    note: s.note || "",
     loc: s.loc || "",
     nMin: s.nMin,
     nMax: s.nMax,
@@ -3370,6 +3458,7 @@ function vForm() {
         <label class="field"><span>Goes in</span><select id="f_loc"><option value="">No storage yet</option>${opts}</select></label>
         ${e ? `<label class="field"><span>Diameter (mm)</span><input type="number" step="0.01" id="f_dia" value="${esc(spoolEdit.dia)}"></label>` : `<label class="field"><span>How many identical spools</span><input type="number" inputmode="numeric" min="1" max="20" id="f_qty" value="${esc(spoolEdit.qty)}"></label>`}
       </div>
+      <label class="field"><span>Note</span><input type="text" id="f_note" maxlength="300" autocomplete="off" placeholder="Anything worth remembering about this spool" value="${esc(spoolEdit.note)}"></label>
       <h3>Print settings</h3>
       <div class="g4">
         <label class="field"><span>Nozzle min</span><input type="number" inputmode="numeric" id="f_nMin" value="${esc(spoolEdit.nMin)}"></label>
@@ -3396,6 +3485,7 @@ const fields = [
   "pattern",
   "left",
   "tareG",
+  "note",
   "loc",
   "qty",
   "dia",
@@ -3621,6 +3711,9 @@ async function submitForm() {
     netG: FULL_G,
     remainG: leftOf(spoolEdit.left),
     tareG: num(spoolEdit.tareG),
+    note: String(spoolEdit.note || "")
+      .trim()
+      .slice(0, 300),
     dia: num(spoolEdit.dia) || 1.75,
     nMin: num(spoolEdit.nMin),
     nMax: num(spoolEdit.nMax),
@@ -4279,6 +4372,96 @@ function storeSummary(l) {
     .filter(Boolean)
     .join(", ");
 }
+/* Setup's sections fold shut. Which are open is remembered on this device, starting with the first two.
+   fold() turns a card into a folding section, and force keeps one open while something in it is in progress. */
+const SETUP_OPEN = ["storages", "printers"];
+const setupOpen = () => {
+  const v = local.get("setupOpen");
+  return v === "all" ? null : Array.isArray(v) ? v : SETUP_OPEN;
+};
+function fold(id, card, force) {
+  const open = setupOpen(),
+    isOpen = force || !open || open.includes(id);
+  return card
+    .replace(
+      /^<div class="card"><h2>(.*?)<\/h2>/,
+      (m, title) =>
+        `<details class="card fold" data-sect="${id}" ${isOpen ? "open" : ""}><summary><h2>${title}</h2></summary>`,
+    )
+    .replace(/<\/div>\s*$/, "</details>");
+}
+
+/* Restoring a backup. restoreJob holds a backup file that has been chosen and checked, until you say what
+   to do with it. The parts of a backup are Firestore collections, each kept in S under its own key. */
+let restoreJob = null;
+const BACKUP_PARTS = [
+  ["spools", "spools"],
+  ["locations", "locs"],
+  ["brands", "brands"],
+  ["profiles", "profiles"],
+  ["printers", "printers"],
+  ["jobs", "jobs"],
+];
+function readBackup(text, name) {
+  let d;
+  try {
+    d = JSON.parse(text);
+  } catch {
+    throw "That file isn't a Spool Stock backup.";
+  }
+  if (!d || typeof d !== "object" || !d.spools || typeof d.spools !== "object" || Array.isArray(d.spools))
+    throw "That file isn't a Spool Stock backup. Use one saved with Download full backup.";
+  const words = {spools: "spool", locations: "storage", brands: "manufacturer", profiles: "saved setting"};
+  const parts = [];
+  for (const [part] of BACKUP_PARTS) {
+    const docs = d[part];
+    if (!docs || typeof docs !== "object" || Array.isArray(docs)) {
+      d[part] = null;
+      continue;
+    }
+    for (const id of Object.keys(docs))
+      if (!/^[\w-]{1,80}$/.test(id) || !docs[id] || typeof docs[id] !== "object") delete docs[id];
+    const n = Object.keys(docs).length;
+    if (n) parts.push(plural(n, words[part] || part.replace(/s$/, "")));
+  }
+  const saved = d.saved && !isNaN(Date.parse(d.saved)) ? when(Date.parse(d.saved)) : "at an unknown time";
+  return {data: d, name, saved, summary: parts.join(", ")};
+}
+/* Writes a backup back. With replace, anything not in the backup is removed, and its settings are used too. */
+async function runRestore(replace) {
+  const d = restoreJob.data;
+  let put = 0,
+    gone = 0;
+  for (const [part, key] of BACKUP_PARTS) {
+    const docs = d[part];
+    if (!docs) continue;
+    for (const [id, doc] of Object.entries(docs)) {
+      if (!replace && S[key][id]) continue;
+      const body = {...doc};
+      delete body.id;
+      col(part).doc(id).set(body);
+      put++;
+    }
+    if (replace)
+      for (const id of Object.keys(S[key]))
+        if (!docs[id]) {
+          col(part).doc(id).delete();
+          gone++;
+        }
+  }
+  if (d.config && typeof d.config === "object" && (replace || !Object.keys(S.settings).length))
+    db.doc("config/main").set(d.config);
+  restoreJob = null;
+  render();
+  toast(
+    replace
+      ? `Restored. ${put} put back${gone ? `, ${gone} removed` : ""}.`
+      : put
+        ? `Added ${put} that ${put === 1 ? "was" : "were"} missing.`
+        : "Nothing was missing, so nothing changed.",
+  );
+}
+
 /* The Setup page. */
 function vSetup() {
   const ls = orderedLocs();
@@ -4289,12 +4472,24 @@ function vSetup() {
     )
     .join("");
   const bs = Object.values(S.brands).sort((a, b) => a.name.localeCompare(b.name));
+  const theme = local.get("theme") || "";
+  const backup = restoreJob
+    ? `<div class="note"><b>${esc(restoreJob.name)}</b>, saved ${esc(restoreJob.saved)}. It holds ${esc(restoreJob.summary)}.</div>
+      <div class="btns"><button class="btn go" data-act="restoreAdd">Add what's missing</button><button class="btn bad" data-act="restoreAll">Replace everything</button><button class="btn" data-act="restoreCancel">Cancel</button></div>
+      <p class="hint">Add what's missing puts back anything in the backup that isn't in your stock now, and changes nothing else. Replace everything makes your stock exactly what the backup holds.</p>`
+    : `<div class="btns"><button class="btn" data-act="csv">Download spool list (CSV)</button><button class="btn" data-act="json">Download full backup (JSON)</button><label class="btn" for="pickBackup">Restore from a backup</label></div>
+      <p class="hint">The full backup holds your spools, storages, printers, prints, logos and settings.</p>`;
   return `<div><h1>Setup</h1></div>
-  <div class="card"><div class="cardhead"><h2>Storages</h2><button class="btn sm go" data-go="store-new">Add storage</button></div>
+  ${fold(
+    "storages",
+    `<div class="card"><h2>Storages</h2><div class="btns"><button class="btn sm go" data-go="store-new">Add storage</button></div>
     ${rows || "<p>Nothing set up yet. Add each place you keep filament.</p>"}
     ${rows ? `<div class="btns"><button class="btn" data-act="printAllLocs">Queue all storage stickers</button><button class="btn bad" data-act="storesClear">Remove all storages</button></div>` : ""}
-  </div>
-  <div class="card"><div class="cardhead"><h2>Printers</h2><button class="btn sm go" data-go="printer-new">Add printer</button></div>
+  </div>`,
+  )}
+  ${fold(
+    "printers",
+    `<div class="card"><h2>Printers</h2><div class="btns"><button class="btn sm go" data-go="printer-new">Add printer</button></div>
     ${
       orderedPrinters()
         .map(
@@ -4304,8 +4499,11 @@ function vSetup() {
         .join("") ||
       "<p>Add your printers and say which storage feeds each one, so prints can be matched to spools.</p>"
     }
-  </div>
-  <div class="card"><h2>Manufacturers and logos</h2>
+  </div>`,
+  )}
+  ${fold(
+    "logos",
+    `<div class="card"><h2>Manufacturers and logos</h2>
     ${bs.length ? `<div class="btns"><button class="btn go" data-act="logosAll">Find missing logos</button></div>` : ""}
     ${
       bs
@@ -4317,16 +4515,33 @@ function vSetup() {
     }
     ${crop ? cropHTML() : ""}
     ${logoPicker ? logoPanel() : ""}
-
-  </div>
-  ${pluginCard()}
-  ${orcaCard()}
-  <div class="card"><h2>Spool Reader</h2><p>Reads labels and identifies spools from photos. Give it your stock list so it can check against what you own.</p>
+  </div>`,
+    !!(crop || logoPicker),
+  )}
+  ${fold("plugin", pluginCard())}
+  ${fold("presets", orcaCard())}
+  ${fold(
+    "reader",
+    `<div class="card"><h2>Spool Reader</h2><p>Reads labels and identifies spools from photos. Give it your stock list so it can check against what you own.</p>
     <div class="btns">${CFG.readerUrl ? `<a class="btn" href="${esc(CFG.readerUrl)}" target="_blank" rel="noopener">Open Spool Reader</a>` : ""}<button class="btn" data-act="listCopy">Copy stock list</button><button class="btn" data-act="listSave">Download stock list</button><button class="btn" data-go="import">Import spools</button></div>
-  </div>
-  ${CFG.repo && !IS_APP ? `<div class="card"><h2>Apps</h2><p>The Android app and Windows exe are on the releases page.</p><div class="btns"><a class="btn" href="https://github.com/${esc(CFG.repo)}/releases/latest" target="_blank" rel="noopener">Open releases</a></div></div>` : ""}
-  <div class="card"><h2>Account</h2><p>${esc(firebase.auth().currentUser?.email || "")}</p><div class="btns"><button class="btn" data-act="signOut">Sign out</button></div></div>
-  <div class="card"><h2>Backup</h2><div class="btns"><button class="btn" data-act="csv">Download spool list (CSV)</button><button class="btn" data-act="json">Download full backup (JSON)</button></div></div>`;
+  </div>`,
+  )}
+  ${fold(
+    "look",
+    `<div class="card"><h2>Appearance</h2>
+    <label class="field"><span>Theme, on this device</span><select id="themeSel">${[
+      ["", "Follow this device"],
+      ["light", "Light"],
+      ["dark", "Dark"],
+    ]
+      .map(([k, t]) => `<option value="${k}" ${theme === k ? "selected" : ""}>${t}</option>`)
+      .join("")}</select></label>
+    <p class="hint">On a keyboard, press / to search your stock from anywhere, and Esc to close a question.</p>
+  </div>`,
+  )}
+  ${CFG.repo && !IS_APP ? fold("apps", `<div class="card"><h2>Apps</h2><p>The Android app and Windows exe are on the releases page.</p><div class="btns"><a class="btn" href="https://github.com/${esc(CFG.repo)}/releases/latest" target="_blank" rel="noopener">Open releases</a></div></div>`) : ""}
+  ${fold("account", `<div class="card"><h2>Account</h2><p>${esc(firebase.auth().currentUser?.email || "")}</p><div class="btns"><button class="btn" data-act="signOut">Sign out</button></div></div>`)}
+  ${fold("backup", `<div class="card"><h2>Backup</h2>${backup}</div>`, !!restoreJob)}`;
 }
 
 /* ==========================================================================================================
@@ -5428,6 +5643,23 @@ const actions = {
   jobUndo(el) {
     undoJob(el.dataset.v);
   },
+  restoreAdd() {
+    runRestore(false);
+  },
+  restoreAll() {
+    ask(
+      "Replace everything?",
+      `Your stock becomes exactly what ${restoreJob.name} holds: ${restoreJob.summary}. Anything added since that backup is removed. Download a full backup of today's stock first if you might want it back.`,
+      [
+        ["Replace everything", () => runRestore(true), "bad"],
+        ["Cancel", null],
+      ],
+    );
+  },
+  restoreCancel() {
+    restoreJob = null;
+    render();
+  },
   usageRange(el) {
     local.set("usageRange", el.dataset.v);
     render();
@@ -5898,11 +6130,15 @@ const actions = {
       "spool-stock-backup.json",
       JSON.stringify(
         {
+          format: "spool-stock-backup",
+          version: 2,
           saved: new Date().toISOString(),
           spools: S.spools,
           locations: S.locs,
           brands: S.brands,
           profiles: S.profiles,
+          printers: S.printers,
+          jobs: S.jobs,
           config: S.settings,
         },
         null,
@@ -6022,6 +6258,29 @@ document.addEventListener("change", async e => {
   }
   if (t.id === "lpPct" && printLog) {
     printLog.pct = t.value;
+    return;
+  }
+  if (t.id === "pickBackup" && t.files[0]) {
+    const f = t.files[0];
+    t.value = "";
+    try {
+      restoreJob = readBackup(await f.text(), f.name);
+      render();
+    } catch (m) {
+      toast(String(m));
+    }
+    return;
+  }
+  if (t.id === "sortSel") {
+    local.set("stockSort", t.value);
+    const box = $("#spoolList");
+    if (box) box.innerHTML = stockRows();
+    return;
+  }
+  if (t.id === "themeSel") {
+    if (t.value) local.set("theme", t.value);
+    else local.del("theme");
+    applyTheme();
     return;
   }
   if (t.id === "pickImport" && t.files[0]) {
@@ -6183,6 +6442,32 @@ addEventListener("paste", e => {
     p.dispatchEvent(new Event("change", {bubbles: true}));
   }
 });
+/* Setup remembers which of its sections are open. Saved on the click itself, before the section moves, so a
+   redraw that lands in between can't put it back. */
+document.addEventListener("click", e => {
+  const sum = e.target.closest && e.target.closest(".fold > summary");
+  if (!sum) return;
+  const sect = sum.parentElement,
+    all = [...document.querySelectorAll("[data-sect]")].map(d => d.dataset.sect),
+    open = new Set(setupOpen() || all);
+  if (sect.open) open.delete(sect.dataset.sect);
+  else open.add(sect.dataset.sect);
+  local.set("setupOpen", [...open]);
+});
+/* Keyboard: / searches the stock from anywhere, Esc closes a question. */
+addEventListener("keydown", e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "");
+  if (e.key === "Escape" && !$("#modal").hidden) {
+    $("#modal").hidden = true;
+    return;
+  }
+  if (e.key !== "/" || typing || e.ctrlKey || e.metaKey || e.altKey || !db || !S.ready) return;
+  e.preventDefault();
+  S.focusSearch = true;
+  if (S.view === "stock") render();
+  else go("stock");
+});
+
 /* One tooltip for anything carrying data-tip (the figure) and data-tip2 (what it is), shown on hover, tap
    and keyboard focus. Text goes in with textContent, as print names come from files. */
 function showTip(el) {

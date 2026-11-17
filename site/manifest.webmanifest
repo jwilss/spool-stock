@@ -7,7 +7,37 @@
   "background_color": "#101518",
   "theme_color": "#FFC800",
   "icons": [
-    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
-    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"}
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "description": "A filament inventory built around QR stickers.",
+  "shortcuts": [
+    {
+      "name": "Scan a sticker",
+      "short_name": "Scan",
+      "url": "./#scan"
+    },
+    {
+      "name": "Add a spool",
+      "short_name": "Add",
+      "url": "./#add"
+    },
+    {
+      "name": "Log a print",
+      "short_name": "Log",
+      "url": "./#log"
+    },
+    {
+      "name": "Usage",
+      "url": "./#usage"
+    }
   ]
 }

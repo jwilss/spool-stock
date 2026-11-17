@@ -1,7 +1,7 @@
 // Keeps the app opening with no signal. Tries the network first so updates arrive,
 // and falls back to the saved copy when the network is missing or too slow. Its own files are always
 // checked with the server (a quick "has this changed" check), so a new version shows on the next open.
-const CACHE = "spool-stock-v4";
+const CACHE = "spool-stock-v5";
 const FILES = [
   "./",
   "index.html",
