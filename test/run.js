@@ -817,10 +817,17 @@ const dbOf = p => p.evaluate(() => JSON.parse(localStorage.getItem("__fb")));
       .set({at, printer: "Alpha", job: "Bracket", pct: 100, items: [{spool: s.id, g: 12}], source: "orca"});
     return {id: s.id, g0};
   });
+  await p.waitForSelector("[data-go=usage].btn");
+  ok(true, "Setup's plugin card points to the prints in Usage");
+  await p.click("[data-nav=usage]");
   await p.waitForSelector("[data-act=jobUndo]");
   ok(
     (await p.textContent("#main")).includes("12 g off " + js.id.toUpperCase()),
-    "Setup lists prints the plugin took off",
+    "Usage lists prints the plugin took off",
+  );
+  ok(
+    (await p.$$(".stat")).length === 3 && (await p.$$(".colslot")).length === 12,
+    "Usage shows totals and a chart, over 12 weeks to start with",
   );
   await p.click("[data-act=jobUndo]");
   await p.waitForTimeout(200);
@@ -906,6 +913,81 @@ const dbOf = p => p.evaluate(() => JSON.parse(localStorage.getItem("__fb")));
   await p.waitForTimeout(150);
   db = await dbOf(p);
   ok(db[uid + "spools/" + pick].remainG === w0, "undo puts the weight back");
+  const manual = Object.entries(db).filter(([k, v]) => k.startsWith(uid + "jobs/m-"));
+  ok(
+    manual.length === 2 && manual.some(([, v]) => v.undone) && manual.every(([, v]) => v.source === "manual"),
+    "prints logged by hand are kept as records too, and Undo marks one undone",
+  );
+
+  // the Usage page
+  await p.click("[data-nav=usage]");
+  await p.waitForSelector(".chart");
+  const used = await p.evaluate(() =>
+    allPrints()
+      .filter(x => !x.undone && x.at > Date.now() - 864e5)
+      .reduce((a, x) => a + x.g, 0),
+  );
+  ok(
+    used > 0 && (await p.textContent(".stats")).includes(Math.round(used) + " g"),
+    "today's prints are in the total: " + used,
+  );
+  ok((await p.textContent(".ranked")).includes("PLA"), "split by material");
+  ok((await p.textContent("#main")).includes("Logged by hand"), "and by printer, with hand-logged prints named");
+  await p.hover(".colslot:last-child");
+  ok(
+    !(await p.$eval("#tip", e => e.hidden)) && /print/.test(await p.textContent("#tip")),
+    "a column shows its figures on hover: " + (await p.textContent("#tip")),
+  );
+  await p.click("[data-act=usageRange][data-v='30d']");
+  ok((await p.$$(".colslot")).length === 30, "30 days shows a column a day");
+  await p.reload();
+  await p.waitForSelector(".chart");
+  ok((await p.$$(".colslot")).length === 30, "the period is remembered");
+  await p.click("[data-act=usageRange][data-v='12w']");
+  ok((await p.$$(".tableview tbody tr")).length === 12, "the same figures are there as a table");
+  await p.evaluate(() => {
+    col("spools").doc("lo01").set({
+      brand: "Sunlu",
+      material: "PLA",
+      colour: "Teal",
+      hex: "#008080",
+      netG: 1000,
+      remainG: 90,
+      status: "active",
+      loc: null,
+    });
+    col("spools").doc("lo02").set({
+      brand: "Sunlu",
+      material: "PETG",
+      colour: "Pink",
+      hex: "#ff88aa",
+      netG: 1000,
+      remainG: 60,
+      status: "active",
+      loc: null,
+    });
+    col("spools").doc("lo03").set({
+      brand: "Sunlu",
+      material: "PETG",
+      colour: "Pink",
+      hex: "#ff88aa",
+      netG: 1000,
+      remainG: 900,
+      status: "active",
+      loc: null,
+    });
+  });
+  await p.waitForFunction(() => /Running low/.test(document.querySelector("#main").textContent));
+  const lowT = await p.evaluate(() => lowText());
+  ok(
+    /Sunlu PLA, Teal \(90 g left\)/.test(lowT) && !/Pink/.test(lowT),
+    "running low lists a filament only when every spool of it is low: " + lowT.replace(/\n/g, "; "),
+  );
+  await p.evaluate(() => {
+    for (const k of ["lo01", "lo02", "lo03"]) col("spools").doc(k).delete();
+    location.hash = "stock";
+  });
+  await p.waitForSelector(".racks");
 
   // ring size follows a real 1 kg roll
   const radius = await p.evaluate(() =>
