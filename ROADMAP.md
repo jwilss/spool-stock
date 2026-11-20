@@ -112,7 +112,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [ ] Stock view on the real Orca
 - [ ] Plugin 1.4.0 on the real Orca: the Update button when the next version is published (can the plugin replace its own file? `update.installed` or `update.failed` in the log), and clicking a spool opening the browser
 - [ ] Plugin 1.3.1: open Orca with both printers off (no freeze, tab says they may be switched off), then switch them on (they connect without pressing Connect)
-- [ ] Plugin 1.3.0 Cameras with Jack's Tapo cameras: picture appears, keeps up live, and stops when the view is left (`camera.connected`, `camera.video` and `camera.stopped` in the log)
+- [x] Plugin Cameras with Tapo cameras on a real Orca (confirmed 20 Nov 2026)
 - [ ] Log a print with a real Orca export from each printer
 - [ ] Import the Orca presets zip into Orca, and Send to Orca from the rebuilt Windows app, including the filament list
 - [ ] Camera inside the APK
