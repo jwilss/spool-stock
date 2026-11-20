@@ -6,6 +6,10 @@ from urllib.parse import urlparse, parse_qs
 import shutil
 
 TOOLS = ["openssl", "ffmpeg", "ffprobe", "node"]
+# The Windows OpenSSL installer puts it in its own folder without adding that to the PATH, so look there too.
+_ossl = Path(os.environ.get("ProgramFiles", r"C:\Program Files"), "OpenSSL-Win64", "bin")
+if os.name == "nt" and not shutil.which("openssl") and (_ossl / "openssl.exe").exists():
+    os.environ["PATH"] = str(_ossl) + os.pathsep + os.environ["PATH"]
 # Stop with a clear message if a tool the test needs isn't installed (on Windows: see SETUP.md).
 missing = [t for t in TOOLS if not shutil.which(t)]
 if missing:
@@ -1220,6 +1224,19 @@ ok(
     and 'username="printer cam"' in auth_used[1],
     "signs in with Digest when the camera asks, over Basic",
 )
+# Ask as a page that opens later would, before the slower ffprobe and ffmpeg checks below: the test lets a camera
+# go after 3 s without asking, and on Windows those two can take that long on a new file.
+late = plug.handle({"type": "cams", "want": [{"id": cid, "gen": 0, "seq": -1}]})["cams"][0]
+ok(
+    late.get("init")
+    and plug.mp4_init(SPS, PPS)[0] == base64.b64decode(late["init"])
+    and late["chunks"]
+    and (base64.b64decode(late["chunks"][0])[4:8] == b"moof"),
+    "a page that opens later gets the header and starts from a keyframe",
+)
+first = base64.b64decode(late["chunks"][0])
+trun = first.index(b"trun")
+ok(struct.unpack(">I", first[trun + 24 : trun + 28])[0] == 0x02000000, "and that first frame is a keyframe")
 mp4 = tmp / "cam.mp4"
 mp4.write_bytes(b"".join(got))
 pr = json.loads(
@@ -1244,17 +1261,6 @@ ok(
     "decodes without errors" + (": " + dec.stderr[:200] if dec.stderr.strip() else ""),
 )
 (tmp / "cam-replies.json").write_text(json.dumps([r for r in replies if r.get("init") or r.get("chunks")]))
-late = plug.handle({"type": "cams", "want": [{"id": cid, "gen": 0, "seq": -1}]})["cams"][0]
-ok(
-    late.get("init")
-    and plug.mp4_init(SPS, PPS)[0] == base64.b64decode(late["init"])
-    and late["chunks"]
-    and (base64.b64decode(late["chunks"][0])[4:8] == b"moof"),
-    "a page that opens later gets the header and starts from a keyframe",
-)
-first = base64.b64decode(late["chunks"][0])
-trun = first.index(b"trun")
-ok(struct.unpack(">I", first[trun + 24 : trun + 28])[0] == 0x02000000, "and that first frame is a keyframe")
 playing_before = CAM["playing"]
 time.sleep(plug.CAM_IDLE + 2.5)
 ok(

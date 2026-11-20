@@ -49,7 +49,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - Logos are found once and stored per manufacturer in your account: Simple Icons for exact vector matches, Wikimedia Commons as choices, or your own upload. All are turned solid black on transparent. No API keys.
 - Spool rings are sized like a real 1 kg roll: the filament left is the area between the core and the outside, so a ring shrinks slowly at first and quickly near the core. Anything over 1 kg draws as full.
 - Stickers are black except for the colour box: solid, triangles for split colours, or a left to right blend for gradients.
-- Wide labels use `wideSpoolOps` and `wideLocOps`. Density comes from the catalogue line, the empty spool weight from the spool, then its brand, then the catalogue. The PDF's built-in font has no ³, so it's drawn as a small raised 3. `test/sheet_check.py` checks a printed sheet: each QR code scans inside its own label, nothing lands in the gaps, and where the codes sit and how big they are.
+- Wide labels use `wideSpoolOps` and `wideLocOps`. Density comes from the catalogue line, the empty spool weight from the spool, then its brand, then the catalogue. The PDF's built-in font has no ³, so it's drawn as a small raised 3. `test/sheet_check.js` checks a printed sheet: each QR code scans inside its own label, nothing lands in the gaps, and where the codes sit and how big they are. It reads the codes with the app's own jsQR in overlapping windows, since jsQR finds one code at a time and gets confused by codes that touch.
 - The Firebase key isn't in the repo or its history. Browsers still need it, so it can be read in `config.js` on the live site. The key is restricted to Firebase services, sign-ups are off, and `firestore.rules` protects the data.
 
 ## Done
@@ -95,6 +95,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Search manufacturers, then their own filament names, filling settings, spool weight and colours
 - [x] The jw_ maker's mark at the foot of Setup (dark tile, tag-yellow cursor)
 - [x] The tests run on Windows too: paths with spaces, `python` instead of `python3`, ruff through Python, CRLF line endings, and a clear message when ffmpeg, OpenSSL or Poppler is missing (setup in SETUP.md)
+- [x] First real Windows run (20 Nov 2026), all six suites passing: the sticker sheet check moved from OpenCV (blocked by Smart App Control) to jsQR, the Python suites find OpenSSL in its install folder, and two timing waits allow for Windows taking 2 s to refuse a local connection and longer to start ffmpeg
 
 ## Check on first use
 

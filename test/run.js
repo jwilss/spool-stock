@@ -264,13 +264,16 @@ const dbOf = p => p.evaluate(() => JSON.parse(localStorage.getItem("__fb")));
     ok((await p.$$eval(".sheetmap > *", e => e.length)) === 14, "the 14 per sheet size shows 14 places to start from");
     const [d14] = await Promise.all([p.waitForEvent("download"), p.click("[data-act=pdf]")]);
     await d14.saveAs(out + "/stickers-14.pdf");
-    const r = JSON.parse(
-      python([
-        path.join(__dirname, "sheet_check.py"),
-        path.join(out, "stickers-14.pdf"),
-        ...["99.1", "38.1", "2", "7", "4.65", "15.15", "101.6", "38.1"],
-      ]),
-    );
+    const r = require("./sheet_check.js").sheetCheck(path.join(out, "stickers-14.pdf"), {
+      w: 99.1,
+      h: 38.1,
+      cols: 2,
+      rows: 7,
+      left: 4.65,
+      top: 15.15,
+      stepAcross: 101.6,
+      stepDown: 38.1,
+    });
     ok(
       r.codes >= 5 && r.codes === r.inside && r.pages === 1,
       `99.1 x 38.1 mm sheet: ${r.codes} QR codes scan, each inside its own label (${r.inside} inside), on one A4 page`,

@@ -102,7 +102,7 @@ winget install OpenJS.NodeJS.LTS Gyan.FFmpeg ShiningLight.OpenSSL.Light oschwart
 Close PowerShell and open a new window so it picks up the new tools, then:
 
 ```powershell
-pip install ruff opencv-python numpy
+pip install ruff
 npm install
 npm install --no-save playwright
 npx playwright install chromium
@@ -110,3 +110,5 @@ npm test
 ```
 
 If a suite says it needs a tool that you've just installed, open another new window. The reader suite uses a file the app suite writes, so it only passes once the app suite does.
+
+The OpenSSL installer doesn't add itself to the PATH, so the plugin and probe suites also look in `C:\Program Files\OpenSSL-Win64\bin`. The sticker sheet check reads QR codes with the app's own jsQR rather than OpenCV, as Windows Smart App Control blocks OpenCV's unsigned files.

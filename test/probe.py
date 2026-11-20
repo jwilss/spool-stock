@@ -4,6 +4,10 @@ from pathlib import Path
 import shutil
 
 TOOLS = ["openssl"]
+# The Windows OpenSSL installer puts it in its own folder without adding that to the PATH, so look there too.
+_ossl = Path(os.environ.get("ProgramFiles", r"C:\Program Files"), "OpenSSL-Win64", "bin")
+if os.name == "nt" and not shutil.which("openssl") and (_ossl / "openssl.exe").exists():
+    os.environ["PATH"] = str(_ossl) + os.pathsep + os.environ["PATH"]
 # Stop with a clear message if a tool the test needs isn't installed (on Windows: see SETUP.md).
 missing = [t for t in TOOLS if not shutil.which(t)]
 if missing:
@@ -283,7 +287,13 @@ page.on_lifecycle_event(
 )
 page.on_message({"type": "snapshot"})
 time.sleep(0.5)
-logtext = (tmp / "OrcaSlicer" / "spoolstock-probe" / "probe.log").read_text(encoding="utf-8")
+# Wait for both job file lookups to fail. Nothing listens on their port, and Windows takes about 2 s to refuse a
+# connection on 127.0.0.1 where Linux refuses at once.
+for _ in range(50):
+    logtext = (tmp / "OrcaSlicer" / "spoolstock-probe" / "probe.log").read_text(encoding="utf-8")
+    if logtext.count('"printer.job_file_error"') >= 2:
+        break
+    time.sleep(0.2)
 kinds = [json.loads(l)["kind"] for l in logtext.splitlines()]
 for k in (
     "probe.start",
