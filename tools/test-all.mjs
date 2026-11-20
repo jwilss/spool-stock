@@ -4,7 +4,7 @@
 //   npm test -- app plugin only the named ones
 //
 // Each suite prints PASS or FAIL lines and exits non-zero if anything failed. Details of what each one needs
-// (Playwright, ffmpeg, the camera feed file) are in CLAUDE.md.
+// (Playwright, ffmpeg, OpenSSL, Poppler) are in SETUP.md.
 import {spawnSync} from "node:child_process";
 import path from "node:path";
 import {fileURLToPath} from "node:url";

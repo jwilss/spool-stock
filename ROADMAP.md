@@ -12,13 +12,12 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - `wrappers/windows/`: Electron shell around the site.
 - `.github/workflows/`: `site.yml` adds the Firebase key from the `FIREBASE_API_KEY` secret, refreshes the catalogue and publishes the site. `apps.yml` builds the APK and exe.
 - `firestore.rules`: keeps each account to its own data.
-- `docs/`: images for the README, made with `test/shots.js`. The stickers image is the only one it doesn't make.
 - `tools/format.mjs` and `tools/test-all.mjs`: `npm run format` and `npm test`. `package.json` only holds these developer tools; the app has no build step.
 - `test/`: `run.js` for the app, `reader.js` for Spool Reader, `orca.js` for the Windows Orca bridge, `plugin.py` and `probe.py` for the Orca plugins (`plugin.py` also runs `plugin-tab.js`, which checks the tab's Stock and Presets views in Chromium). They use stand-ins for Firebase, Claude, Orca and the printers.
 - `orca-plugin/spoolstock/`: the OrcaSlicer 2.5 plugin that takes each print off the spools it used.
 - `orca-plugin/probe/`: the read-only test plugin used to find out what Orca and the printers report. Its README has what it found.
 - `SETUP.md`: first time setup.
-- `CLAUDE.md`: house rules, tests, publishing and agreed next steps, read automatically by Claude Code.
+- `CLAUDE.md`: house rules, tests, publishing and agreed next steps, read automatically by Claude Code. Kept locally and git-ignored, so it isn't on GitHub.
 
 ## How it fits together
 
@@ -96,6 +95,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] The jw_ maker's mark at the foot of Setup (dark tile, tag-yellow cursor)
 - [x] The tests run on Windows too: paths with spaces, `python` instead of `python3`, ruff through Python, CRLF line endings, and a clear message when ffmpeg, OpenSSL or Poppler is missing (setup in SETUP.md)
 - [x] First real Windows run (20 Nov 2026), all six suites passing: the sticker sheet check moved from OpenCV (blocked by Smart App Control) to jsQR, the Python suites find OpenSSL in its install folder, and two timing waits allow for Windows taking 2 s to refuse a local connection and longer to start ffmpeg
+- [x] Kept low-key on GitHub (20 Nov 2026): no top-level README or its screenshots, CLAUDE.md kept locally only, and no personal names or setup in the docs or tests (test printers are Alpha and Bravo). The history was rewritten to match.
 
 ## Check on first use
 

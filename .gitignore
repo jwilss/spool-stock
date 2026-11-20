@@ -4,3 +4,8 @@ wrappers/android/android/
 test/out/
 /site/spool_stock.py
 __pycache__/
+
+# Kept locally only
+CLAUDE.md
+# Backups and anything else private
+private/
