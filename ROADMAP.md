@@ -93,6 +93,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Firebase key moved to a repository secret and cleared from the history
 - [x] Square camera viewfinder that frames the QR code
 - [x] Search manufacturers, then their own filament names, filling settings, spool weight and colours
+- [x] The jw_ maker's mark at the foot of Setup (dark tile, tag-yellow cursor)
 
 ## Check on first use
 
