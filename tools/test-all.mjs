@@ -10,12 +10,14 @@ import path from "node:path";
 import {fileURLToPath} from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Windows installs Python as "python", Linux and macOS as "python3"
+const PY = process.platform === "win32" ? "python" : "python3";
 const SUITES = {
   app: ["node", "test/run.js"],
   reader: ["node", "test/reader.js"],
   orca: ["node", "test/orca.js"],
-  plugin: ["python3", "test/plugin.py"],
-  probe: ["python3", "test/probe.py"],
+  plugin: [PY, "test/plugin.py"],
+  probe: [PY, "test/probe.py"],
   format: ["node", "tools/format.mjs", "--check"],
 };
 
