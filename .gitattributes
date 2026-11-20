@@ -1,0 +1,7 @@
+# Keep line endings as LF everywhere, Windows included, so files match what the formatter and tests expect.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
+*.3mf binary
+*.mjpeg binary

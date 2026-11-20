@@ -1,4 +1,10 @@
 const {chromium} = require("playwright");
+// Runs a Python script and returns what it printed. Arguments go in a list, so paths with spaces are fine,
+// and Windows calls Python "python" where Linux calls it "python3".
+const python = args =>
+  require("child_process")
+    .execFileSync(process.platform === "win32" ? "python" : "python3", ["-I", ...args], {maxBuffer: 64e6})
+    .toString();
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
@@ -47,7 +53,7 @@ const dbOf = p => p.evaluate(() => JSON.parse(localStorage.getItem("__fb")));
     args: [
       "--use-fake-ui-for-media-stream",
       "--use-fake-device-for-media-stream",
-      "--use-file-for-fake-video-capture=" + out + "/feed.mjpeg",
+      "--use-file-for-fake-video-capture=" + path.join(__dirname, "fixtures", "feed.mjpeg"),
     ],
   });
   const ctx = await b.newContext({
@@ -259,9 +265,11 @@ const dbOf = p => p.evaluate(() => JSON.parse(localStorage.getItem("__fb")));
     const [d14] = await Promise.all([p.waitForEvent("download"), p.click("[data-act=pdf]")]);
     await d14.saveAs(out + "/stickers-14.pdf");
     const r = JSON.parse(
-      require("child_process")
-        .execSync(`python3 -I ${__dirname}/sheet_check.py ${out}/stickers-14.pdf 99.1 38.1 2 7 4.65 15.15 101.6 38.1`)
-        .toString(),
+      python([
+        path.join(__dirname, "sheet_check.py"),
+        path.join(out, "stickers-14.pdf"),
+        ...["99.1", "38.1", "2", "7", "4.65", "15.15", "101.6", "38.1"],
+      ]),
     );
     ok(
       r.codes >= 5 && r.codes === r.inside && r.pages === 1,
@@ -1318,11 +1326,11 @@ const dbOf = p => p.evaluate(() => JSON.parse(localStorage.getItem("__fb")));
   const [oz] = await Promise.all([p.waitForEvent("download"), p.click("[data-act=orcaZip]")]);
   await oz.saveAs(out + "/orca.zip");
   const presets = JSON.parse(
-    require("child_process")
-      .execSync(
-        `python3 -I -c "import zipfile,json,sys;z=zipfile.ZipFile(sys.argv[1]);print(json.dumps({n:json.loads(z.read(n)) for n in z.namelist()}))" ${out}/orca.zip`,
-      )
-      .toString(),
+    python([
+      "-c",
+      "import zipfile,json,sys;z=zipfile.ZipFile(sys.argv[1]);print(json.dumps({n:json.loads(z.read(n)) for n in z.namelist()}))",
+      path.join(out, "orca.zip"),
+    ]),
   );
   const cat = JSON.parse(fs.readFileSync(__dirname + "/../site/catalogue.json")),
     known = new Set([

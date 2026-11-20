@@ -90,3 +90,23 @@ Every logo is turned solid black on transparent. No API keys are needed.
 ## Printing stickers
 
 Print from a PC or a browser, at 100% or Actual size. Do a test on plain paper first using the outlines option.
+
+## Running the tests on Windows
+
+Only needed if you're changing the code. In PowerShell, from the project folder:
+
+```powershell
+winget install OpenJS.NodeJS.LTS Gyan.FFmpeg ShiningLight.OpenSSL.Light oschwartz10612.Poppler
+```
+
+Close PowerShell and open a new window so it picks up the new tools, then:
+
+```powershell
+pip install ruff opencv-python numpy
+npm install
+npm install --no-save playwright
+npx playwright install chromium
+npm test
+```
+
+If a suite says it needs a tool that you've just installed, open another new window. The reader suite uses a file the app suite writes, so it only passes once the app suite does.

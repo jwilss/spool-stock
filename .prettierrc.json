@@ -4,5 +4,6 @@
   "trailingComma": "all",
   "arrowParens": "avoid",
   "bracketSpacing": false,
-  "embeddedLanguageFormatting": "off"
+  "embeddedLanguageFormatting": "off",
+  "endOfLine": "auto"
 }

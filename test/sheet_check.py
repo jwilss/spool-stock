@@ -3,6 +3,10 @@
 # Usage: python3 test/sheet_check.py file.pdf width height cols rows left top step_across step_down  (all in mm)
 import json, subprocess, sys, tempfile, glob, os
 import cv2, numpy as np
+import shutil
+
+if not shutil.which("pdftoppm"):
+    sys.exit("Needs pdftoppm (Poppler) on the PATH. Install it, open a new terminal, then run this again.")
 
 pdf, w, h, cols, rows, left, top, px, py = (
     sys.argv[1],

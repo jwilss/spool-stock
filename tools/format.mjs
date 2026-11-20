@@ -81,10 +81,26 @@ for (const file of JS_FILES) await rewrite(file, js);
 for (const file of HTML_FILES) await rewrite(file, formatHtml);
 
 // Python first, then the pages inside the plugins, so each tool only sees its own part.
+// pip often puts ruff somewhere that isn't on the PATH on Windows, so fall back to running it through Python.
 let ruff = true;
+const ruffArgs = ["format", ...(check ? ["--check"] : []), ...PYTHON];
+const runRuff = () => {
+  try {
+    return execFileSync("ruff", ruffArgs, {cwd: root, stdio: "pipe"});
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+    const py = process.platform === "win32" ? "python" : "python3";
+    try {
+      return execFileSync(py, ["-m", "ruff", ...ruffArgs], {cwd: root, stdio: "pipe"});
+    } catch (e2) {
+      if (e2.code === "ENOENT" || /No module named ruff/.test(String(e2.stderr)))
+        throw Object.assign(e2, {code: "ENOENT"});
+      throw e2;
+    }
+  }
+};
 try {
-  const args = ["format", ...(check ? ["--check"] : []), ...PYTHON];
-  execFileSync("ruff", args, {cwd: root, stdio: "pipe"});
+  runRuff();
 } catch (e) {
   if (e.code === "ENOENT") ruff = false;
   else if (check) {

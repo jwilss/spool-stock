@@ -1,6 +1,13 @@
 # Runs the Orca probe plugin against a stand-in Orca and a fake Bambu printer. Run: python3 test/probe.py
 import importlib.util, json, os, socket, ssl, struct, subprocess, sys, tempfile, threading, time, types
 from pathlib import Path
+import shutil
+
+TOOLS = ["openssl"]
+# Stop with a clear message if a tool the test needs isn't installed (on Windows: see SETUP.md).
+missing = [t for t in TOOLS if not shutil.which(t)]
+if missing:
+    sys.exit("Needs " + ", ".join(missing) + " on the PATH. Install them, open a new terminal, then run this again.")
 
 ok_all = True
 

@@ -3,6 +3,13 @@
 import base64, copy, http.server, importlib.util, io, json, os, queue, re, socket, ssl, struct, subprocess, sys, tempfile, threading, time, types, zipfile
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+import shutil
+
+TOOLS = ["openssl", "ffmpeg", "ffprobe", "node"]
+# Stop with a clear message if a tool the test needs isn't installed (on Windows: see SETUP.md).
+missing = [t for t in TOOLS if not shutil.which(t)]
+if missing:
+    sys.exit("Needs " + ", ".join(missing) + " on the PATH. Install them, open a new terminal, then run this again.")
 
 ok_all = True
 

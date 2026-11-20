@@ -94,6 +94,7 @@ A filament inventory built around QR stickers. One website, wrapped as an Androi
 - [x] Square camera viewfinder that frames the QR code
 - [x] Search manufacturers, then their own filament names, filling settings, spool weight and colours
 - [x] The jw_ maker's mark at the foot of Setup (dark tile, tag-yellow cursor)
+- [x] The tests run on Windows too: paths with spaces, `python` instead of `python3`, ruff through Python, CRLF line endings, and a clear message when ffmpeg, OpenSSL or Poppler is missing (setup in SETUP.md)
 
 ## Check on first use
 
